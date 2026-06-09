@@ -23,6 +23,8 @@ jobs:
         run: npm install
 
       - name: Build project
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
 
       - name: Upload build files to S3
