@@ -26,12 +26,14 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
-
+        
+      - name: Configure AWS credentials 
+        uses: aws-actions/configure-aws-credentials@v4 
+        with: 
+          role-to-assume: arn:aws:iam::956723945403:role/GitHubActionDeployRole_finpm
+          aws-region: ap-northeast-2
+          
       - name: Upload build files to S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           aws s3 sync ./dist s3://${{ secrets.S3_BUCKET_NAME }}/frontend/build \
             --region ${{ secrets.AWS_REGION }} \
