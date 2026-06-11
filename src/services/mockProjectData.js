@@ -2,6 +2,8 @@ export const MOCK_PROJECTS = {
   "project-001": {
     projectId: "project-001",
     projectName: "PM Agent 개발",
+    projectStartDate: "2026-06-01",
+    projectEndDate: "2026-08-31",
     projectDescription:
       "SI 프로젝트 산출물 생성과 일정관리를 지원하는 PM Agent 개발 프로젝트입니다.",
     conversations: [
@@ -64,6 +66,8 @@ export const MOCK_PROJECTS = {
   "project-002": {
     projectId: "project-002",
     projectName: "모바일 뱅킹 고도화",
+    projectStartDate: "2026-06-01",
+    projectEndDate: "2026-08-31",
     projectDescription:
       "모바일 뱅킹 서비스의 화면 목록, 주간 일정, 지연 업무를 관리하는 프로젝트입니다.",
     conversations: [

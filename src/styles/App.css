@@ -911,6 +911,41 @@ p {
   animation: spin 900ms linear infinite;
 }
 
+.schedule-todo-result {
+  width: min(760px, 100%);
+  overflow-x: auto;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.schedule-todo-result table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.schedule-todo-result th,
+.schedule-todo-result td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e6edf7;
+  color: #344054;
+  text-align: left;
+  vertical-align: top;
+}
+
+.schedule-todo-result th {
+  color: #173a67;
+  background: #f7fbff;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.schedule-todo-result tr:last-child td {
+  border-bottom: 0;
+}
+
 .suggested-action-list {
   display: flex;
   flex-wrap: wrap;
@@ -1218,24 +1253,34 @@ p {
 }
 
 .command-recommendations {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
 }
 
 .command-recommendations > span {
+  flex: 0 0 auto;
   color: #667085;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .command-chip-list {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 8px;
+  min-width: max-content;
 }
 
 .command-chip {
-  max-width: min(100%, 280px);
+  flex: 0 0 auto;
+  max-width: 280px;
   min-height: 34px;
   padding: 0 12px;
   overflow: hidden;

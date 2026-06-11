@@ -128,6 +128,8 @@ const normalizeProject = (project, source = "mock") => {
   return {
     projectId: project.projectId,
     projectName: project.projectName,
+    projectStartDate: project.projectStartDate ?? project.startDate ?? "",
+    projectEndDate: project.projectEndDate ?? project.endDate ?? "",
     projectDescription: project.projectDescription ?? project.summary ?? "",
     conversations: sortConversations(normalizedConversations),
     createdAt: project.createdAt ?? formatDateTime(),

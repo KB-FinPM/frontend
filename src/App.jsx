@@ -32,7 +32,10 @@ import {
   updateProject,
 } from "./services/projectService.js";
 import { createChatId, sendProjectMessage } from "./services/chatService.js";
-import { getCommandRecommendations } from "./services/commandRecommendationService.js";
+import {
+  getCommandRecommendations,
+  saveCommandUsage,
+} from "./services/commandRecommendationService.js";
 import { downloadArtifactFile, uploadDocument } from "./api/finpmApi.js";
 import {
   CHAT_ACTION_COMMAND_TYPES,
@@ -45,48 +48,49 @@ import ProgressBar from "./components/ProgressBar.jsx";
 
 const DEFAULT_USER_ID = "frontend-user";
 const DEFAULT_PERMISSION_SCOPE = ["project:read"];
-const DEFAULT_DOCUMENT_TYPE = DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION;
+const DEFAULT_DOCUMENT_TYPE =
+  DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION;
 const GENERATION_PROGRESS_STEP_INTERVAL_MS = 650;
 const GENERATION_PROGRESS_MIN_DURATION_MS = 3200;
 const GENERATION_PROGRESS_STEPS = [
   {
     name: "요청 확인 중",
-    completedName: "10% 요청 확인 완료",
+    completedName: "요청 확인 완료",
     role: "PM Agent",
     message: "생성 요청과 업로드 문서를 확인하고 있습니다.",
     progress: 10,
   },
   {
     name: "Input Agent 문서 분석 중",
-    completedName: "25% Input Agent 문서 분석 완료",
+    completedName: "Input Agent 문서 분석 완료",
     role: "Input Agent",
     message: "구축요건 정의서에서 요구사항 후보를 추출하고 있습니다.",
     progress: 25,
   },
   {
     name: "Core Agent 요구사항 추출 중",
-    completedName: "45% Core Agent 요구사항 추출 완료",
+    completedName: "Core Agent 요구사항 추출 완료",
     role: "Core Agent",
     message: "요구사항 정의서 항목을 정리하고 있습니다.",
     progress: 45,
   },
   {
     name: "Validation Agent 검증 중",
-    completedName: "65% Validation Agent 검증 완료",
+    completedName: "Validation Agent 검증 완료",
     role: "Validation Agent",
     message: "누락 항목과 표현을 점검하고 있습니다.",
     progress: 65,
   },
   {
     name: "Output Agent 엑셀 작성 중",
-    completedName: "85% Output Agent 엑셀 작성 완료",
+    completedName: "Output Agent 엑셀 작성 완료",
     role: "Output Agent",
     message: "엑셀 파일과 다운로드 버튼을 준비하고 있습니다.",
     progress: 85,
   },
   {
     name: "문서 생성 완료",
-    completedName: "100% 문서 생성 완료",
+    completedName: "문서 생성 완료",
     role: "PM Agent",
     message: "요구사항 정의서 생성이 완료되었습니다.",
     progress: 100,
@@ -109,44 +113,69 @@ const getActionMessage = (action) =>
     : action?.label || "생성하기";
 
 const normalizeCommandText = (value = "") =>
-  String(value).replace(/\s+/g, "").toLowerCase();
+  String(value)
+    .replace(/\s+/g, "")
+    .toLowerCase();
 
 const isRequirementSpecGenerationRequest = (value = "") => {
   const normalized = normalizeCommandText(value);
   const hasRequirementTarget =
     normalized.includes("요구사항명세서") ||
-    normalized.includes("요구사항정의서");
+    normalized.includes("요구사항정의서") ||
+    normalized.includes("요구사항") ||
+    normalized.includes("요건정의서") ||
+    normalized.includes("requirement");
   const hasGenerationSignal =
     normalized.includes("생성") ||
     normalized.includes("만들") ||
-    normalized.includes("작성");
+    normalized.includes("만드") ||
+    normalized.includes("작성") ||
+    normalized.includes("정리") ||
+    normalized.includes("추출");
 
   return hasRequirementTarget && hasGenerationSignal;
 };
 
-const toDocumentContext = (document) => ({
-  document_id: document.document_id ?? document.documentId,
-  file_name: document.file_name ?? document.fileName ?? "",
-  document_type: document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE,
-  display_label:
-    document.display_label ??
-    document.displayLabel ??
-    "업로드한 구축요건 정의서",
-});
+const getDocumentDisplayLabel = (documentType) => {
+  if (documentType === DOCUMENT_TYPES.WBS) return "업로드한 WBS";
+  if (documentType === DOCUMENT_TYPES.MEETING_NOTES) return "업로드한 회의록";
+  if (documentType === DOCUMENT_TYPES.REQUIREMENT_SPEC) {
+    return "업로드한 요구사항 명세서";
+  }
+  return "업로드한 구축요건 정의서";
+};
 
-const toAttachmentDocument = (document) => ({
-  documentId: document.document_id ?? document.documentId,
-  fileName:
-    document.file_name ??
-    document.fileName ??
-    "업로드한 구축요건 정의서",
-  documentType: document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE,
-  createdAt: document.created_at ?? document.createdAt ?? "",
-  displayLabel:
-    document.display_label ??
-    document.displayLabel ??
-    "업로드한 구축요건 정의서",
-});
+const toDocumentContext = (document) => {
+  const documentType =
+    document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE;
+  return {
+    document_id: document.document_id ?? document.documentId,
+    file_name: document.file_name ?? document.fileName ?? "",
+    document_type: documentType,
+    display_label:
+      document.display_label ??
+      document.displayLabel ??
+      getDocumentDisplayLabel(documentType),
+  };
+};
+
+const toAttachmentDocument = (document) => {
+  const documentType =
+    document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE;
+  return {
+    documentId: document.document_id ?? document.documentId,
+    fileName:
+      document.file_name ??
+      document.fileName ??
+      getDocumentDisplayLabel(documentType),
+    documentType,
+    createdAt: document.created_at ?? document.createdAt ?? "",
+    displayLabel:
+      document.display_label ??
+      document.displayLabel ??
+      getDocumentDisplayLabel(documentType),
+  };
+};
 
 const buildGenerationProgress = (progress, status = "RUNNING") => {
   const safeProgress = Math.max(0, Math.min(100, Math.round(progress)));
@@ -157,8 +186,8 @@ const buildGenerationProgress = (progress, status = "RUNNING") => {
     safeProgress >= 100
       ? GENERATION_PROGRESS_STEPS.length
       : activeIndex === -1
-        ? GENERATION_PROGRESS_STEPS.length - 1
-        : activeIndex;
+      ? GENERATION_PROGRESS_STEPS.length - 1
+      : activeIndex;
 
   return {
     progress: safeProgress,
@@ -199,7 +228,8 @@ const buildGenerationFailureProgress = (failedIndex) => {
         return {
           ...step,
           name: `${step.name.replace(/ 중$/, "")} 중 오류 발생`,
-          message: "이 단계에서 문제가 발생했습니다. 문서를 확인한 뒤 다시 시도해주세요.",
+          message:
+            "이 단계에서 문제가 발생했습니다. 문서를 확인한 뒤 다시 시도해주세요.",
           status: "FAILED",
         };
       }
@@ -308,7 +338,10 @@ function App() {
 
   const waitForGenerationProgressMinimum = async () => {
     const elapsed = Date.now() - progressStartedAtRef.current;
-    const remaining = Math.max(0, GENERATION_PROGRESS_MIN_DURATION_MS - elapsed);
+    const remaining = Math.max(
+      0,
+      GENERATION_PROGRESS_MIN_DURATION_MS - elapsed,
+    );
     if (remaining > 0) {
       await wait(remaining);
     }
@@ -354,7 +387,9 @@ function App() {
   };
 
   const enterProject = useCallback((loadedProject) => {
-    const nextActiveConversationId = getInitialActiveConversationId(loadedProject);
+    const nextActiveConversationId = getInitialActiveConversationId(
+      loadedProject,
+    );
 
     setProject(loadedProject);
     setActiveConversationIdState(nextActiveConversationId);
@@ -375,7 +410,10 @@ function App() {
     setRecentProjectId(loadedProject.projectId);
 
     if (nextActiveConversationId) {
-      setActiveConversationId(loadedProject.projectId, nextActiveConversationId);
+      setActiveConversationId(
+        loadedProject.projectId,
+        nextActiveConversationId,
+      );
     }
   }, []);
 
@@ -611,6 +649,7 @@ function App() {
             state: CHAT_STATES.WAITING_REQUIRED_INFO,
             uploadRequest: {
               label: "구축요건 정의서 업로드",
+              acceptedTypes: [".docx", ".md", ".txt", ".csv", ".json", ".log"],
               documentType: DEFAULT_DOCUMENT_TYPE,
               originalMessage: trimmedValue,
             },
@@ -625,6 +664,7 @@ function App() {
         setProject(messageResult.project);
         setActiveConversationIdState(localConversationId);
         setActiveConversationId(targetProject.projectId, localConversationId);
+        await saveCommandUsage(targetProject.projectId, trimmedValue);
         setLastCommandInfo({ commandText: trimmedValue });
         setSelectedDocumentIds([]);
         setDocumentStatusMessage("");
@@ -639,6 +679,13 @@ function App() {
         context: {
           selected_document_ids: [],
           selected_documents: [],
+          project_name: targetProject.projectName || "",
+          project: {
+            project_id: targetProject.projectId,
+            name: targetProject.projectName || "",
+            start_date: targetProject.projectStartDate || "",
+            end_date: targetProject.projectEndDate || "",
+          },
         },
         permission_scope: DEFAULT_PERMISSION_SCOPE,
       });
@@ -660,6 +707,7 @@ function App() {
       setProject(targetProject);
       setActiveConversationIdState(targetConversationId);
       setActiveConversationId(targetProject.projectId, targetConversationId);
+      await saveCommandUsage(targetProject.projectId, trimmedValue);
       setLastCommandInfo({ commandText: trimmedValue });
 
       const nextRecommendations = await getCommandRecommendations(
@@ -759,9 +807,12 @@ function App() {
 
     try {
       const [file] = uploadFiles;
+      const uploadRequest = message.metadata?.uploadRequest ?? {};
+      const requestedDocumentType =
+        uploadRequest.documentType || DEFAULT_DOCUMENT_TYPE;
       const response = await uploadDocument({
         projectId: project.projectId,
-        documentType: DEFAULT_DOCUMENT_TYPE,
+        documentType: requestedDocumentType,
         file,
       });
       const document = response?.document;
@@ -772,16 +823,57 @@ function App() {
 
       const uploadedDocument = toAttachmentDocument(document);
       await clearMessageActions({
-        conversationId: message.metadata?.conversationId || activeConversationId,
+        conversationId:
+          message.metadata?.conversationId || activeConversationId,
         message,
       });
-      await requestGenerationConfirmation({
-        conversationId: message.metadata?.conversationId || activeConversationId,
-        originalMessage:
-          message.metadata?.uploadRequest?.originalMessage ||
-          "요구사항 정의서 생성해줘",
-        sourceDocument: uploadedDocument,
-      });
+      if (requestedDocumentType === DEFAULT_DOCUMENT_TYPE) {
+        await requestGenerationConfirmation({
+          conversationId:
+            message.metadata?.conversationId || activeConversationId,
+          originalMessage:
+            uploadRequest.originalMessage || "요구사항 정의서 생성해줘",
+          sourceDocument: uploadedDocument,
+        });
+      } else if (requestedDocumentType === DOCUMENT_TYPES.WBS) {
+        const conversationId =
+          message.metadata?.conversationId || activeConversationId;
+        const assistantMessage = await sendProjectMessage({
+          project_id: project.projectId,
+          conversation_id: conversationId || null,
+          user_id: DEFAULT_USER_ID,
+          message: uploadRequest.originalMessage || "WBS 기준으로 일정 알려줘",
+          context: {
+            selected_document_ids: [uploadedDocument.documentId],
+            selected_documents: [toDocumentContext(uploadedDocument)],
+            project_name: project.projectName || "",
+            project: {
+              project_id: project.projectId,
+              name: project.projectName || "",
+              start_date: project.projectStartDate || "",
+              end_date: project.projectEndDate || "",
+            },
+          },
+          permission_scope: DEFAULT_PERMISSION_SCOPE,
+        });
+        const backendConversationId =
+          assistantMessage.metadata?.conversationId || conversationId;
+        if (!backendConversationId) {
+          throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
+        }
+        const messageResult = await addMessagesToConversation(
+          project.projectId,
+          backendConversationId,
+          [assistantMessage],
+        );
+        setProject(messageResult.project);
+        setActiveConversationIdState(backendConversationId);
+        setActiveConversationId(project.projectId, backendConversationId);
+      } else {
+        setDocumentStatusMessage(
+          `${uploadedDocument.fileName} 업로드가 완료되었습니다.`,
+        );
+      }
     } catch (error) {
       setDocumentError(
         error instanceof Error
@@ -794,7 +886,11 @@ function App() {
   };
 
   const handleSuggestedActionClick = async (message, action) => {
-    if (!project || isResponding || !EXECUTABLE_ACTION_TYPES.has(action?.type)) {
+    if (
+      !project ||
+      isResponding ||
+      !EXECUTABLE_ACTION_TYPES.has(action?.type)
+    ) {
       return;
     }
 
@@ -897,12 +993,11 @@ function App() {
       const fallbackMessage = {
         id: createChatId("assistant"),
         role: "assistant",
-        content:
-          isConfirmGenerationAction
-            ? "요구사항 정의서 생성 중 문제가 발생했습니다. 업로드한 구축요건 정의서를 확인한 뒤 다시 시도해주세요."
-            : error instanceof Error
-              ? error.message
-              : "대기 작업을 처리하지 못했습니다.",
+        content: isConfirmGenerationAction
+          ? "요구사항 정의서 생성 중 문제가 발생했습니다. 업로드한 구축요건 정의서를 확인한 뒤 다시 시도해주세요."
+          : error instanceof Error
+          ? error.message
+          : "대기 작업을 처리하지 못했습니다.",
         createdAt: formatDateTime(),
         metadata: failedProgress
           ? {
@@ -990,8 +1085,10 @@ function App() {
     if (!project) return;
 
     try {
-      const { project: updatedProject, activeConversationId: nextConversationId } =
-        await deleteConversation(project.projectId, conversationId);
+      const {
+        project: updatedProject,
+        activeConversationId: nextConversationId,
+      } = await deleteConversation(project.projectId, conversationId);
       setProject(updatedProject);
       setActiveConversationIdState(nextConversationId);
       setComposerValue("");
@@ -1103,7 +1200,9 @@ function App() {
 
   return (
     <main
-      className={`chat-app-shell ${isSidebarDrawerOpen ? "is-sidebar-open" : ""}`}
+      className={`chat-app-shell ${
+        isSidebarDrawerOpen ? "is-sidebar-open" : ""
+      }`}
     >
       <button
         className="sidebar-backdrop"
@@ -1151,7 +1250,9 @@ function App() {
             <Bot size={20} aria-hidden="true" />
           </div>
           <div className="chat-title">
-            <strong>{activeConversation?.title ?? "새 채팅을 시작해보세요"}</strong>
+            <strong>
+              {activeConversation?.title ?? "새 채팅을 시작해보세요"}
+            </strong>
             <span>
               {project.projectName} · {project.projectId}
             </span>
@@ -1227,9 +1328,13 @@ function App() {
               aria-label="메시지 입력"
             />
             <button
-              className={`send-button ${composerValue.trim() ? "" : "is-empty"}`}
+              className={`send-button ${
+                composerValue.trim() ? "" : "is-empty"
+              }`}
               type="submit"
-              disabled={!composerValue.trim() || isResponding || isUploadingDocument}
+              disabled={
+                !composerValue.trim() || isResponding || isUploadingDocument
+              }
               aria-label="메시지 보내기"
             >
               <ArrowUp size={18} aria-hidden="true" />
@@ -1285,7 +1390,6 @@ function ProjectEntry({
         <div className="entry-copy">
           <p className="eyebrow">Project Workspace</p>
           <h1>PM Agent</h1>
-          <p>프로젝트 ID를 입력하면 저장된 대화 이력을 확인합니다.</p>
         </div>
 
         <form className="entry-form" onSubmit={onSubmit}>
@@ -1300,7 +1404,11 @@ function ProjectEntry({
                 onChange={(event) => onProjectIdChange(event.target.value)}
               />
             </div>
-            <button className="primary-button" type="submit" disabled={isLoading}>
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={isLoading}
+            >
               {isLoading ? (
                 <>
                   <LoaderCircle size={18} aria-hidden="true" />
@@ -1325,7 +1433,8 @@ function ProjectEntry({
               <div>
                 <strong>신규 프로젝트입니다.</strong>
                 <p>
-                  {pendingNewProjectId} 프로젝트의 이름과 설명을 입력한 후 입장하세요.
+                  {pendingNewProjectId} 프로젝트의 이름과 설명을 입력한 후
+                  입장하세요.
                 </p>
               </div>
             </div>
@@ -1443,12 +1552,10 @@ function ProjectSidebar({
 
       <section className="conversation-panel" aria-label="대화 목록">
         <div className="conversation-panel-header">
-          <strong>대화</strong>
-          <span>{conversations.length}개</span>
+          <strong>이전 대화</strong>
         </div>
         <button className="new-chat-button" type="button" onClick={onNewChat}>
-          <PlusCircle size={17} aria-hidden="true" />
-          새 채팅
+          <PlusCircle size={17} aria-hidden="true" />새 채팅
         </button>
 
         {conversationActionError && (
@@ -1461,9 +1568,7 @@ function ProjectSidebar({
               <ConversationListItem
                 key={conversation.conversationId}
                 conversation={conversation}
-                isActive={
-                  conversation.conversationId === activeConversationId
-                }
+                isActive={conversation.conversationId === activeConversationId}
                 isEditing={
                   conversation.conversationId === editingConversationId
                 }
@@ -1493,7 +1598,11 @@ function ProjectSidebar({
         )}
       </section>
 
-      <button className="secondary-button" type="button" onClick={onChangeProject}>
+      <button
+        className="secondary-button"
+        type="button"
+        onClick={onChangeProject}
+      >
         <LogOut size={16} aria-hidden="true" />
         프로젝트 변경
       </button>
@@ -1549,10 +1658,18 @@ function ConversationListItem({
         <div className="conversation-delete-confirm">
           <p>이 대화를 삭제하시겠습니까?</p>
           <div>
-            <button className="mini-action-button danger" type="button" onClick={onDelete}>
+            <button
+              className="mini-action-button danger"
+              type="button"
+              onClick={onDelete}
+            >
               삭제
             </button>
-            <button className="mini-action-button" type="button" onClick={onCancelDelete}>
+            <button
+              className="mini-action-button"
+              type="button"
+              onClick={onCancelDelete}
+            >
               취소
             </button>
           </div>
@@ -1690,10 +1807,7 @@ function CommandRecommendationBar({ recommendations, isDisabled, onSelect }) {
   if (!recommendations.length) return null;
 
   return (
-    <section
-      className="command-recommendations"
-      aria-label="추천 명령어"
-    >
+    <section className="command-recommendations" aria-label="추천 명령어">
       <span>추천 명령어</span>
       <div className="command-chip-list">
         {recommendations.map((recommendation) => (
@@ -1743,12 +1857,17 @@ function ChatMessage({
           EXECUTABLE_ACTION_TYPES.has(action.type),
         )
       : [];
-  const downloadFiles = isAssistant ? message.metadata?.downloadFiles ?? [] : [];
+  const downloadFiles = isAssistant
+    ? message.metadata?.downloadFiles ?? []
+    : [];
   const uploadRequest =
     isAssistant && !actionsResolved ? message.metadata?.uploadRequest : null;
   const generationProgressResult = isAssistant
     ? message.metadata?.generationProgress
     : null;
+  const scheduleTodoItems = isAssistant
+    ? message.metadata?.result?.items ?? []
+    : [];
 
   const handleFileChange = (event) => {
     onAgentUploadFiles({
@@ -1792,6 +1911,11 @@ function ChatMessage({
               ref={fileInputRef}
               className="message-file-input"
               type="file"
+              accept={
+                Array.isArray(uploadRequest.acceptedTypes)
+                  ? uploadRequest.acceptedTypes.join(",")
+                  : undefined
+              }
               disabled={isResponding || isUploadingDocument}
               onChange={handleFileChange}
               aria-label={uploadRequest.label || "구축요건 정의서 업로드"}
@@ -1804,6 +1928,7 @@ function ChatMessage({
             downloadFiles={downloadFiles}
           />
         )}
+        <ScheduleTodoResult items={scheduleTodoItems} />
         <MessageResult
           downloadFiles={downloadFiles}
           onDownloadFile={onDownloadFile}
@@ -1812,9 +1937,12 @@ function ChatMessage({
           <div className="suggested-action-list">
             {suggestedActions.map((action) => (
               <button
-                key={`${action.type}-${getActionId(message, action)}-${action.label}`}
+                key={`${action.type}-${getActionId(message, action)}-${
+                  action.label
+                }`}
                 className={`suggested-action-button ${
-                  action.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION
+                  action.type ===
+                  CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION
                     ? "secondary"
                     : "primary"
                 }`}
@@ -1849,6 +1977,38 @@ function MessageResult({ downloadFiles, onDownloadFile }) {
           {(file.file_name || "요구사항명세서.xlsx") + " 다운로드"}
         </button>
       ))}
+    </div>
+  );
+}
+
+function ScheduleTodoResult({ items }) {
+  const todos = Array.isArray(items) ? items : [];
+  if (!todos.length) return null;
+
+  return (
+    <div className="schedule-todo-result" aria-label="회의록 기반 TODO">
+      <table>
+        <thead>
+          <tr>
+            <th>할 일</th>
+            <th>담당자</th>
+            <th>기한</th>
+            <th>관련 산출물</th>
+            <th>상태</th>
+          </tr>
+        </thead>
+        <tbody>
+          {todos.map((todo, index) => (
+            <tr key={todo.todo_id ?? `${todo.title}-${index}`}>
+              <td>{todo.title || "제목 없음"}</td>
+              <td>{todo.assignee || "담당자 미정"}</td>
+              <td>{todo.due_date || "기한 미정"}</td>
+              <td>{todo.related_document || "회의록 기반 신규 TODO"}</td>
+              <td>{todo.status || "확인 필요"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

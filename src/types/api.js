@@ -21,6 +21,7 @@ export const DOCUMENT_TYPES = Object.freeze({
   CONSTRUCTION_REQUIREMENT_DEFINITION: "CONSTRUCTION_REQUIREMENT_DEFINITION",
   REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
   MEETING_NOTES: "MEETING_NOTES",
+  WBS: "WBS",
   UNKNOWN: "UNKNOWN",
 });
 
@@ -36,6 +37,10 @@ export const DOCUMENT_TYPE_OPTIONS = Object.freeze([
   {
     value: DOCUMENT_TYPES.MEETING_NOTES,
     label: "회의록",
+  },
+  {
+    value: DOCUMENT_TYPES.WBS,
+    label: "WBS",
   },
   {
     value: DOCUMENT_TYPES.UNKNOWN,
