@@ -128,8 +128,10 @@ const normalizeProject = (project, source = "mock") => {
   return {
     projectId: project.projectId,
     projectName: project.projectName,
-    projectStartDate: project.projectStartDate ?? project.startDate ?? "",
-    projectEndDate: project.projectEndDate ?? project.endDate ?? "",
+    projectStartDate:
+      project.projectStartDate ?? project.startDate ?? project.start_date ?? "",
+    projectEndDate:
+      project.projectEndDate ?? project.endDate ?? project.end_date ?? "",
     projectDescription: project.projectDescription ?? project.summary ?? "",
     conversations: sortConversations(normalizedConversations),
     createdAt: project.createdAt ?? formatDateTime(),
@@ -209,6 +211,7 @@ export const createProject = async (
   projectId,
   projectName,
   projectDescription = "",
+  start_date = "",
 ) => {
   const normalizedProjectId = normalizeProjectId(projectId);
   const normalizedProjectName = projectName.trim();
@@ -230,6 +233,7 @@ export const createProject = async (
   persistProject({
     projectId: normalizedProjectId,
     projectName: normalizedProjectName,
+    projectStartDate: String(start_date ?? "").trim(),
     projectDescription: projectDescription.trim(),
     conversations: [],
     createdAt: formatDateTime(),
@@ -247,7 +251,7 @@ export const createProject = async (
 
 export const updateProject = async (
   projectId,
-  { projectName, projectDescription = "" },
+  { projectName, projectDescription = "", start_date = "" },
 ) => {
   const normalizedProjectName = projectName.trim();
 
@@ -261,6 +265,7 @@ export const updateProject = async (
   const updatedProject = persistProject({
     ...currentProject,
     projectName: normalizedProjectName,
+    projectStartDate: String(start_date ?? "").trim(),
     projectDescription: projectDescription.trim(),
     updatedAt: formatDateTime(),
   });

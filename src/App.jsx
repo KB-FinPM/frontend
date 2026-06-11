@@ -36,7 +36,11 @@ import {
   getCommandRecommendations,
   saveCommandUsage,
 } from "./services/commandRecommendationService.js";
-import { downloadArtifactFile, uploadDocument } from "./api/finpmApi.js";
+import {
+  downloadArtifactFile,
+  listDocuments,
+  uploadDocument,
+} from "./api/finpmApi.js";
 import {
   CHAT_ACTION_COMMAND_TYPES,
   CHAT_STATES,
@@ -50,6 +54,24 @@ const DEFAULT_USER_ID = "frontend-user";
 const DEFAULT_PERMISSION_SCOPE = ["project:read"];
 const DEFAULT_DOCUMENT_TYPE =
   DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION;
+const SCREEN_DESIGN_DOCUMENT_TYPE = "SCREEN_DESIGN";
+const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
+  ".docx",
+  ".xlsx",
+  ".xls",
+  ".pdf",
+  ".md",
+  ".txt",
+  ".csv",
+  ".json",
+  ".log",
+];
+const GENERATION_REQUEST_TYPES = Object.freeze({
+  REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
+  WBS_CREATE: "WBS_CREATE",
+  WBS_REFERENCE: "WBS_REFERENCE",
+  SCREEN_DESIGN_BASED: "SCREEN_DESIGN_BASED",
+});
 const GENERATION_PROGRESS_STEP_INTERVAL_MS = 650;
 const GENERATION_PROGRESS_MIN_DURATION_MS = 3200;
 const GENERATION_PROGRESS_STEPS = [
@@ -117,7 +139,16 @@ const normalizeCommandText = (value = "") =>
     .replace(/\s+/g, "")
     .toLowerCase();
 
-const isRequirementSpecGenerationRequest = (value = "") => {
+const hasGenerationSignal = (normalized = "") =>
+  normalized.includes("생성") ||
+  normalized.includes("만들") ||
+  normalized.includes("만드") ||
+  normalized.includes("작성") ||
+  normalized.includes("정리") ||
+  normalized.includes("추출") ||
+  normalized.includes("초안");
+
+const getGenerationRequestType = (value = "") => {
   const normalized = normalizeCommandText(value);
   const hasRequirementTarget =
     normalized.includes("요구사항명세서") ||
@@ -125,15 +156,28 @@ const isRequirementSpecGenerationRequest = (value = "") => {
     normalized.includes("요구사항") ||
     normalized.includes("요건정의서") ||
     normalized.includes("requirement");
-  const hasGenerationSignal =
-    normalized.includes("생성") ||
-    normalized.includes("만들") ||
-    normalized.includes("만드") ||
-    normalized.includes("작성") ||
-    normalized.includes("정리") ||
-    normalized.includes("추출");
+  const hasWbsTarget = normalized.includes("wbs");
+  const hasScreenDesignTarget =
+    normalized.includes("화면설계서") ||
+    normalized.includes("화면설계") ||
+    normalized.includes("화면정의서") ||
+    normalized.includes("화면정의") ||
+    normalized.includes("screendesign");
+  const isGeneration = hasGenerationSignal(normalized);
 
-  return hasRequirementTarget && hasGenerationSignal;
+  if (hasScreenDesignTarget && (isGeneration || normalized.includes("기반"))) {
+    return GENERATION_REQUEST_TYPES.SCREEN_DESIGN_BASED;
+  }
+  if (hasWbsTarget && isGeneration) {
+    return GENERATION_REQUEST_TYPES.WBS_CREATE;
+  }
+  if (hasWbsTarget) {
+    return GENERATION_REQUEST_TYPES.WBS_REFERENCE;
+  }
+  if (hasRequirementTarget && isGeneration) {
+    return GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
+  }
+  return "";
 };
 
 const getDocumentDisplayLabel = (documentType) => {
@@ -142,12 +186,18 @@ const getDocumentDisplayLabel = (documentType) => {
   if (documentType === DOCUMENT_TYPES.REQUIREMENT_SPEC) {
     return "업로드한 요구사항 명세서";
   }
-  return "업로드한 구축요건 정의서";
+  if (documentType === DEFAULT_DOCUMENT_TYPE) {
+    return "업로드한 구축요건 정의서";
+  }
+  if (documentType === SCREEN_DESIGN_DOCUMENT_TYPE) {
+    return "업로드한 화면설계서";
+  }
+  return "업로드한 문서";
 };
 
 const toDocumentContext = (document) => {
   const documentType =
-    document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE;
+    document.document_type ?? document.documentType ?? DOCUMENT_TYPES.UNKNOWN;
   return {
     document_id: document.document_id ?? document.documentId,
     file_name: document.file_name ?? document.fileName ?? "",
@@ -161,7 +211,7 @@ const toDocumentContext = (document) => {
 
 const toAttachmentDocument = (document) => {
   const documentType =
-    document.document_type ?? document.documentType ?? DEFAULT_DOCUMENT_TYPE;
+    document.document_type ?? document.documentType ?? DOCUMENT_TYPES.UNKNOWN;
   return {
     documentId: document.document_id ?? document.documentId,
     fileName:
@@ -174,6 +224,116 @@ const toAttachmentDocument = (document) => {
       document.display_label ??
       document.displayLabel ??
       getDocumentDisplayLabel(documentType),
+  };
+};
+
+const normalizeDocumentListResponse = (response) => {
+  const documents =
+    (Array.isArray(response) && response) ||
+    response?.documents ||
+    response?.items ||
+    response?.data ||
+    response?.result?.documents ||
+    [];
+
+  return (Array.isArray(documents) ? documents : [])
+    .map(toAttachmentDocument)
+    .filter((document) => document.documentId || document.fileName);
+};
+
+const compactText = (value = "") =>
+  String(value)
+    .replace(/\s+/g, "")
+    .toLowerCase();
+
+const getDocumentSearchText = (document) =>
+  compactText(
+    [
+      document.documentType,
+      document.fileName,
+      document.displayLabel,
+      document.documentId,
+    ].join(" "),
+  );
+
+const findMatchingDocument = (documents, config) =>
+  documents.find((document) => {
+    const documentType = document.documentType ?? "";
+    if (config.documentTypes?.includes(documentType)) return true;
+
+    const searchText = getDocumentSearchText(document);
+    return (config.keywords ?? []).some((keyword) =>
+      searchText.includes(compactText(keyword)),
+    );
+  }) ?? null;
+
+const getRequiredDocumentConfig = (requestType) => {
+  if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
+    return {
+      documentTypes: [DEFAULT_DOCUMENT_TYPE],
+      keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
+      message: "요구사항 정의서 생성을 위해 구축요건정의서를 업로드해주세요.",
+      label: "구축요건정의서 업로드",
+      documentType: DEFAULT_DOCUMENT_TYPE,
+    };
+  }
+
+  if (requestType === GENERATION_REQUEST_TYPES.WBS_CREATE) {
+    return {
+      documentTypes: [
+        DOCUMENT_TYPES.REQUIREMENT_SPEC,
+        DEFAULT_DOCUMENT_TYPE,
+      ],
+      keywords: ["요구사항", "요건정의", "구축요건", "rfp"],
+      message: "WBS 생성을 위해 요구사항 정의서를 업로드해주세요.",
+      label: "요구사항 정의서 업로드",
+      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+    };
+  }
+
+  if (requestType === GENERATION_REQUEST_TYPES.WBS_REFERENCE) {
+    return {
+      documentTypes: [DOCUMENT_TYPES.WBS],
+      keywords: ["wbs"],
+      message: "WBS 기준 일정 확인을 위해 WBS 문서를 업로드해주세요.",
+      label: "WBS 업로드",
+      documentType: DOCUMENT_TYPES.WBS,
+    };
+  }
+
+  if (requestType === GENERATION_REQUEST_TYPES.SCREEN_DESIGN_BASED) {
+    return {
+      documentTypes: [SCREEN_DESIGN_DOCUMENT_TYPE],
+      keywords: ["화면설계", "화면정의", "screendesign"],
+      message:
+        "화면설계서 기반 산출물 생성을 위해 화면설계서를 업로드해주세요.",
+      label: "화면설계서 업로드",
+      documentType: DOCUMENT_TYPES.UNKNOWN,
+    };
+  }
+
+  return null;
+};
+
+const getProjectStartDate = (project) =>
+  project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
+
+const buildProjectContext = (targetProject, documents = []) => {
+  const selectedDocuments = documents.filter(Boolean);
+
+  return {
+    selected_document_ids: selectedDocuments
+      .map((document) => document.documentId)
+      .filter(Boolean),
+    selected_documents: selectedDocuments.map(toDocumentContext),
+    source_document_type: selectedDocuments[0]?.documentType,
+    project_name: targetProject.projectName || "",
+    project: {
+      project_id: targetProject.projectId,
+      name: targetProject.projectName || "",
+      start_date: getProjectStartDate(targetProject),
+      end_date: targetProject.projectEndDate || "",
+    },
   };
 };
 
@@ -262,6 +422,7 @@ function App() {
   const [entryError, setEntryError] = useState("");
   const [pendingNewProjectId, setPendingNewProjectId] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectStartDate, setNewProjectStartDate] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
   const [project, setProject] = useState(null);
@@ -272,6 +433,7 @@ function App() {
   const [isResponding, setIsResponding] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
+  const [settingsStartDate, setSettingsStartDate] = useState("");
   const [settingsDescription, setSettingsDescription] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -377,6 +539,7 @@ function App() {
           ...(currentMessage.metadata ?? {}),
           actionResolved: true,
           uploadRequest: null,
+          startDateRequest: null,
           pendingAction: null,
           suggestedActions: [],
         },
@@ -397,6 +560,7 @@ function App() {
     setEntryProjectId(loadedProject.projectId);
     setPendingNewProjectId("");
     setNewProjectName("");
+    setNewProjectStartDate("");
     setNewProjectDescription("");
     setNewProjectError("");
     setConversationActionError("");
@@ -441,6 +605,7 @@ function App() {
 
         setPendingNewProjectId(nextProjectId);
         setNewProjectName("");
+        setNewProjectStartDate("");
         setNewProjectDescription("");
       } catch (error) {
         setEntryError(
@@ -531,6 +696,7 @@ function App() {
     if (pendingNewProjectId && value.trim() !== pendingNewProjectId) {
       setPendingNewProjectId("");
       setNewProjectName("");
+      setNewProjectStartDate("");
       setNewProjectDescription("");
       setNewProjectError("");
     }
@@ -545,6 +711,9 @@ function App() {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const submittedProjectName = String(formData.get("projectName") ?? "");
+    const submittedProjectStartDate = String(
+      formData.get("start_date") ?? "",
+    );
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
     );
@@ -562,6 +731,7 @@ function App() {
         pendingNewProjectId,
         submittedProjectName,
         submittedProjectDescription,
+        submittedProjectStartDate,
       );
       enterProject(createdProject);
     } catch (error) {
@@ -613,6 +783,136 @@ function App() {
     setIsSidebarDrawerOpen(false);
   };
 
+  const loadProjectDocuments = async (projectId) => {
+    try {
+      const response = await listDocuments(projectId);
+      return normalizeDocumentListResponse(response);
+    } catch {
+      return [];
+    }
+  };
+
+  const sendLocalRequiredInfoMessage = async ({
+    targetProject,
+    targetConversationId,
+    userMessage,
+    content,
+    metadata,
+  }) => {
+    const localConversationId =
+      targetConversationId || createChatId("conversation");
+    const assistantMessage = {
+      id: createChatId("assistant"),
+      role: "assistant",
+      content,
+      createdAt: formatDateTime(),
+      metadata: {
+        conversationId: localConversationId,
+        state: CHAT_STATES.WAITING_REQUIRED_INFO,
+        ...metadata,
+      },
+    };
+    const messageResult = await addMessagesToConversation(
+      targetProject.projectId,
+      localConversationId,
+      userMessage ? [userMessage, assistantMessage] : [assistantMessage],
+    );
+
+    setProject(messageResult.project);
+    setActiveConversationIdState(localConversationId);
+    setActiveConversationId(targetProject.projectId, localConversationId);
+    if (userMessage) {
+      await saveCommandUsage(targetProject.projectId, userMessage.content);
+      setLastCommandInfo({ commandText: userMessage.content });
+    }
+    setSelectedDocumentIds([]);
+    setDocumentStatusMessage("");
+
+    return {
+      project: messageResult.project,
+      conversationId: localConversationId,
+    };
+  };
+
+  const sendBackendConversationMessage = async ({
+    targetProject,
+    targetConversationId,
+    messageText,
+    userMessage = null,
+    documents = [],
+  }) => {
+    const assistantMessage = await sendProjectMessage({
+      project_id: targetProject.projectId,
+      conversation_id: targetConversationId || null,
+      user_id: DEFAULT_USER_ID,
+      message: messageText,
+      context: buildProjectContext(targetProject, documents),
+      permission_scope: DEFAULT_PERMISSION_SCOPE,
+    });
+    const backendConversationId =
+      assistantMessage.metadata?.conversationId ?? targetConversationId;
+    if (!backendConversationId) {
+      throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
+    }
+
+    const messageResult = await addMessagesToConversation(
+      targetProject.projectId,
+      backendConversationId,
+      userMessage ? [userMessage, assistantMessage] : [assistantMessage],
+    );
+    const selectedIds = documents
+      .map((document) => document.documentId)
+      .filter(Boolean);
+
+    setProject(messageResult.project);
+    setActiveConversationIdState(backendConversationId);
+    setActiveConversationId(targetProject.projectId, backendConversationId);
+    setSelectedDocumentIds(selectedIds);
+    setDocumentStatusMessage("");
+
+    return {
+      project: messageResult.project,
+      conversationId: backendConversationId,
+      assistantMessage,
+    };
+  };
+
+  const prepareMessageRequest = async ({ messageText, targetProject }) => {
+    const requestType = getGenerationRequestType(messageText);
+
+    if (
+      requestType === GENERATION_REQUEST_TYPES.WBS_CREATE &&
+      !getProjectStartDate(targetProject)
+    ) {
+      return { status: "START_DATE_REQUIRED", requestType };
+    }
+
+    const requiredDocumentConfig = getRequiredDocumentConfig(requestType);
+    if (!requiredDocumentConfig) {
+      return { status: "READY", documents: [], requestType };
+    }
+
+    const documents = await loadProjectDocuments(targetProject.projectId);
+    const matchedDocument = findMatchingDocument(
+      documents,
+      requiredDocumentConfig,
+    );
+
+    if (matchedDocument) {
+      return {
+        status: "READY",
+        documents: [matchedDocument],
+        requestType,
+      };
+    }
+
+    return {
+      status: "UPLOAD_REQUIRED",
+      documentConfig: requiredDocumentConfig,
+      requestType,
+    };
+  };
+
   const sendMessage = async (messageText) => {
     if (!project || isResponding) return;
 
@@ -635,78 +935,55 @@ function App() {
         createdAt: formatDateTime(),
       };
 
-      if (isRequirementSpecGenerationRequest(trimmedValue)) {
-        const localConversationId =
-          targetConversationId || createChatId("conversation");
-        const assistantMessage = {
-          id: createChatId("assistant"),
-          role: "assistant",
-          content:
-            "요구사항 정의서를 생성하려면 구축요건 정의서가 필요합니다.\n구축요건 정의서를 업로드해주세요.",
-          createdAt: formatDateTime(),
+      const preparedRequest = await prepareMessageRequest({
+        messageText: trimmedValue,
+        targetProject,
+      });
+
+      if (preparedRequest.status === "START_DATE_REQUIRED") {
+        await sendLocalRequiredInfoMessage({
+          targetProject,
+          targetConversationId,
+          userMessage,
+          content: "WBS 생성을 위해 프로젝트 시작일을 입력해주세요.",
           metadata: {
-            conversationId: localConversationId,
-            state: CHAT_STATES.WAITING_REQUIRED_INFO,
-            uploadRequest: {
-              label: "구축요건 정의서 업로드",
-              acceptedTypes: [".docx", ".md", ".txt", ".csv", ".json", ".log"],
-              documentType: DEFAULT_DOCUMENT_TYPE,
+            startDateRequest: {
+              label: "프로젝트 시작일",
               originalMessage: trimmedValue,
             },
           },
-        };
-        const messageResult = await addMessagesToConversation(
-          targetProject.projectId,
-          localConversationId,
-          [userMessage, assistantMessage],
-        );
-
-        setProject(messageResult.project);
-        setActiveConversationIdState(localConversationId);
-        setActiveConversationId(targetProject.projectId, localConversationId);
-        await saveCommandUsage(targetProject.projectId, trimmedValue);
-        setLastCommandInfo({ commandText: trimmedValue });
-        setSelectedDocumentIds([]);
-        setDocumentStatusMessage("");
+        });
         return;
       }
 
-      const assistantMessage = await sendProjectMessage({
-        project_id: targetProject.projectId,
-        conversation_id: targetConversationId || null,
-        user_id: DEFAULT_USER_ID,
-        message: trimmedValue,
-        context: {
-          selected_document_ids: [],
-          selected_documents: [],
-          project_name: targetProject.projectName || "",
-          project: {
-            project_id: targetProject.projectId,
-            name: targetProject.projectName || "",
-            start_date: targetProject.projectStartDate || "",
-            end_date: targetProject.projectEndDate || "",
+      if (preparedRequest.status === "UPLOAD_REQUIRED") {
+        await sendLocalRequiredInfoMessage({
+          targetProject,
+          targetConversationId,
+          userMessage,
+          content: preparedRequest.documentConfig.message,
+          metadata: {
+            uploadRequest: {
+              label: preparedRequest.documentConfig.label,
+              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+              documentType: preparedRequest.documentConfig.documentType,
+              originalMessage: trimmedValue,
+              resumeAfterUpload: true,
+            },
           },
-        },
-        permission_scope: DEFAULT_PERMISSION_SCOPE,
-      });
-      const backendConversationId =
-        assistantMessage.metadata?.conversationId ?? targetConversationId;
-      if (!backendConversationId) {
-        throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
+        });
+        return;
       }
 
-      const messageResult = await addMessagesToConversation(
-        targetProject.projectId,
-        backendConversationId,
-        [userMessage, assistantMessage],
-      );
-
-      targetProject = messageResult.project;
-      targetConversationId = backendConversationId;
-
-      setProject(targetProject);
-      setActiveConversationIdState(targetConversationId);
-      setActiveConversationId(targetProject.projectId, targetConversationId);
+      const backendResult = await sendBackendConversationMessage({
+        targetProject,
+        targetConversationId,
+        messageText: trimmedValue,
+        userMessage,
+        documents: preparedRequest.documents,
+      });
+      targetProject = backendResult.project;
+      targetConversationId = backendResult.conversationId;
       await saveCommandUsage(targetProject.projectId, trimmedValue);
       setLastCommandInfo({ commandText: trimmedValue });
 
@@ -754,47 +1031,6 @@ function App() {
     sendMessage(commandText);
   };
 
-  const requestGenerationConfirmation = async ({
-    conversationId,
-    originalMessage,
-    sourceDocument,
-  }) => {
-    if (!project) return;
-
-    const assistantMessage = await sendProjectMessage({
-      project_id: project.projectId,
-      conversation_id: conversationId || activeConversationId || null,
-      user_id: DEFAULT_USER_ID,
-      message: originalMessage || "요구사항 정의서 생성해줘",
-      context: {
-        selected_document_ids: [sourceDocument.documentId],
-        selected_documents: [toDocumentContext(sourceDocument)],
-        source_document_type: DEFAULT_DOCUMENT_TYPE,
-        project_name: project.projectName || "",
-      },
-      permission_scope: DEFAULT_PERMISSION_SCOPE,
-    });
-    const backendConversationId =
-      assistantMessage.metadata?.conversationId ||
-      conversationId ||
-      activeConversationId;
-    if (!backendConversationId) {
-      throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
-    }
-
-    const messageResult = await addMessagesToConversation(
-      project.projectId,
-      backendConversationId,
-      [assistantMessage],
-    );
-
-    setProject(messageResult.project);
-    setActiveConversationIdState(backendConversationId);
-    setActiveConversationId(project.projectId, backendConversationId);
-    setSelectedDocumentIds([sourceDocument.documentId]);
-    setDocumentStatusMessage("");
-  };
-
   const handleAgentUploadFiles = async ({ message, files }) => {
     if (!project || isUploadingDocument) return;
 
@@ -821,54 +1057,38 @@ function App() {
         throw new Error("업로드된 문서 정보를 확인하지 못했습니다.");
       }
 
-      const uploadedDocument = toAttachmentDocument(document);
+      const uploadedDocument = {
+        ...toAttachmentDocument(document),
+        documentType:
+          document.document_type ??
+          document.documentType ??
+          requestedDocumentType,
+        displayLabel:
+          document.display_label ??
+          document.displayLabel ??
+          getDocumentDisplayLabel(requestedDocumentType),
+      };
       await clearMessageActions({
         conversationId:
           message.metadata?.conversationId || activeConversationId,
         message,
       });
-      if (requestedDocumentType === DEFAULT_DOCUMENT_TYPE) {
-        await requestGenerationConfirmation({
-          conversationId:
+      const shouldResumeAfterUpload =
+        uploadRequest.resumeAfterUpload ||
+        requestedDocumentType === DEFAULT_DOCUMENT_TYPE ||
+        requestedDocumentType === DOCUMENT_TYPES.WBS;
+      if (shouldResumeAfterUpload) {
+        const originalMessage =
+          uploadRequest.originalMessage || "업로드한 문서를 기준으로 진행해줘";
+        await sendBackendConversationMessage({
+          targetProject: project,
+          targetConversationId:
             message.metadata?.conversationId || activeConversationId,
-          originalMessage:
-            uploadRequest.originalMessage || "요구사항 정의서 생성해줘",
-          sourceDocument: uploadedDocument,
+          messageText: originalMessage,
+          documents: [uploadedDocument],
         });
-      } else if (requestedDocumentType === DOCUMENT_TYPES.WBS) {
-        const conversationId =
-          message.metadata?.conversationId || activeConversationId;
-        const assistantMessage = await sendProjectMessage({
-          project_id: project.projectId,
-          conversation_id: conversationId || null,
-          user_id: DEFAULT_USER_ID,
-          message: uploadRequest.originalMessage || "WBS 기준으로 일정 알려줘",
-          context: {
-            selected_document_ids: [uploadedDocument.documentId],
-            selected_documents: [toDocumentContext(uploadedDocument)],
-            project_name: project.projectName || "",
-            project: {
-              project_id: project.projectId,
-              name: project.projectName || "",
-              start_date: project.projectStartDate || "",
-              end_date: project.projectEndDate || "",
-            },
-          },
-          permission_scope: DEFAULT_PERMISSION_SCOPE,
-        });
-        const backendConversationId =
-          assistantMessage.metadata?.conversationId || conversationId;
-        if (!backendConversationId) {
-          throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
-        }
-        const messageResult = await addMessagesToConversation(
-          project.projectId,
-          backendConversationId,
-          [assistantMessage],
-        );
-        setProject(messageResult.project);
-        setActiveConversationIdState(backendConversationId);
-        setActiveConversationId(project.projectId, backendConversationId);
+        await saveCommandUsage(project.projectId, originalMessage);
+        setLastCommandInfo({ commandText: originalMessage });
       } else {
         setDocumentStatusMessage(
           `${uploadedDocument.fileName} 업로드가 완료되었습니다.`,
@@ -882,6 +1102,82 @@ function App() {
       );
     } finally {
       setIsUploadingDocument(false);
+    }
+  };
+
+  const handleStartDateSubmit = async ({ message, startDate }) => {
+    if (!project || isResponding) return;
+
+    const normalizedStartDate = String(startDate ?? "").trim();
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    const originalMessage =
+      message.metadata?.startDateRequest?.originalMessage || "WBS 만들어줘";
+
+    if (!targetConversationId) {
+      setDocumentError("프로젝트 시작일을 저장할 대화 정보를 확인하지 못했습니다.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedStartDate)) {
+      setDocumentError("프로젝트 시작일을 YYYY-MM-DD 형식으로 입력해주세요.");
+      return;
+    }
+
+    setIsResponding(true);
+    setDocumentError("");
+    setDocumentStatusMessage("");
+
+    try {
+      const updatedProject = await updateProject(project.projectId, {
+        projectName: project.projectName,
+        projectDescription: project.projectDescription,
+        start_date: normalizedStartDate,
+      });
+      setProject(updatedProject);
+      await clearMessageActions({
+        conversationId: targetConversationId,
+        message,
+      });
+
+      const preparedRequest = await prepareMessageRequest({
+        messageText: originalMessage,
+        targetProject: updatedProject,
+      });
+
+      if (preparedRequest.status === "UPLOAD_REQUIRED") {
+        await sendLocalRequiredInfoMessage({
+          targetProject: updatedProject,
+          targetConversationId,
+          content: preparedRequest.documentConfig.message,
+          metadata: {
+            uploadRequest: {
+              label: preparedRequest.documentConfig.label,
+              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+              documentType: preparedRequest.documentConfig.documentType,
+              originalMessage,
+              resumeAfterUpload: true,
+            },
+          },
+        });
+        return;
+      }
+
+      await sendBackendConversationMessage({
+        targetProject: updatedProject,
+        targetConversationId,
+        messageText: originalMessage,
+        documents: preparedRequest.documents,
+      });
+      await saveCommandUsage(updatedProject.projectId, originalMessage);
+      setLastCommandInfo({ commandText: originalMessage });
+    } catch (error) {
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "프로젝트 시작일을 저장하지 못했습니다.",
+      );
+    } finally {
+      setIsResponding(false);
     }
   };
 
@@ -1113,6 +1409,7 @@ function App() {
     setEntryError("");
     setPendingNewProjectId("");
     setNewProjectName("");
+    setNewProjectStartDate("");
     setNewProjectDescription("");
     setNewProjectError("");
     setIsSettingsOpen(false);
@@ -1132,6 +1429,7 @@ function App() {
   const openSettings = () => {
     if (!project) return;
     setSettingsName(project.projectName ?? "");
+    setSettingsStartDate(getProjectStartDate(project));
     setSettingsDescription(project.projectDescription ?? "");
     setSettingsError("");
     setIsSettingsOpen(true);
@@ -1148,6 +1446,9 @@ function App() {
     if (!project) return;
     const formData = new FormData(event.currentTarget);
     const submittedProjectName = String(formData.get("projectName") ?? "");
+    const submittedProjectStartDate = String(
+      formData.get("start_date") ?? "",
+    );
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
     );
@@ -1164,6 +1465,7 @@ function App() {
       const updatedProject = await updateProject(project.projectId, {
         projectName: submittedProjectName,
         projectDescription: submittedProjectDescription,
+        start_date: submittedProjectStartDate,
       });
       setProject(updatedProject);
       setIsSettingsOpen(false);
@@ -1185,12 +1487,14 @@ function App() {
         error={entryError}
         pendingNewProjectId={pendingNewProjectId}
         newProjectName={newProjectName}
+        newProjectStartDate={newProjectStartDate}
         newProjectDescription={newProjectDescription}
         newProjectError={newProjectError}
         isLoading={isLoadingProject}
         isCreating={isCreatingProject}
         onProjectIdChange={handleEntryProjectIdChange}
         onNewProjectNameChange={setNewProjectName}
+        onNewProjectStartDateChange={setNewProjectStartDate}
         onNewProjectDescriptionChange={setNewProjectDescription}
         onSubmit={handleEntrySubmit}
         onCreateProject={handleCreateProject}
@@ -1269,6 +1573,7 @@ function App() {
                   isResponding={isResponding}
                   isUploadingDocument={isUploadingDocument}
                   onAgentUploadFiles={handleAgentUploadFiles}
+                  onStartDateSubmit={handleStartDateSubmit}
                   onDownloadFile={handleDownloadFile}
                   onSuggestedActionClick={handleSuggestedActionClick}
                 />
@@ -1347,10 +1652,12 @@ function App() {
         <ProjectSettingsModal
           project={project}
           projectName={settingsName}
+          projectStartDate={settingsStartDate}
           projectDescription={settingsDescription}
           error={settingsError}
           isSaving={isSavingSettings}
           onProjectNameChange={setSettingsName}
+          onProjectStartDateChange={setSettingsStartDate}
           onProjectDescriptionChange={setSettingsDescription}
           onClose={closeSettings}
           onSubmit={handleSettingsSubmit}
@@ -1365,12 +1672,14 @@ function ProjectEntry({
   error,
   pendingNewProjectId,
   newProjectName,
+  newProjectStartDate,
   newProjectDescription,
   newProjectError,
   isLoading,
   isCreating,
   onProjectIdChange,
   onNewProjectNameChange,
+  onNewProjectStartDateChange,
   onNewProjectDescriptionChange,
   onSubmit,
   onCreateProject,
@@ -1448,6 +1757,20 @@ function ProjectEntry({
               required
               disabled={!isNewProject}
               onChange={(event) => onNewProjectNameChange(event.target.value)}
+            />
+
+            <label htmlFor="new-project-start-date">
+              프로젝트 시작일 <span>선택</span>
+            </label>
+            <input
+              id="new-project-start-date"
+              name="start_date"
+              type="date"
+              value={newProjectStartDate}
+              disabled={!isNewProject}
+              onChange={(event) =>
+                onNewProjectStartDateChange(event.target.value)
+              }
             />
 
             <label htmlFor="new-project-description">
@@ -1545,6 +1868,10 @@ function ProjectSidebar({
           <div>
             <dt>Project ID</dt>
             <dd>{project.projectId}</dd>
+          </div>
+          <div>
+            <dt>프로젝트 시작일</dt>
+            <dd>{getProjectStartDate(project) || "미입력"}</dd>
           </div>
         </dl>
         <p>{project.projectDescription || "프로젝트 설명이 아직 없습니다."}</p>
@@ -1711,10 +2038,12 @@ function ConversationListItem({
 function ProjectSettingsModal({
   project,
   projectName,
+  projectStartDate,
   projectDescription,
   error,
   isSaving,
   onProjectNameChange,
+  onProjectStartDateChange,
   onProjectDescriptionChange,
   onClose,
   onSubmit,
@@ -1755,6 +2084,17 @@ function ProjectSettingsModal({
             value={projectName}
             required
             onChange={(event) => onProjectNameChange(event.target.value)}
+          />
+
+          <label htmlFor="settings-project-start-date">
+            프로젝트 시작일 <span>선택</span>
+          </label>
+          <input
+            id="settings-project-start-date"
+            name="start_date"
+            type="date"
+            value={projectStartDate}
+            onChange={(event) => onProjectStartDateChange(event.target.value)}
           />
 
           <label htmlFor="settings-project-description">
@@ -1804,23 +2144,23 @@ function ProjectSettingsModal({
 }
 
 function CommandRecommendationBar({ recommendations, isDisabled, onSelect }) {
-  if (!recommendations.length) return null;
+  const recommendation = recommendations[0];
+  if (!recommendation) return null;
 
   return (
     <section className="command-recommendations" aria-label="추천 명령어">
       <span>추천 명령어</span>
       <div className="command-chip-list">
-        {recommendations.map((recommendation) => (
-          <button
-            key={`${recommendation.type}-${recommendation.commandText}`}
-            className="command-chip"
-            type="button"
-            disabled={isDisabled}
-            onClick={() => onSelect(recommendation.commandText)}
-          >
-            {recommendation.commandText}
-          </button>
-        ))}
+        <button
+          key={`${recommendation.type}-${recommendation.commandText}`}
+          className="command-chip"
+          type="button"
+          disabled={isDisabled}
+          title={recommendation.commandText}
+          onClick={() => onSelect(recommendation.commandText)}
+        >
+          {recommendation.commandText}
+        </button>
       </div>
     </section>
   );
@@ -1843,6 +2183,7 @@ function ChatMessage({
   isResponding,
   isUploadingDocument,
   onAgentUploadFiles,
+  onStartDateSubmit,
   onDownloadFile,
   onSuggestedActionClick,
 }) {
@@ -1862,6 +2203,10 @@ function ChatMessage({
     : [];
   const uploadRequest =
     isAssistant && !actionsResolved ? message.metadata?.uploadRequest : null;
+  const startDateRequest =
+    isAssistant && !actionsResolved
+      ? message.metadata?.startDateRequest
+      : null;
   const generationProgressResult = isAssistant
     ? message.metadata?.generationProgress
     : null;
@@ -1922,6 +2267,14 @@ function ChatMessage({
             />
           </div>
         )}
+        {startDateRequest && (
+          <StartDateRequestForm
+            message={message}
+            label={startDateRequest.label}
+            isDisabled={isResponding}
+            onSubmit={onStartDateSubmit}
+          />
+        )}
         {generationProgressResult && (
           <GenerationProgressResult
             progressState={generationProgressResult}
@@ -1957,6 +2310,41 @@ function ChatMessage({
         )}
       </div>
     </article>
+  );
+}
+
+function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
+  const [startDate, setStartDate] = useState("");
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onSubmit({ message, startDate });
+  };
+
+  return (
+    <form className="message-start-date-form" onSubmit={handleSubmit}>
+      <label htmlFor={`${message.id}-start-date`}>
+        {label || "프로젝트 시작일"}
+      </label>
+      <div>
+        <input
+          id={`${message.id}-start-date`}
+          name="start_date"
+          type="date"
+          value={startDate}
+          disabled={isDisabled}
+          required
+          onChange={(event) => setStartDate(event.target.value)}
+        />
+        <button
+          className="message-upload-button"
+          type="submit"
+          disabled={isDisabled || !startDate}
+        >
+          저장 후 WBS 생성
+        </button>
+      </div>
+    </form>
   );
 }
 

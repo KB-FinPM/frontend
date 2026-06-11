@@ -194,7 +194,7 @@ p {
 }
 
 .new-project-panel.is-open {
-  max-height: 620px;
+  max-height: 720px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -865,10 +865,43 @@ p {
 }
 
 .message-action-panel,
-.download-file-list {
+.download-file-list,
+.message-start-date-form > div {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.message-start-date-form {
+  display: grid;
+  gap: 8px;
+  width: min(420px, 100%);
+  padding: 12px;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.message-start-date-form label {
+  color: #173a67;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.message-start-date-form input {
+  min-width: 180px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #101828;
+  background: #ffffff;
+  outline: none;
+}
+
+.message-start-date-form input:focus {
+  border-color: #1f6ed4;
+  box-shadow: 0 0 0 3px rgba(31, 110, 212, 0.1);
 }
 
 .message-file-input {
@@ -1253,12 +1286,12 @@ p {
 }
 
 .command-recommendations {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -1272,15 +1305,12 @@ p {
 
 .command-chip-list {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 8px;
-  min-width: max-content;
+  min-width: 0;
 }
 
 .command-chip {
-  flex: 0 0 auto;
-  max-width: 280px;
+  min-width: 0;
+  max-width: 100%;
   min-height: 34px;
   padding: 0 12px;
   overflow: hidden;
