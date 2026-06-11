@@ -1,4 +1,12 @@
-import { API_BASE_URL, requestJson, uploadMultipart } from "./client.js";
+import {
+  API_BASE_URL,
+  ApiError,
+  getFriendlyHttpErrorMessage,
+  normalizeFetchError,
+  parseResponseBody,
+  requestJson,
+  uploadMultipart,
+} from "./client.js";
 
 const encodePathSegment = (value) => encodeURIComponent(String(value ?? ""));
 
@@ -33,15 +41,6 @@ const downloadBlob = (blob, fileName) => {
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
-};
-
-const downloadErrorMessage = async (response) => {
-  try {
-    const data = await response.json();
-    return data?.message || data?.detail || "파일을 다운로드하지 못했습니다.";
-  } catch {
-    return "파일을 다운로드하지 못했습니다.";
-  }
 };
 
 export const healthCheck = () => requestJson("/health");
@@ -86,19 +85,38 @@ export const downloadArtifactFile = async ({
   artifactId,
   fileName = "요구사항명세서.xlsx",
 }) => {
-  const response = await fetch(
-    buildApiUrl(
-      `/projects/${encodePathSegment(projectId)}/artifacts/${encodePathSegment(
-        artifactId,
-      )}/download`,
-    ),
-  );
-
-  if (!response.ok) {
-    throw new Error(await downloadErrorMessage(response));
+  let response;
+  try {
+    response = await fetch(
+      buildApiUrl(
+        `/projects/${encodePathSegment(projectId)}/artifacts/${encodePathSegment(
+          artifactId,
+        )}/download`,
+      ),
+    );
+  } catch (error) {
+    throw normalizeFetchError(error);
   }
 
-  const blob = await response.blob();
+  if (!response.ok) {
+    const data = await parseResponseBody(response);
+    throw new ApiError(
+      getFriendlyHttpErrorMessage(data, response, {
+        fallbackMessage: "파일을 다운로드하지 못했습니다.",
+      }),
+      {
+        status: response.status,
+        data,
+      },
+    );
+  }
+
+  let blob;
+  try {
+    blob = await response.blob();
+  } catch (error) {
+    throw normalizeFetchError(error);
+  }
   const resolvedFileName = fileNameFromContentDisposition(
     response.headers.get("content-disposition"),
     fileName,

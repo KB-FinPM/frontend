@@ -2144,23 +2144,25 @@ function ProjectSettingsModal({
 }
 
 function CommandRecommendationBar({ recommendations, isDisabled, onSelect }) {
-  const recommendation = recommendations[0];
-  if (!recommendation) return null;
+  const visibleRecommendations = recommendations.slice(0, 4);
+  if (!visibleRecommendations.length) return null;
 
   return (
     <section className="command-recommendations" aria-label="추천 명령어">
       <span>추천 명령어</span>
       <div className="command-chip-list">
-        <button
-          key={`${recommendation.type}-${recommendation.commandText}`}
-          className="command-chip"
-          type="button"
-          disabled={isDisabled}
-          title={recommendation.commandText}
-          onClick={() => onSelect(recommendation.commandText)}
-        >
-          {recommendation.commandText}
-        </button>
+        {visibleRecommendations.map((recommendation) => (
+          <button
+            key={`${recommendation.type}-${recommendation.commandText}`}
+            className="command-chip"
+            type="button"
+            disabled={isDisabled}
+            title={recommendation.commandText}
+            onClick={() => onSelect(recommendation.commandText)}
+          >
+            {recommendation.commandText}
+          </button>
+        ))}
       </div>
     </section>
   );
@@ -2486,9 +2488,24 @@ function TypingMessage() {
           <strong>PM Agent</strong>
           <time>응답 생성 중</time>
         </div>
-        <div className="message-body typing-body">
-          <Sparkles size={16} aria-hidden="true" />
-          <p>응답을 준비하고 있습니다.</p>
+        <div
+          className="message-body typing-body"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle
+            className="typing-spinner"
+            size={16}
+            aria-hidden="true"
+          />
+          <p aria-label="응답을 기다리는 중입니다.">
+            응답을 기다리는 중입니다.
+            <span className="typing-dots" aria-hidden="true">
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </span>
+          </p>
         </div>
       </div>
     </article>

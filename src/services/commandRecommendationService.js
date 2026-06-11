@@ -1,4 +1,4 @@
-const MAX_RECOMMENDATIONS = 1;
+const MAX_RECOMMENDATIONS = 4;
 const HISTORY_LIMIT = 30;
 const STORAGE_KEY_PREFIX = "pm-agent.v2.commandUsage";
 
