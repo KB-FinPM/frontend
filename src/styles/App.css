@@ -935,6 +935,17 @@ p {
   background: #195db4;
 }
 
+.message-upload-button.secondary {
+  border: 1px solid #cfd7e6;
+  color: #22324b;
+  background: #ffffff;
+}
+
+.message-upload-button.secondary:hover:not(:disabled) {
+  border-color: #9eb5d6;
+  background: #f4f7fb;
+}
+
 .message-upload-button:disabled {
   cursor: wait;
   opacity: 0.58;
@@ -942,6 +953,51 @@ p {
 
 .message-upload-button:disabled svg {
   animation: spin 900ms linear infinite;
+}
+
+.message-document-choice-panel {
+  display: grid;
+  gap: 10px;
+  width: min(520px, 100%);
+  padding: 12px;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.document-choice-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.document-choice-summary strong {
+  color: #173a67;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.document-choice-summary span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.document-choice-actions,
+.document-choice-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.document-choice-select-row select {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #101828;
+  background: #ffffff;
 }
 
 .schedule-todo-result {
@@ -1304,13 +1360,12 @@ p {
 }
 
 .command-recommendations {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
+  max-width: 100%;
 }
 
 .command-recommendations > span {
@@ -1323,17 +1378,18 @@ p {
 
 .command-chip-list {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .command-chip {
-  flex: 1 1 0;
+  flex: 0 1 auto;
+  width: fit-content;
   min-width: 0;
-  max-width: 220px;
+  max-width: 100%;
   min-height: 34px;
   padding: 0 12px;
   overflow: hidden;

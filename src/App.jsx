@@ -56,16 +56,22 @@ const DEFAULT_DOCUMENT_TYPE =
   DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION;
 const SCREEN_DESIGN_DOCUMENT_TYPE = "SCREEN_DESIGN";
 const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
-  ".docx",
-  ".xlsx",
-  ".xls",
   ".pdf",
+  "application/pdf",
+  ".docx",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".md",
   ".txt",
+  "text/plain",
   ".csv",
   ".json",
+  "application/json",
   ".log",
 ];
+const PROJECT_START_DATE_ERROR =
+  "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
 const GENERATION_REQUEST_TYPES = Object.freeze({
   REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
   WBS_CREATE: "WBS_CREATE",
@@ -256,8 +262,8 @@ const getDocumentSearchText = (document) =>
     ].join(" "),
   );
 
-const findMatchingDocument = (documents, config) =>
-  documents.find((document) => {
+const getMatchingDocuments = (documents, config) =>
+  documents.filter((document) => {
     const documentType = document.documentType ?? "";
     if (config.documentTypes?.includes(documentType)) return true;
 
@@ -265,7 +271,7 @@ const findMatchingDocument = (documents, config) =>
     return (config.keywords ?? []).some((keyword) =>
       searchText.includes(compactText(keyword)),
     );
-  }) ?? null;
+  });
 
 const getRequiredDocumentConfig = (requestType) => {
   if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
@@ -273,6 +279,8 @@ const getRequiredDocumentConfig = (requestType) => {
       documentTypes: [DEFAULT_DOCUMENT_TYPE],
       keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
       message: "요구사항 정의서 생성을 위해 구축요건정의서를 업로드해주세요.",
+      existingMessage:
+        "이미 업로드된 구축요건정의서가 있습니다. 이 문서를 기준으로 요구사항 명세서를 생성할까요?",
       label: "구축요건정의서 업로드",
       documentType: DEFAULT_DOCUMENT_TYPE,
     };
@@ -286,6 +294,8 @@ const getRequiredDocumentConfig = (requestType) => {
       ],
       keywords: ["요구사항", "요건정의", "구축요건", "rfp"],
       message: "WBS 생성을 위해 요구사항 정의서를 업로드해주세요.",
+      existingMessage:
+        "이미 업로드된 요구사항 명세서가 있습니다. 이 문서를 기준으로 WBS를 생성할까요?",
       label: "요구사항 정의서 업로드",
       documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
     };
@@ -296,6 +306,8 @@ const getRequiredDocumentConfig = (requestType) => {
       documentTypes: [DOCUMENT_TYPES.WBS],
       keywords: ["wbs"],
       message: "WBS 기준 일정 확인을 위해 WBS 문서를 업로드해주세요.",
+      existingMessage:
+        "이미 업로드된 WBS가 있습니다. 이 문서를 기준으로 일정을 확인할까요?",
       label: "WBS 업로드",
       documentType: DOCUMENT_TYPES.WBS,
     };
@@ -307,6 +319,8 @@ const getRequiredDocumentConfig = (requestType) => {
       keywords: ["화면설계", "화면정의", "screendesign"],
       message:
         "화면설계서 기반 산출물 생성을 위해 화면설계서를 업로드해주세요.",
+      existingMessage:
+        "이미 업로드된 화면설계서가 있습니다. 이 문서를 기준으로 진행할까요?",
       label: "화면설계서 업로드",
       documentType: DOCUMENT_TYPES.UNKNOWN,
     };
@@ -317,6 +331,35 @@ const getRequiredDocumentConfig = (requestType) => {
 
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
+
+const sanitizeProjectStartDateInput = (value = "") => {
+  const text = String(value ?? "");
+  const [year = "", month = "", day = ""] = text.split("-");
+  const safeYear = year.replace(/\D/g, "").slice(0, 4);
+  const safeMonth = month.replace(/\D/g, "").slice(0, 2);
+  const safeDay = day.replace(/\D/g, "").slice(0, 2);
+  return [safeYear, safeMonth, safeDay]
+    .filter((part, index) => part || index === 0)
+    .join("-")
+    .slice(0, 10);
+};
+
+const isValidProjectStartDate = (value = "") => {
+  const text = String(value ?? "").trim();
+  if (!text) return true;
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+};
 
 const buildProjectContext = (targetProject, documents = []) => {
   const selectedDocuments = documents.filter(Boolean);
@@ -539,6 +582,7 @@ function App() {
           ...(currentMessage.metadata ?? {}),
           actionResolved: true,
           uploadRequest: null,
+          documentChoiceRequest: null,
           startDateRequest: null,
           pendingAction: null,
           suggestedActions: [],
@@ -722,6 +766,10 @@ function App() {
       setNewProjectError("프로젝트명을 입력해주세요.");
       return;
     }
+    if (!isValidProjectStartDate(submittedProjectStartDate)) {
+      setNewProjectError(PROJECT_START_DATE_ERROR);
+      return;
+    }
 
     setIsCreatingProject(true);
     setNewProjectError("");
@@ -893,15 +941,18 @@ function App() {
     }
 
     const documents = await loadProjectDocuments(targetProject.projectId);
-    const matchedDocument = findMatchingDocument(
+    const matchingDocuments = getMatchingDocuments(
       documents,
       requiredDocumentConfig,
     );
+    const matchedDocument = matchingDocuments[0] ?? null;
 
     if (matchedDocument) {
       return {
-        status: "READY",
-        documents: [matchedDocument],
+        status: "DOCUMENT_CHOICE_REQUIRED",
+        documents: matchingDocuments,
+        defaultDocument: matchedDocument,
+        documentConfig: requiredDocumentConfig,
         requestType,
       };
     }
@@ -969,6 +1020,26 @@ function App() {
               documentType: preparedRequest.documentConfig.documentType,
               originalMessage: trimmedValue,
               resumeAfterUpload: true,
+            },
+          },
+        });
+        return;
+      }
+
+      if (preparedRequest.status === "DOCUMENT_CHOICE_REQUIRED") {
+        await sendLocalRequiredInfoMessage({
+          targetProject,
+          targetConversationId,
+          userMessage,
+          content:
+            preparedRequest.documentConfig.existingMessage ||
+            "이미 업로드된 문서가 있습니다. 이 문서를 기준으로 진행할까요?",
+          metadata: {
+            documentChoiceRequest: {
+              originalMessage: trimmedValue,
+              documentConfig: preparedRequest.documentConfig,
+              documents: preparedRequest.documents,
+              defaultDocumentId: preparedRequest.defaultDocument?.documentId,
             },
           },
         });
@@ -1118,8 +1189,8 @@ function App() {
       setDocumentError("프로젝트 시작일을 저장할 대화 정보를 확인하지 못했습니다.");
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedStartDate)) {
-      setDocumentError("프로젝트 시작일을 YYYY-MM-DD 형식으로 입력해주세요.");
+    if (!isValidProjectStartDate(normalizedStartDate) || !normalizedStartDate) {
+      setDocumentError(PROJECT_START_DATE_ERROR);
       return;
     }
 
@@ -1162,6 +1233,25 @@ function App() {
         return;
       }
 
+      if (preparedRequest.status === "DOCUMENT_CHOICE_REQUIRED") {
+        await sendLocalRequiredInfoMessage({
+          targetProject: updatedProject,
+          targetConversationId,
+          content:
+            preparedRequest.documentConfig.existingMessage ||
+            "이미 업로드된 문서가 있습니다. 이 문서를 기준으로 진행할까요?",
+          metadata: {
+            documentChoiceRequest: {
+              originalMessage,
+              documentConfig: preparedRequest.documentConfig,
+              documents: preparedRequest.documents,
+              defaultDocumentId: preparedRequest.defaultDocument?.documentId,
+            },
+          },
+        });
+        return;
+      }
+
       await sendBackendConversationMessage({
         targetProject: updatedProject,
         targetConversationId,
@@ -1175,6 +1265,102 @@ function App() {
         error instanceof Error
           ? error.message
           : "프로젝트 시작일을 저장하지 못했습니다.",
+      );
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
+  const handleDocumentChoice = async ({ message, choice, documentId }) => {
+    if (!project || isResponding || isUploadingDocument) return;
+
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    const choiceRequest = message.metadata?.documentChoiceRequest ?? {};
+    const documentConfig = choiceRequest.documentConfig ?? {};
+    const documents = Array.isArray(choiceRequest.documents)
+      ? choiceRequest.documents
+      : [];
+    const originalMessage =
+      choiceRequest.originalMessage || "선택한 문서를 기준으로 진행해줘";
+
+    if (!targetConversationId) {
+      setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    if (choice === "upload_new") {
+      try {
+        const result = await updateConversationMessage(
+          project.projectId,
+          targetConversationId,
+          message.id,
+          (currentMessage) => ({
+            ...currentMessage,
+            content: documentConfig.message || "새 기준 문서를 업로드해주세요.",
+            metadata: {
+              ...(currentMessage.metadata ?? {}),
+              documentChoiceRequest: null,
+              uploadRequest: {
+                label: documentConfig.label || "문서 업로드",
+                acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+                documentType: documentConfig.documentType || DEFAULT_DOCUMENT_TYPE,
+                originalMessage,
+                resumeAfterUpload: true,
+              },
+            },
+          }),
+        );
+        setProject(result.project);
+        setSelectedDocumentIds([]);
+        setDocumentStatusMessage("");
+      } catch (error) {
+        setDocumentError(
+          error instanceof Error
+            ? error.message
+            : "업로드 요청으로 전환하지 못했습니다.",
+        );
+      }
+      return;
+    }
+
+    const selectedDocument =
+      documents.find((document) => document.documentId === documentId) ??
+      documents.find(
+        (document) => document.documentId === choiceRequest.defaultDocumentId,
+      ) ??
+      documents[0];
+
+    if (!selectedDocument?.documentId) {
+      setDocumentError("선택할 문서 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setIsResponding(true);
+    setConversationActionError("");
+    setDocumentError("");
+    setDocumentStatusMessage("");
+
+    try {
+      await clearMessageActions({
+        conversationId: targetConversationId,
+        message,
+      });
+      const backendResult = await sendBackendConversationMessage({
+        targetProject: project,
+        targetConversationId,
+        messageText: originalMessage,
+        documents: [selectedDocument],
+      });
+      await saveCommandUsage(project.projectId, originalMessage);
+      setLastCommandInfo({ commandText: originalMessage });
+      setSelectedDocumentIds([selectedDocument.documentId]);
+      setProject(backendResult.project);
+    } catch (error) {
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "선택한 문서로 요청을 진행하지 못했습니다.",
       );
     } finally {
       setIsResponding(false);
@@ -1457,6 +1643,10 @@ function App() {
       setSettingsError("프로젝트명을 입력해주세요.");
       return;
     }
+    if (!isValidProjectStartDate(submittedProjectStartDate)) {
+      setSettingsError(PROJECT_START_DATE_ERROR);
+      return;
+    }
 
     setIsSavingSettings(true);
     setSettingsError("");
@@ -1575,6 +1765,7 @@ function App() {
                   onAgentUploadFiles={handleAgentUploadFiles}
                   onStartDateSubmit={handleStartDateSubmit}
                   onDownloadFile={handleDownloadFile}
+                  onDocumentChoice={handleDocumentChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
                 />
               ))
@@ -1769,8 +1960,12 @@ function ProjectEntry({
               value={newProjectStartDate}
               disabled={!isNewProject}
               onChange={(event) =>
-                onNewProjectStartDateChange(event.target.value)
+                onNewProjectStartDateChange(
+                  sanitizeProjectStartDateInput(event.target.value),
+                )
               }
+              max="9999-12-31"
+              pattern="\d{4}-\d{2}-\d{2}"
             />
 
             <label htmlFor="new-project-description">
@@ -2094,7 +2289,13 @@ function ProjectSettingsModal({
             name="start_date"
             type="date"
             value={projectStartDate}
-            onChange={(event) => onProjectStartDateChange(event.target.value)}
+            onChange={(event) =>
+              onProjectStartDateChange(
+                sanitizeProjectStartDateInput(event.target.value),
+              )
+            }
+            max="9999-12-31"
+            pattern="\d{4}-\d{2}-\d{2}"
           />
 
           <label htmlFor="settings-project-description">
@@ -2187,6 +2388,7 @@ function ChatMessage({
   onAgentUploadFiles,
   onStartDateSubmit,
   onDownloadFile,
+  onDocumentChoice,
   onSuggestedActionClick,
 }) {
   const isAssistant = message.role === "assistant";
@@ -2205,6 +2407,10 @@ function ChatMessage({
     : [];
   const uploadRequest =
     isAssistant && !actionsResolved ? message.metadata?.uploadRequest : null;
+  const documentChoiceRequest =
+    isAssistant && !actionsResolved
+      ? message.metadata?.documentChoiceRequest
+      : null;
   const startDateRequest =
     isAssistant && !actionsResolved
       ? message.metadata?.startDateRequest
@@ -2268,6 +2474,13 @@ function ChatMessage({
               aria-label={uploadRequest.label || "구축요건 정의서 업로드"}
             />
           </div>
+        )}
+        {documentChoiceRequest && (
+          <DocumentChoicePanel
+            request={documentChoiceRequest}
+            isDisabled={isResponding || isUploadingDocument}
+            onChoice={(choice) => onDocumentChoice({ message, ...choice })}
+          />
         )}
         {startDateRequest && (
           <StartDateRequestForm
@@ -2336,7 +2549,11 @@ function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
           value={startDate}
           disabled={isDisabled}
           required
-          onChange={(event) => setStartDate(event.target.value)}
+          onChange={(event) =>
+            setStartDate(sanitizeProjectStartDateInput(event.target.value))
+          }
+          max="9999-12-31"
+          pattern="\d{4}-\d{2}-\d{2}"
         />
         <button
           className="message-upload-button"
@@ -2347,6 +2564,80 @@ function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
         </button>
       </div>
     </form>
+  );
+}
+
+function DocumentChoicePanel({ request, isDisabled, onChoice }) {
+  const documents = Array.isArray(request?.documents) ? request.documents : [];
+  const defaultDocumentId =
+    request?.defaultDocumentId || documents[0]?.documentId || "";
+  const [selectedDocumentId, setSelectedDocumentId] =
+    useState(defaultDocumentId);
+  const defaultDocument =
+    documents.find((document) => document.documentId === defaultDocumentId) ??
+    documents[0];
+
+  if (!documents.length) return null;
+
+  return (
+    <div className="message-document-choice-panel">
+      <div className="document-choice-summary">
+        <strong>{defaultDocument?.fileName || "업로드된 문서"}</strong>
+        <span>{defaultDocument?.displayLabel || "기존 문서"}</span>
+      </div>
+      <div className="document-choice-actions">
+        <button
+          className="message-upload-button"
+          type="button"
+          disabled={isDisabled}
+          onClick={() =>
+            onChoice({
+              choice: "use_existing",
+              documentId: defaultDocument?.documentId,
+            })
+          }
+        >
+          기존 문서 사용
+        </button>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled}
+          onClick={() => onChoice({ choice: "upload_new" })}
+        >
+          새 문서 업로드
+        </button>
+      </div>
+      {documents.length > 1 && (
+        <div className="document-choice-select-row">
+          <select
+            value={selectedDocumentId}
+            disabled={isDisabled}
+            onChange={(event) => setSelectedDocumentId(event.target.value)}
+            aria-label="다른 문서 선택"
+          >
+            {documents.map((document) => (
+              <option key={document.documentId} value={document.documentId}>
+                {document.fileName || document.documentId}
+              </option>
+            ))}
+          </select>
+          <button
+            className="message-upload-button secondary"
+            type="button"
+            disabled={isDisabled || !selectedDocumentId}
+            onClick={() =>
+              onChoice({
+                choice: "select_other",
+                documentId: selectedDocumentId,
+              })
+            }
+          >
+            다른 문서 선택
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

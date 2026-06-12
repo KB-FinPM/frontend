@@ -50,6 +50,26 @@ const writeActiveConversationIds = (activeConversationIds) =>
 
 export const normalizeProjectId = (projectId) => projectId.trim();
 
+const PROJECT_START_DATE_ERROR =
+  "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
+
+const isValidProjectStartDate = (value = "") => {
+  const text = String(value ?? "").trim();
+  if (!text) return true;
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+};
+
 export const createConversationId = () =>
   `conversation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -222,6 +242,9 @@ export const createProject = async (
   if (!normalizedProjectName) {
     throw new Error("프로젝트명을 입력해주세요.");
   }
+  if (!isValidProjectStartDate(start_date)) {
+    throw new Error(PROJECT_START_DATE_ERROR);
+  }
 
   await wait();
 
@@ -257,6 +280,9 @@ export const updateProject = async (
 
   if (!normalizedProjectName) {
     throw new Error("프로젝트명을 입력해주세요.");
+  }
+  if (!isValidProjectStartDate(start_date)) {
+    throw new Error(PROJECT_START_DATE_ERROR);
   }
 
   await wait();
