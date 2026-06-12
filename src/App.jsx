@@ -3,6 +3,8 @@ import {
   ArrowUp,
   Bot,
   Check,
+  Download,
+  FileText,
   FolderOpen,
   LoaderCircle,
   LogOut,
@@ -37,7 +39,10 @@ import {
   saveCommandUsage,
 } from "./services/commandRecommendationService.js";
 import {
+  deleteProjectFile,
   downloadArtifactFile,
+  downloadProjectFile,
+  listProjectFiles,
   listDocuments,
   uploadDocument,
 } from "./api/finpmApi.js";
@@ -245,6 +250,103 @@ const normalizeDocumentListResponse = (response) => {
   return (Array.isArray(documents) ? documents : [])
     .map(toAttachmentDocument)
     .filter((document) => document.documentId || document.fileName);
+};
+
+const getFileExtension = (fileName = "") => {
+  const name = String(fileName ?? "");
+  const dotIndex = name.lastIndexOf(".");
+  return dotIndex >= 0 ? name.slice(dotIndex + 1).toUpperCase() : "";
+};
+
+const formatFileSize = (value) => {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size <= 0) return "크기 정보 없음";
+  const units = ["B", "KB", "MB", "GB"];
+  let nextSize = size;
+  let unitIndex = 0;
+  while (nextSize >= 1024 && unitIndex < units.length - 1) {
+    nextSize /= 1024;
+    unitIndex += 1;
+  }
+  return `${nextSize.toFixed(nextSize >= 10 || unitIndex === 0 ? 0 : 1)} ${
+    units[unitIndex]
+  }`;
+};
+
+const formatFileUploadedAt = (value) => {
+  if (!value) return "업로드 시간 정보 없음";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const normalizeUploadedFile = (file) => {
+  const documentType =
+    file.document_type ??
+    file.documentType ??
+    file.document_type_value ??
+    DOCUMENT_TYPES.UNKNOWN;
+  const fileName =
+    file.file_name ??
+    file.fileName ??
+    file.name ??
+    file.original_file_name ??
+    "업로드 파일";
+  const fileId =
+    file.file_id ??
+    file.fileId ??
+    file.document_id ??
+    file.documentId ??
+    file.id ??
+    "";
+  const resolvedFileType =
+    file.file_type ??
+    file.fileType ??
+    file.content_type ??
+    file.contentType ??
+    getFileExtension(fileName);
+  const fileType = resolvedFileType || "확인 불가";
+
+  return {
+    fileId,
+    fileName,
+    fileType,
+    fileSize: file.file_size ?? file.fileSize ?? file.size ?? null,
+    uploadedAt:
+      file.uploaded_at ??
+      file.uploadedAt ??
+      file.created_at ??
+      file.createdAt ??
+      "",
+    documentType,
+    documentLabel:
+      file.display_label ??
+      file.displayLabel ??
+      getDocumentDisplayLabel(documentType),
+    raw: file,
+  };
+};
+
+const normalizeUploadedFileListResponse = (response) => {
+  const files =
+    (Array.isArray(response) && response) ||
+    response?.files ||
+    response?.items ||
+    response?.documents ||
+    response?.data ||
+    response?.result?.files ||
+    response?.result?.documents ||
+    [];
+
+  return (Array.isArray(files) ? files : [])
+    .map(normalizeUploadedFile)
+    .filter((file) => file.fileId || file.fileName);
 };
 
 const compactText = (value = "") =>
@@ -492,6 +594,14 @@ function App() {
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(null);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
+  const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [isLoadingUploadedFiles, setIsLoadingUploadedFiles] = useState(false);
+  const [fileManagerError, setFileManagerError] = useState("");
+  const [fileActionError, setFileActionError] = useState("");
+  const [pendingDeleteFile, setPendingDeleteFile] = useState(null);
+  const [deletingFileId, setDeletingFileId] = useState("");
+  const [downloadingFileId, setDownloadingFileId] = useState("");
   const scrollRef = useRef(null);
   const progressTimerRef = useRef(null);
   const progressStartedAtRef = useRef(0);
@@ -506,6 +616,17 @@ function App() {
     [activeConversationId, conversations],
   );
   const activeMessages = activeConversation?.messages ?? [];
+
+  const resetFileManagerState = () => {
+    setIsFileManagerOpen(false);
+    setUploadedFiles([]);
+    setIsLoadingUploadedFiles(false);
+    setFileManagerError("");
+    setFileActionError("");
+    setPendingDeleteFile(null);
+    setDeletingFileId("");
+    setDownloadingFileId("");
+  };
 
   const clearGenerationProgressTimer = () => {
     if (progressTimerRef.current) {
@@ -613,6 +734,7 @@ function App() {
     setSelectedDocumentIds([]);
     setDocumentError("");
     setDocumentStatusMessage("");
+    resetFileManagerState();
     clearGenerationProgressTimer();
     setGenerationProgress(null);
     setRecentProjectId(loadedProject.projectId);
@@ -808,6 +930,7 @@ function App() {
     setDocumentError("");
     setDocumentStatusMessage("");
     resetGenerationState();
+    resetFileManagerState();
     setIsSidebarDrawerOpen(false);
   };
 
@@ -837,6 +960,112 @@ function App() {
       return normalizeDocumentListResponse(response);
     } catch {
       return [];
+    }
+  };
+
+  const loadUploadedFiles = async (targetProject = project) => {
+    if (!targetProject?.projectId) {
+      setUploadedFiles([]);
+      setFileManagerError("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+
+    setIsLoadingUploadedFiles(true);
+    setFileManagerError("");
+    setFileActionError("");
+
+    try {
+      const response = await listProjectFiles(targetProject.projectId);
+      setUploadedFiles(normalizeUploadedFileListResponse(response));
+    } catch {
+      setUploadedFiles([]);
+      setFileManagerError(
+        "파일 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+      );
+    } finally {
+      setIsLoadingUploadedFiles(false);
+    }
+  };
+
+  const openFileManager = () => {
+    setIsFileManagerOpen(true);
+    setPendingDeleteFile(null);
+    if (!project) {
+      setUploadedFiles([]);
+      setFileManagerError("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    loadUploadedFiles(project);
+  };
+
+  const closeFileManager = () => {
+    setIsFileManagerOpen(false);
+    setFileActionError("");
+    setPendingDeleteFile(null);
+  };
+
+  const handleDownloadUploadedFile = async (file) => {
+    if (!project?.projectId) {
+      setFileActionError("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    if (!file?.fileId) {
+      setFileActionError("다운로드할 파일 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setDownloadingFileId(file.fileId);
+    setFileActionError("");
+
+    try {
+      await downloadProjectFile({
+        projectId: project.projectId,
+        fileId: file.fileId,
+        fileName: file.fileName,
+      });
+    } catch {
+      setFileActionError("파일 다운로드 중 오류가 발생했습니다.");
+    } finally {
+      setDownloadingFileId("");
+    }
+  };
+
+  const handleRequestDeleteUploadedFile = (file) => {
+    setPendingDeleteFile(file);
+    setFileActionError("");
+  };
+
+  const handleCancelDeleteUploadedFile = () => {
+    setPendingDeleteFile(null);
+    setFileActionError("");
+  };
+
+  const handleConfirmDeleteUploadedFile = async () => {
+    if (!project?.projectId) {
+      setFileActionError("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    if (!pendingDeleteFile?.fileId) {
+      setFileActionError("삭제할 파일 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setDeletingFileId(pendingDeleteFile.fileId);
+    setFileActionError("");
+
+    try {
+      await deleteProjectFile({
+        projectId: project.projectId,
+        fileId: pendingDeleteFile.fileId,
+      });
+      setUploadedFiles((files) =>
+        files.filter((file) => file.fileId !== pendingDeleteFile.fileId),
+      );
+      setPendingDeleteFile(null);
+    } catch {
+      setFileActionError("파일 삭제 중 오류가 발생했습니다.");
+    } finally {
+      setDeletingFileId("");
     }
   };
 
@@ -1698,6 +1927,7 @@ function App() {
         deletingConversationId={deletingConversationId}
         conversationActionError={conversationActionError}
         onChangeProject={handleChangeProject}
+        onOpenFileManager={openFileManager}
         onOpenSettings={openSettings}
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
@@ -1837,6 +2067,24 @@ function App() {
           onProjectDescriptionChange={setSettingsDescription}
           onClose={closeSettings}
           onSubmit={handleSettingsSubmit}
+        />
+      )}
+      {isFileManagerOpen && (
+        <FileManagerModal
+          project={project}
+          files={uploadedFiles}
+          isLoading={isLoadingUploadedFiles}
+          error={fileManagerError}
+          actionError={fileActionError}
+          pendingDeleteFile={pendingDeleteFile}
+          deletingFileId={deletingFileId}
+          downloadingFileId={downloadingFileId}
+          onRefresh={() => loadUploadedFiles(project)}
+          onClose={closeFileManager}
+          onDownload={handleDownloadUploadedFile}
+          onRequestDelete={handleRequestDeleteUploadedFile}
+          onCancelDelete={handleCancelDeleteUploadedFile}
+          onConfirmDelete={handleConfirmDeleteUploadedFile}
         />
       )}
     </main>
@@ -2000,6 +2248,7 @@ function ProjectSidebar({
   deletingConversationId,
   conversationActionError,
   onChangeProject,
+  onOpenFileManager,
   onOpenSettings,
   onNewChat,
   onSelectConversation,
@@ -2104,6 +2353,15 @@ function ProjectSidebar({
           <p className="conversation-empty">아직 대화가 없습니다.</p>
         )}
       </section>
+
+      <button
+        className="secondary-button"
+        type="button"
+        onClick={onOpenFileManager}
+      >
+        <FileText size={16} aria-hidden="true" />
+        업로드 파일 목록
+      </button>
 
       <button
         className="secondary-button"
@@ -2324,6 +2582,177 @@ function ProjectSettingsModal({
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function FileManagerModal({
+  project,
+  files,
+  isLoading,
+  error,
+  actionError,
+  pendingDeleteFile,
+  deletingFileId,
+  downloadingFileId,
+  onRefresh,
+  onClose,
+  onDownload,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}) {
+  const hasProject = Boolean(project?.projectId);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="file-manager-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="file-manager-title"
+      >
+        <header className="settings-modal-header">
+          <div>
+            <span>Files</span>
+            <h2 id="file-manager-title">업로드 파일 목록</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="파일 목록 닫기"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="file-manager-toolbar">
+          <div className="readonly-field">
+            <span>Project ID</span>
+            <strong>{project?.projectId || "프로젝트 미선택"}</strong>
+          </div>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={isLoading || !hasProject}
+            onClick={onRefresh}
+          >
+            새로고침
+          </button>
+        </div>
+
+        {actionError && <p className="form-error">{actionError}</p>}
+
+        <div className="file-manager-content">
+          {!hasProject ? (
+            <p className="file-manager-empty">프로젝트를 먼저 선택해주세요.</p>
+          ) : isLoading ? (
+            <div className="file-manager-loading" role="status">
+              <LoaderCircle size={18} aria-hidden="true" />
+              파일 목록을 불러오는 중입니다.
+            </div>
+          ) : error ? (
+            <p className="form-error">{error}</p>
+          ) : files.length ? (
+            <ul className="uploaded-file-list">
+              {files.map((file) => {
+                const isPendingDelete =
+                  pendingDeleteFile?.fileId === file.fileId;
+                const isDeleting = deletingFileId === file.fileId;
+                const isDownloading = downloadingFileId === file.fileId;
+
+                return (
+                  <li
+                    className="uploaded-file-item"
+                    key={`${file.fileId}-${file.fileName}`}
+                  >
+                    <div className="uploaded-file-main">
+                      <FileText size={18} aria-hidden="true" />
+                      <div>
+                        <strong>{file.fileName}</strong>
+                        <span>{file.documentLabel}</span>
+                      </div>
+                    </div>
+                    <dl className="uploaded-file-meta">
+                      <div>
+                        <dt>유형</dt>
+                        <dd>{file.fileType}</dd>
+                      </div>
+                      <div>
+                        <dt>업로드 시간</dt>
+                        <dd>{formatFileUploadedAt(file.uploadedAt)}</dd>
+                      </div>
+                      <div>
+                        <dt>크기</dt>
+                        <dd>{formatFileSize(file.fileSize)}</dd>
+                      </div>
+                      <div>
+                        <dt>문서 구분</dt>
+                        <dd>{file.documentLabel}</dd>
+                      </div>
+                    </dl>
+                    <div className="uploaded-file-actions">
+                      <button
+                        className="mini-action-button"
+                        type="button"
+                        disabled={isDeleting || isDownloading}
+                        onClick={() => onDownload(file)}
+                      >
+                        {isDownloading ? (
+                          <>
+                            <LoaderCircle size={14} aria-hidden="true" />
+                            다운로드 중
+                          </>
+                        ) : (
+                          <>
+                            <Download size={14} aria-hidden="true" />
+                            다운로드
+                          </>
+                        )}
+                      </button>
+                      <button
+                        className="mini-action-button danger"
+                        type="button"
+                        disabled={isDeleting || isDownloading}
+                        onClick={() => onRequestDelete(file)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        삭제
+                      </button>
+                    </div>
+                    {isPendingDelete && (
+                      <div className="file-delete-confirm">
+                        <span>이 파일을 삭제하시겠습니까?</span>
+                        <div>
+                          <button
+                            className="mini-action-button"
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={onCancelDelete}
+                          >
+                            취소
+                          </button>
+                          <button
+                            className="mini-action-button danger"
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={onConfirmDelete}
+                          >
+                            {isDeleting ? "삭제 중" : "삭제"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="file-manager-empty">업로드된 파일이 없습니다.</p>
+          )}
+        </div>
       </section>
     </div>
   );

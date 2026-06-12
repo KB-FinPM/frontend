@@ -63,6 +63,17 @@ export const uploadDocument = ({ projectId, documentType, file }) => {
 export const listDocuments = (projectId) =>
   requestJson(`/projects/${encodePathSegment(projectId)}/documents`);
 
+export const listProjectFiles = async (projectId) => {
+  try {
+    return await requestJson(`/projects/${encodePathSegment(projectId)}/files`);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return listDocuments(projectId);
+    }
+    throw error;
+  }
+};
+
 export const getDocument = ({ projectId, documentId }) =>
   requestJson(
     `/projects/${encodePathSegment(projectId)}/documents/${encodePathSegment(
@@ -103,6 +114,59 @@ export const downloadArtifactFile = async ({
     throw new ApiError(
       getFriendlyHttpErrorMessage(data, response, {
         fallbackMessage: "파일을 다운로드하지 못했습니다.",
+      }),
+      {
+        status: response.status,
+        data,
+      },
+    );
+  }
+
+  let blob;
+  try {
+    blob = await response.blob();
+  } catch (error) {
+    throw normalizeFetchError(error);
+  }
+  const resolvedFileName = fileNameFromContentDisposition(
+    response.headers.get("content-disposition"),
+    fileName,
+  );
+  downloadBlob(blob, resolvedFileName);
+  return { fileName: resolvedFileName };
+};
+
+// TODO: Replace the fallback document-list path once backend file management APIs
+// are implemented for uploaded file delete/download operations.
+export const deleteProjectFile = ({ projectId, fileId }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/files/${encodePathSegment(fileId)}`,
+    { method: "DELETE" },
+  );
+
+export const downloadProjectFile = async ({
+  projectId,
+  fileId,
+  fileName = "uploaded-file",
+}) => {
+  let response;
+  try {
+    response = await fetch(
+      buildApiUrl(
+        `/projects/${encodePathSegment(projectId)}/files/${encodePathSegment(
+          fileId,
+        )}/download`,
+      ),
+    );
+  } catch (error) {
+    throw normalizeFetchError(error);
+  }
+
+  if (!response.ok) {
+    const data = await parseResponseBody(response);
+    throw new ApiError(
+      getFriendlyHttpErrorMessage(data, response, {
+        fallbackMessage: "파일 다운로드 중 오류가 발생했습니다.",
       }),
       {
         status: response.status,
