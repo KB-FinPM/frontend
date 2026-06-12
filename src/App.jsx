@@ -1114,7 +1114,24 @@ function App() {
 
     try {
       const [file] = uploadFiles;
-      const uploadRequest = message.metadata?.uploadRequest ?? {};
+      const documentChoiceRequest =
+        message.metadata?.documentChoiceRequest ?? null;
+      const documentChoiceConfig =
+        documentChoiceRequest?.documentConfig ?? null;
+      const uploadRequest =
+        message.metadata?.uploadRequest ??
+        (documentChoiceRequest
+          ? {
+              label: documentChoiceConfig?.label || "새 문서 업로드",
+              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+              documentType:
+                documentChoiceConfig?.documentType || DEFAULT_DOCUMENT_TYPE,
+              originalMessage:
+                documentChoiceRequest.originalMessage ||
+                "업로드한 문서를 기준으로 진행해줘",
+              resumeAfterUpload: true,
+            }
+          : {});
       const requestedDocumentType =
         uploadRequest.documentType || DEFAULT_DOCUMENT_TYPE;
       const response = await uploadDocument({
@@ -1277,7 +1294,6 @@ function App() {
     const targetConversationId =
       message.metadata?.conversationId || activeConversationId;
     const choiceRequest = message.metadata?.documentChoiceRequest ?? {};
-    const documentConfig = choiceRequest.documentConfig ?? {};
     const documents = Array.isArray(choiceRequest.documents)
       ? choiceRequest.documents
       : [];
@@ -1290,37 +1306,6 @@ function App() {
     }
 
     if (choice === "upload_new") {
-      try {
-        const result = await updateConversationMessage(
-          project.projectId,
-          targetConversationId,
-          message.id,
-          (currentMessage) => ({
-            ...currentMessage,
-            content: documentConfig.message || "새 기준 문서를 업로드해주세요.",
-            metadata: {
-              ...(currentMessage.metadata ?? {}),
-              documentChoiceRequest: null,
-              uploadRequest: {
-                label: documentConfig.label || "문서 업로드",
-                acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
-                documentType: documentConfig.documentType || DEFAULT_DOCUMENT_TYPE,
-                originalMessage,
-                resumeAfterUpload: true,
-              },
-            },
-          }),
-        );
-        setProject(result.project);
-        setSelectedDocumentIds([]);
-        setDocumentStatusMessage("");
-      } catch (error) {
-        setDocumentError(
-          error instanceof Error
-            ? error.message
-            : "업로드 요청으로 전환하지 못했습니다.",
-        );
-      }
       return;
     }
 
@@ -2479,7 +2464,14 @@ function ChatMessage({
           <DocumentChoicePanel
             request={documentChoiceRequest}
             isDisabled={isResponding || isUploadingDocument}
+            isUploading={isUploadingDocument}
             onChoice={(choice) => onDocumentChoice({ message, ...choice })}
+            onUploadFiles={(files) =>
+              onAgentUploadFiles({
+                message,
+                files,
+              })
+            }
           />
         )}
         {startDateRequest && (
@@ -2567,17 +2559,52 @@ function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
   );
 }
 
-function DocumentChoicePanel({ request, isDisabled, onChoice }) {
+function DocumentChoicePanel({
+  request,
+  isDisabled,
+  isUploading,
+  onChoice,
+  onUploadFiles,
+}) {
+  const fileInputRef = useRef(null);
   const documents = Array.isArray(request?.documents) ? request.documents : [];
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
     useState(defaultDocumentId);
+  const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false);
+  const [isDocumentPickerOpen, setIsDocumentPickerOpen] = useState(false);
   const defaultDocument =
     documents.find((document) => document.documentId === defaultDocumentId) ??
     documents[0];
+  const selectedDocument =
+    documents.find((document) => document.documentId === selectedDocumentId) ??
+    defaultDocument;
+  const uploadLabel = request?.documentConfig?.label || "새 문서 업로드";
+  const acceptedTypes = Array.isArray(request?.documentConfig?.acceptedTypes)
+    ? request.documentConfig.acceptedTypes
+    : DOCUMENT_UPLOAD_ACCEPTED_TYPES;
+
+  useEffect(() => {
+    setSelectedDocumentId(defaultDocumentId);
+    setIsUploadPanelOpen(false);
+    setIsDocumentPickerOpen(false);
+  }, [defaultDocumentId]);
 
   if (!documents.length) return null;
+
+  const handlePanelAction = (event, callback) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isDisabled) return;
+    callback();
+  };
+
+  const handleFileChange = (event) => {
+    event.stopPropagation();
+    onUploadFiles?.(event.target.files);
+    event.target.value = "";
+  };
 
   return (
     <div className="message-document-choice-panel">
@@ -2590,11 +2617,13 @@ function DocumentChoicePanel({ request, isDisabled, onChoice }) {
           className="message-upload-button"
           type="button"
           disabled={isDisabled}
-          onClick={() =>
-            onChoice({
-              choice: "use_existing",
-              documentId: defaultDocument?.documentId,
-            })
+          onClick={(event) =>
+            handlePanelAction(event, () =>
+              onChoice({
+                choice: "use_existing",
+                documentId: defaultDocument?.documentId,
+              }),
+            )
           }
         >
           기존 문서 사용
@@ -2603,16 +2632,37 @@ function DocumentChoicePanel({ request, isDisabled, onChoice }) {
           className="message-upload-button secondary"
           type="button"
           disabled={isDisabled}
-          onClick={() => onChoice({ choice: "upload_new" })}
+          onClick={(event) =>
+            handlePanelAction(event, () => {
+              setIsUploadPanelOpen(true);
+              setIsDocumentPickerOpen(false);
+            })
+          }
         >
           새 문서 업로드
         </button>
+        {documents.length > 1 && (
+          <button
+            className="message-upload-button secondary"
+            type="button"
+            disabled={isDisabled}
+            onClick={(event) =>
+              handlePanelAction(event, () => {
+                setIsDocumentPickerOpen(true);
+                setIsUploadPanelOpen(false);
+              })
+            }
+          >
+            다른 문서 선택
+          </button>
+        )}
       </div>
-      {documents.length > 1 && (
-        <div className="document-choice-select-row">
+      {isDocumentPickerOpen && documents.length > 1 && (
+        <div className="document-choice-picker">
           <select
             value={selectedDocumentId}
             disabled={isDisabled}
+            onClick={(event) => event.stopPropagation()}
             onChange={(event) => setSelectedDocumentId(event.target.value)}
             aria-label="다른 문서 선택"
           >
@@ -2622,19 +2672,72 @@ function DocumentChoicePanel({ request, isDisabled, onChoice }) {
               </option>
             ))}
           </select>
+          <div className="document-choice-selected">
+            선택된 문서:{" "}
+            <strong>{selectedDocument?.fileName || selectedDocumentId}</strong>
+          </div>
           <button
-            className="message-upload-button secondary"
+            className="message-upload-button"
             type="button"
             disabled={isDisabled || !selectedDocumentId}
-            onClick={() =>
-              onChoice({
-                choice: "select_other",
-                documentId: selectedDocumentId,
-              })
+            onClick={(event) =>
+              handlePanelAction(event, () =>
+                onChoice({
+                  choice: "select_other",
+                  documentId: selectedDocumentId,
+                }),
+              )
             }
           >
-            다른 문서 선택
+            이 문서로 생성
           </button>
+        </div>
+      )}
+      {isUploadPanelOpen && (
+        <div className="document-choice-upload-panel">
+          <div className="document-choice-upload-copy">
+            <strong>새 기준 문서 업로드</strong>
+            <span>업로드가 완료되면 새 문서를 기준으로 생성이 진행됩니다.</span>
+          </div>
+          <div className="document-choice-actions">
+            <button
+              className="message-upload-button"
+              type="button"
+              disabled={isDisabled || isUploading}
+              onClick={(event) =>
+                handlePanelAction(event, () => fileInputRef.current?.click())
+              }
+            >
+              {isUploading ? (
+                <>
+                  <LoaderCircle size={16} aria-hidden="true" />
+                  업로드 중
+                </>
+              ) : (
+                uploadLabel
+              )}
+            </button>
+            <button
+              className="message-upload-button secondary"
+              type="button"
+              disabled={isDisabled || isUploading}
+              onClick={(event) =>
+                handlePanelAction(event, () => setIsUploadPanelOpen(false))
+              }
+            >
+              취소
+            </button>
+            <input
+              ref={fileInputRef}
+              className="message-file-input"
+              type="file"
+              accept={acceptedTypes.join(",")}
+              disabled={isDisabled || isUploading}
+              onClick={(event) => event.stopPropagation()}
+              onChange={handleFileChange}
+              aria-label={uploadLabel}
+            />
+          </div>
         </div>
       )}
     </div>
