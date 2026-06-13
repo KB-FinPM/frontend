@@ -68,6 +68,8 @@ const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls",
+  "application/vnd.ms-excel",
   ".md",
   ".txt",
   "text/plain",
@@ -82,7 +84,8 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
   WBS_CREATE: "WBS_CREATE",
   WBS_REFERENCE: "WBS_REFERENCE",
-  SCREEN_DESIGN_BASED: "SCREEN_DESIGN_BASED",
+  SCREEN_DESIGN_CREATE: "SCREEN_DESIGN_CREATE",
+  UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
 const GENERATION_PROGRESS_STEP_INTERVAL_MS = 650;
 const GENERATION_PROGRESS_MIN_DURATION_MS = 3200;
@@ -187,10 +190,20 @@ const getGenerationRequestType = (value = "") => {
     normalized.includes("화면정의서") ||
     normalized.includes("화면정의") ||
     normalized.includes("screendesign");
+  const hasUnitTestTarget =
+    normalized.includes("단위테스트계획서") ||
+    normalized.includes("단위테스트계획") ||
+    normalized.includes("단위테스트케이스") ||
+    normalized.includes("테스트계획서") ||
+    normalized.includes("테스트케이스") ||
+    normalized.includes("unittest");
   const isGeneration = hasGenerationSignal(normalized);
 
-  if (hasScreenDesignTarget && (isGeneration || normalized.includes("기반"))) {
-    return GENERATION_REQUEST_TYPES.SCREEN_DESIGN_BASED;
+  if (hasUnitTestTarget && isGeneration) {
+    return GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE;
+  }
+  if (hasScreenDesignTarget && isGeneration) {
+    return GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE;
   }
   if (hasWbsTarget && isGeneration) {
     return GENERATION_REQUEST_TYPES.WBS_CREATE;
@@ -405,39 +418,66 @@ const getRequiredDocumentConfig = (requestType) => {
     return {
       documentTypes: [
         DOCUMENT_TYPES.REQUIREMENT_SPEC,
-        DEFAULT_DOCUMENT_TYPE,
       ],
-      keywords: ["요구사항", "요건정의", "구축요건", "rfp"],
-      message: "WBS 생성을 위해 요구사항 정의서를 업로드해주세요.",
+      keywords: ["요구사항", "요구사항명세", "요구사항정의"],
+      message:
+        "WBS 생성을 위해 기준 문서가 필요합니다. 요구사항 정의서를 업로드하거나 먼저 생성해 주세요.",
       existingMessage:
         "이미 업로드된 요구사항 명세서가 있습니다. 이 문서를 기준으로 WBS를 생성할까요?",
       label: "요구사항 정의서 업로드",
       documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+      commandActions: [
+        {
+          label: "요구사항 정의서 생성",
+          message: "요구사항 정의서 생성해줘",
+        },
+      ],
     };
   }
 
   if (requestType === GENERATION_REQUEST_TYPES.WBS_REFERENCE) {
+    return null;
+  }
+
+  if (requestType === GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE) {
     return {
-      documentTypes: [DOCUMENT_TYPES.WBS],
-      keywords: ["wbs"],
-      message: "WBS 기준 일정 확인을 위해 WBS 문서를 업로드해주세요.",
+      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
+      keywords: ["요구사항", "요구사항명세", "요구사항정의", "rfp", "기획서"],
+      message:
+        "화면설계서를 생성하기 위해 기준 문서가 필요합니다. 요구사항 정의서를 업로드하거나 먼저 생성해 주세요.",
       existingMessage:
-        "이미 업로드된 WBS가 있습니다. 이 문서를 기준으로 일정을 확인할까요?",
-      label: "WBS 업로드",
-      documentType: DOCUMENT_TYPES.WBS,
+        "이미 업로드된 요구사항 정의서가 있습니다. 이 문서를 기준으로 화면설계서를 생성할까요?",
+      label: "요구사항 정의서 업로드",
+      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+      commandActions: [
+        {
+          label: "요구사항 정의서 생성",
+          message: "요구사항 정의서 생성해줘",
+        },
+      ],
     };
   }
 
-  if (requestType === GENERATION_REQUEST_TYPES.SCREEN_DESIGN_BASED) {
+  if (requestType === GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE) {
     return {
-      documentTypes: [SCREEN_DESIGN_DOCUMENT_TYPE],
-      keywords: ["화면설계", "화면정의", "screendesign"],
+      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC, SCREEN_DESIGN_DOCUMENT_TYPE],
+      keywords: ["요구사항", "요구사항명세", "요구사항정의", "화면설계"],
       message:
-        "화면설계서 기반 산출물 생성을 위해 화면설계서를 업로드해주세요.",
+        "단위테스트계획서를 생성하기 위해 기준 문서가 필요합니다. 요구사항 정의서나 화면설계서를 업로드하거나 선행 산출물을 먼저 생성해 주세요.",
       existingMessage:
-        "이미 업로드된 화면설계서가 있습니다. 이 문서를 기준으로 진행할까요?",
-      label: "화면설계서 업로드",
-      documentType: DOCUMENT_TYPES.UNKNOWN,
+        "이미 업로드된 기준 문서가 있습니다. 이 문서를 기준으로 단위테스트계획서를 생성할까요?",
+      label: "기준 문서 업로드",
+      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+      commandActions: [
+        {
+          label: "화면설계서 생성",
+          message: "요구사항 정의서를 기준으로 화면설계서 생성해줘",
+        },
+        {
+          label: "요구사항 정의서 생성",
+          message: "요구사항 정의서 생성해줘",
+        },
+      ],
     };
   }
 
@@ -736,6 +776,7 @@ function App() {
           startDateRequest: null,
           pendingAction: null,
           suggestedActions: [],
+          commandActions: [],
         },
       }),
     );
@@ -1279,6 +1320,7 @@ function App() {
               originalMessage: trimmedValue,
               resumeAfterUpload: true,
             },
+            commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
         });
         return;
@@ -1504,6 +1546,7 @@ function App() {
               originalMessage,
               resumeAfterUpload: true,
             },
+            commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
         });
         return;
@@ -1787,6 +1830,25 @@ function App() {
     }
   };
 
+  const handleCommandActionClick = async (message, action) => {
+    if (!project || isResponding) return;
+
+    const commandText = String(
+      action?.message || action?.command || action?.label || "",
+    ).trim();
+    if (!commandText) return;
+
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    if (targetConversationId) {
+      await clearMessageActions({
+        conversationId: targetConversationId,
+        message,
+      });
+    }
+    sendMessage(commandText);
+  };
+
   const handleDownloadFile = async (file) => {
     if (!project || !file?.artifact_id) {
       setDocumentError("다운로드할 파일 정보를 확인하지 못했습니다.");
@@ -2044,6 +2106,7 @@ function App() {
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
+                  onCommandActionClick={handleCommandActionClick}
                 />
               ))
             ) : (
@@ -2786,25 +2849,22 @@ function FileManagerModal({
                     </div>
                     {isPendingDelete && (
                       <div className="file-delete-confirm">
-                        <span>이 파일을 삭제하시겠습니까?</span>
-                        <div>
-                          <button
-                            className="mini-action-button"
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={onCancelDelete}
-                          >
-                            취소
-                          </button>
-                          <button
-                            className="mini-action-button danger"
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={onConfirmDelete}
-                          >
-                            {isDeleting ? "삭제 중" : "삭제"}
-                          </button>
-                        </div>
+                        <button
+                          className="mini-action-button"
+                          type="button"
+                          disabled={isDeleting}
+                          onClick={onCancelDelete}
+                        >
+                          취소
+                        </button>
+                        <button
+                          className="mini-action-button danger"
+                          type="button"
+                          disabled={isDeleting}
+                          onClick={onConfirmDelete}
+                        >
+                          {isDeleting ? "삭제 중" : "확인"}
+                        </button>
                       </div>
                     )}
                   </li>
@@ -2866,6 +2926,7 @@ function ChatMessage({
   onDownloadFile,
   onDocumentChoice,
   onSuggestedActionClick,
+  onCommandActionClick,
 }) {
   const isAssistant = message.role === "assistant";
   const fileInputRef = useRef(null);
@@ -2883,6 +2944,12 @@ function ChatMessage({
     : [];
   const uploadRequest =
     isAssistant && !actionsResolved ? message.metadata?.uploadRequest : null;
+  const commandActions =
+    isAssistant && !actionsResolved
+      ? message.metadata?.commandActions ??
+        message.metadata?.result?.command_actions ??
+        []
+      : [];
   const documentChoiceRequest =
     isAssistant && !actionsResolved
       ? message.metadata?.documentChoiceRequest
@@ -2984,6 +3051,21 @@ function ChatMessage({
           downloadFiles={downloadFiles}
           onDownloadFile={onDownloadFile}
         />
+        {commandActions.length > 0 && (
+          <div className="suggested-action-list">
+            {commandActions.map((action, index) => (
+              <button
+                key={`${action.message ?? action.command ?? action.label}-${index}`}
+                className="suggested-action-button secondary"
+                type="button"
+                disabled={isResponding || isUploadingDocument}
+                onClick={() => onCommandActionClick(message, action)}
+              >
+                {action.label || action.message || action.command}
+              </button>
+            ))}
+          </div>
+        )}
         {suggestedActions.length > 0 && (
           <div className="suggested-action-list">
             {suggestedActions.map((action) => (

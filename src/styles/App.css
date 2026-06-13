@@ -1594,7 +1594,9 @@ p {
 
 .file-manager-content {
   min-height: 180px;
+  max-height: min(62vh, 520px);
   overflow: auto;
+  padding-right: 2px;
 }
 
 .file-manager-empty,
@@ -1702,17 +1704,12 @@ p {
 
 .file-delete-confirm {
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 10px;
   border: 1px solid #fecdca;
   border-radius: 8px;
   color: #7a271a;
   background: #fff6f5;
-}
-
-.file-delete-confirm span {
-  font-size: 13px;
-  font-weight: 800;
 }
 
 @keyframes spin {
