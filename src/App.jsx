@@ -42,6 +42,7 @@ import {
   deleteProjectFile,
   downloadArtifactFile,
   downloadProjectFile,
+  getChatActionStatus,
   listProjectFiles,
   listDocuments,
   uploadDocument,
@@ -85,6 +86,14 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
 });
 const GENERATION_PROGRESS_STEP_INTERVAL_MS = 650;
 const GENERATION_PROGRESS_MIN_DURATION_MS = 3200;
+const GENERATION_JOB_POLL_INTERVAL_MS = 3000;
+const GENERATION_JOB_MAX_POLLS = 800;
+const GENERATION_ACTION_STATUS = Object.freeze({
+  EXECUTING: "EXECUTING",
+  EXECUTED: "EXECUTED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+});
 const GENERATION_PROGRESS_STEPS = [
   {
     name: "요청 확인 중",
@@ -144,6 +153,10 @@ const getActionMessage = (action) =>
   action?.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION
     ? "취소"
     : action?.label || "생성하기";
+
+const isGenerationPendingAction = (pendingAction) =>
+  String(pendingAction?.action_type ?? "").startsWith("GENERATE_") ||
+  Boolean(pendingAction?.payload?.target_artifact_type);
 
 const normalizeCommandText = (value = "") =>
   String(value)
@@ -688,6 +701,22 @@ function App() {
     );
     setGenerationProgress(failedProgress);
     return failedProgress;
+  };
+
+  const pollGenerationActionStatus = async ({ projectId, actionId }) => {
+    for (let pollCount = 0; pollCount < GENERATION_JOB_MAX_POLLS; pollCount += 1) {
+      const statusResponse = await getChatActionStatus({ projectId, actionId });
+      if (
+        statusResponse.status === GENERATION_ACTION_STATUS.EXECUTED ||
+        statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
+        statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
+      ) {
+        return statusResponse;
+      }
+      await wait(GENERATION_JOB_POLL_INTERVAL_MS);
+    }
+
+    throw new Error("Generation job status polling timed out.");
   };
 
   const clearMessageActions = async ({ conversationId, message }) => {
@@ -1385,6 +1414,7 @@ function App() {
           document.displayLabel ??
           getDocumentDisplayLabel(requestedDocumentType),
       };
+      await loadUploadedFiles(project);
       await clearMessageActions({
         conversationId:
           message.metadata?.conversationId || activeConversationId,
@@ -1597,7 +1627,7 @@ function App() {
     const pendingAction = message.metadata?.pendingAction;
     const isConfirmGenerationAction =
       action.type === CHAT_ACTION_COMMAND_TYPES.CONFIRM_PENDING_ACTION &&
-      pendingAction?.payload?.target_artifact_type === "REQUIREMENT_SPEC";
+      isGenerationPendingAction(pendingAction);
     const shouldResetGenerationState =
       isConfirmGenerationAction ||
       action.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION;
@@ -1657,16 +1687,45 @@ function App() {
             },
           };
         } else {
-          const completedProgress = await completeGenerationProgress();
-          assistantMessage = {
-            ...assistantMessage,
-            metadata: {
-              ...assistantMessage.metadata,
-              generationProgress: completedProgress,
-              pendingAction: null,
-              suggestedActions: [],
-            },
-          };
+          const statusResponse = await pollGenerationActionStatus({
+            projectId: project.projectId,
+            actionId,
+          });
+          if (statusResponse.status === GENERATION_ACTION_STATUS.FAILED) {
+            const failedProgress = failGenerationProgress();
+            assistantMessage = {
+              ...assistantMessage,
+              content: statusResponse.message || assistantMessage.content,
+              metadata: {
+                ...assistantMessage.metadata,
+                state: CHAT_STATES.FAILED,
+                generationProgress: failedProgress,
+                result: statusResponse.result ?? {},
+                downloadFiles: [],
+                pendingAction: null,
+                suggestedActions: [],
+                rawResponse: statusResponse,
+              },
+            };
+          } else {
+            const completedProgress = await completeGenerationProgress();
+            assistantMessage = {
+              ...assistantMessage,
+              content: statusResponse.message || assistantMessage.content,
+              metadata: {
+                ...assistantMessage.metadata,
+                state: statusResponse.state ?? CHAT_STATES.COMPLETED,
+                generationProgress: completedProgress,
+                result: statusResponse.result ?? {},
+                downloadFiles: Array.isArray(statusResponse.download_files)
+                  ? statusResponse.download_files
+                  : [],
+                pendingAction: null,
+                suggestedActions: [],
+                rawResponse: statusResponse,
+              },
+            };
+          }
         }
       }
       const messageResult = await addMessagesToConversation(
@@ -1679,6 +1738,9 @@ function App() {
       setActiveConversationIdState(backendConversationId);
       setActiveConversationId(project.projectId, backendConversationId);
       setLastCommandInfo({ commandText: actionMessage });
+      if (isConfirmGenerationAction) {
+        await loadUploadedFiles(project);
+      }
     } catch (error) {
       const failedProgress = isConfirmGenerationAction
         ? failGenerationProgress()

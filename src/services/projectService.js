@@ -1,8 +1,15 @@
-import { MOCK_PROJECTS, createInitialConversationTitle } from "./mockProjectData.js";
+import {
+  ApiError,
+  createProjectRecord,
+  getProject,
+  updateProjectRecord,
+} from "../api/finpmApi.js";
+import { createInitialConversationTitle } from "./mockProjectData.js";
 import { formatDateTime } from "./dateTime.js";
 
 const RECENT_PROJECT_KEY = "pm-agent.v2.recentProjectId";
 const STORED_PROJECTS_KEY = "pm-agent.v2.projects";
+const PROJECT_CONVERSATIONS_KEY = "pm-agent.v2.projectConversations";
 const ACTIVE_CONVERSATIONS_KEY = "pm-agent.v2.activeConversations";
 const UNTITLED_CONVERSATION_TITLES = new Set([
   "새 채팅",
@@ -12,11 +19,6 @@ const UNTITLED_CONVERSATION_TITLES = new Set([
 ]);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
-
-const wait = (delay = 120) =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, delay);
-  });
 
 const getStorage = () => {
   if (typeof window === "undefined") return null;
@@ -40,9 +42,10 @@ const writeJsonMap = (key, value) => {
   storage.setItem(key, JSON.stringify(value));
 };
 
-const readStoredProjects = () => readJsonMap(STORED_PROJECTS_KEY);
-const writeStoredProjects = (projects) =>
-  writeJsonMap(STORED_PROJECTS_KEY, projects);
+const readStoredProjectConversations = () =>
+  readJsonMap(PROJECT_CONVERSATIONS_KEY);
+const writeStoredProjectConversations = (conversationsByProject) =>
+  writeJsonMap(PROJECT_CONVERSATIONS_KEY, conversationsByProject);
 
 const readActiveConversationIds = () => readJsonMap(ACTIVE_CONVERSATIONS_KEY);
 const writeActiveConversationIds = (activeConversationIds) =>
@@ -134,7 +137,8 @@ const sortConversations = (conversations = []) =>
     second.updatedAt.localeCompare(first.updatedAt),
   );
 
-const normalizeProject = (project, source = "mock") => {
+const normalizeProject = (project, source = "db") => {
+  const projectId = project.projectId ?? project.project_id;
   const conversations = Array.isArray(project.conversations)
     ? project.conversations.map(normalizeConversation)
     : [];
@@ -142,30 +146,56 @@ const normalizeProject = (project, source = "mock") => {
   const normalizedConversations = conversations.length
     ? conversations
     : legacyMessages.length
-      ? [createLegacyConversation(project.projectId, legacyMessages)]
+      ? [createLegacyConversation(projectId, legacyMessages)]
       : [];
 
   return {
-    projectId: project.projectId,
-    projectName: project.projectName,
+    projectId,
+    projectName: project.projectName ?? project.project_name ?? projectId,
     projectStartDate:
       project.projectStartDate ?? project.startDate ?? project.start_date ?? "",
     projectEndDate:
       project.projectEndDate ?? project.endDate ?? project.end_date ?? "",
-    projectDescription: project.projectDescription ?? project.summary ?? "",
+    projectDescription:
+      project.projectDescription ?? project.description ?? project.summary ?? "",
     conversations: sortConversations(normalizedConversations),
-    createdAt: project.createdAt ?? formatDateTime(),
-    updatedAt: project.updatedAt ?? formatDateTime(),
+    createdAt: project.createdAt ?? project.created_at ?? formatDateTime(),
+    updatedAt: project.updatedAt ?? project.updated_at ?? formatDateTime(),
     source,
   };
 };
 
 const persistProject = (project) => {
-  const normalizedProject = normalizeProject(project, "localStorage");
-  const projects = readStoredProjects();
-  projects[normalizedProject.projectId] = normalizedProject;
-  writeStoredProjects(projects);
+  const normalizedProject = normalizeProject(project, "db");
+  const conversationsByProject = readStoredProjectConversations();
+  conversationsByProject[normalizedProject.projectId] =
+    normalizedProject.conversations;
+  writeStoredProjectConversations(conversationsByProject);
   return clone(normalizedProject);
+};
+
+const mergeProjectSession = (project) => {
+  const normalizedProject = normalizeProject(project, "db");
+  const conversations =
+    readStoredProjectConversations()[normalizedProject.projectId] ?? [];
+  return normalizeProject(
+    {
+      ...normalizedProject,
+      conversations,
+    },
+    "db",
+  );
+};
+
+const getProjectNotFoundAsNull = async (projectId) => {
+  try {
+    return await getProject(projectId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 const getProjectOrThrow = async (projectId) => {
@@ -197,11 +227,13 @@ export const clearProjectStorage = () => {
 
   storage.removeItem(RECENT_PROJECT_KEY);
   storage.removeItem(STORED_PROJECTS_KEY);
+  storage.removeItem(PROJECT_CONVERSATIONS_KEY);
   storage.removeItem(ACTIVE_CONVERSATIONS_KEY);
 
   if (typeof window !== "undefined") {
     window.sessionStorage?.removeItem(RECENT_PROJECT_KEY);
     window.sessionStorage?.removeItem(STORED_PROJECTS_KEY);
+    window.sessionStorage?.removeItem(PROJECT_CONVERSATIONS_KEY);
     window.sessionStorage?.removeItem(ACTIVE_CONVERSATIONS_KEY);
   }
 };
@@ -212,19 +244,8 @@ export const getProjectById = async (projectId) => {
     throw new Error("프로젝트 ID를 입력해주세요.");
   }
 
-  await wait();
-
-  const storedProject = readStoredProjects()[normalizedProjectId];
-  if (storedProject) {
-    return normalizeProject(clone(storedProject), "localStorage");
-  }
-
-  const mockProject = MOCK_PROJECTS[normalizedProjectId];
-  if (mockProject) {
-    return normalizeProject(clone(mockProject), "mock");
-  }
-
-  return null;
+  const project = await getProjectNotFoundAsNull(normalizedProjectId);
+  return project ? mergeProjectSession(project) : null;
 };
 
 export const createProject = async (
@@ -246,25 +267,23 @@ export const createProject = async (
     throw new Error(PROJECT_START_DATE_ERROR);
   }
 
-  await wait();
-
   const existingProject = await getProjectById(normalizedProjectId);
   if (existingProject) {
     throw new Error("이미 존재하는 프로젝트 ID입니다.");
   }
 
-  persistProject({
-    projectId: normalizedProjectId,
-    projectName: normalizedProjectName,
-    projectStartDate: String(start_date ?? "").trim(),
-    projectDescription: projectDescription.trim(),
-    conversations: [],
-    createdAt: formatDateTime(),
-    updatedAt: formatDateTime(),
+  const createdProject = await createProjectRecord({
+    project_id: normalizedProjectId,
+    project_name: normalizedProjectName,
+    start_date: String(start_date ?? "").trim() || null,
+    description: projectDescription.trim() || null,
   });
   setRecentProjectId(normalizedProjectId);
 
-  const savedProject = await getProjectById(normalizedProjectId);
+  const savedProject = mergeProjectSession({
+    ...createdProject,
+    conversations: [],
+  });
   if (!savedProject) {
     throw new Error("신규 프로젝트를 저장하지 못했습니다.");
   }
@@ -285,19 +304,23 @@ export const updateProject = async (
     throw new Error(PROJECT_START_DATE_ERROR);
   }
 
-  await wait();
-
   const currentProject = await getProjectOrThrow(projectId);
-  const updatedProject = persistProject({
-    ...currentProject,
-    projectName: normalizedProjectName,
-    projectStartDate: String(start_date ?? "").trim(),
-    projectDescription: projectDescription.trim(),
-    updatedAt: formatDateTime(),
+  const updatedProject = await updateProjectRecord(currentProject.projectId, {
+    project_name: normalizedProjectName,
+    start_date: String(start_date ?? "").trim() || null,
+    description: projectDescription.trim() || null,
   });
+  const normalizedProject = normalizeProject(
+    {
+      ...updatedProject,
+      conversations: currentProject.conversations,
+    },
+    "db",
+  );
+  persistProject(normalizedProject);
 
   setRecentProjectId(currentProject.projectId);
-  return updatedProject;
+  return normalizedProject;
 };
 
 export const persistProjectSession = (project) => {

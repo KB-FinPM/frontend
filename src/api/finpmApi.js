@@ -10,6 +10,8 @@ import {
 
 const encodePathSegment = (value) => encodeURIComponent(String(value ?? ""));
 
+export { ApiError };
+
 const buildApiUrl = (path) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE_URL}${normalizedPath}`;
@@ -45,11 +47,35 @@ const downloadBlob = (blob, fileName) => {
 
 export const healthCheck = () => requestJson("/health");
 
+export const listProjects = () => requestJson("/projects");
+
+export const getProject = (projectId) =>
+  requestJson(`/projects/${encodePathSegment(projectId)}`);
+
+export const createProjectRecord = (payload) =>
+  requestJson("/projects", {
+    method: "POST",
+    body: payload,
+  });
+
+export const updateProjectRecord = (projectId, payload) =>
+  requestJson(`/projects/${encodePathSegment(projectId)}`, {
+    method: "PATCH",
+    body: payload,
+  });
+
 export const sendChatMessage = (payload) =>
   requestJson("/chat/messages", {
     method: "POST",
     body: payload,
   });
+
+export const getChatActionStatus = ({ projectId, actionId }) =>
+  requestJson(
+    `/chat/actions/${encodePathSegment(actionId)}?project_id=${encodePathSegment(
+      projectId,
+    )}`,
+  );
 
 export const uploadDocument = ({ projectId, documentType, file }) => {
   const formData = new FormData();
