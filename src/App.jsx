@@ -80,6 +80,8 @@ const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
 ];
 const PROJECT_START_DATE_ERROR =
   "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
+const PROJECT_CREATE_RESPONSE_ERROR_MESSAGE =
+  "프로젝트 생성 응답에서 프로젝트 ID를 확인하지 못했습니다. 다시 시도해주세요.";
 const GENERATION_REQUEST_TYPES = Object.freeze({
   REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
   WBS_CREATE: "WBS_CREATE",
@@ -87,10 +89,16 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   SCREEN_DESIGN_CREATE: "SCREEN_DESIGN_CREATE",
   UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
-const GENERATION_PROGRESS_STEP_INTERVAL_MS = 650;
-const GENERATION_PROGRESS_MIN_DURATION_MS = 3200;
+const REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE =
+  "REQUIREMENT_SPEC_SOURCE_SELECTION";
+const TECHNICAL_NEGOTIATION_MEETING_LABEL = "기술협상 회의록";
+const TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL =
+  "기술협상 회의록 업로드";
+const GENERATION_PROGRESS_INITIAL_VALUE = 5;
+const GENERATION_PROGRESS_LABEL = "요구사항명세서 생성 중";
 const GENERATION_JOB_POLL_INTERVAL_MS = 3000;
 const GENERATION_JOB_MAX_POLLS = 800;
+const GENERATION_POLL_CANCELLED_ERROR = "GenerationPollingCancelled";
 const GENERATION_ACTION_STATUS = Object.freeze({
   EXECUTING: "EXECUTING",
   EXECUTED: "EXECUTED",
@@ -156,6 +164,16 @@ const getActionMessage = (action) =>
   action?.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION
     ? "취소"
     : action?.label || "생성하기";
+
+const getAssistantActionId = (assistantMessage) =>
+  assistantMessage?.metadata?.actionId ??
+  assistantMessage?.metadata?.result?.action_id ??
+  assistantMessage?.metadata?.result?.job_id ??
+  assistantMessage?.metadata?.pendingAction?.action_id ??
+  assistantMessage?.metadata?.rawResponse?.action_id ??
+  assistantMessage?.metadata?.rawResponse?.result?.action_id ??
+  assistantMessage?.metadata?.rawResponse?.result?.job_id ??
+  "";
 
 const isGenerationPendingAction = (pendingAction) =>
   String(pendingAction?.action_type ?? "").startsWith("GENERATE_") ||
@@ -401,16 +419,54 @@ const getMatchingDocuments = (documents, config) =>
     );
   });
 
+const getDocumentsByType = (documents, documentType) =>
+  documents.filter((document) => document.documentType === documentType);
+
+const uniqueDocumentsById = (documents = []) => {
+  const seen = new Set();
+  return documents.filter((document) => {
+    const documentId = document?.documentId;
+    if (!documentId || seen.has(documentId)) return false;
+    seen.add(documentId);
+    return true;
+  });
+};
+
+const getUploadResumeDocuments = (uploadRequest, uploadedDocument) => {
+  const beforeDocuments = Array.isArray(uploadRequest?.resumeDocumentsBefore)
+    ? uploadRequest.resumeDocumentsBefore
+    : [];
+  const afterDocuments = Array.isArray(uploadRequest?.resumeDocumentsAfter)
+    ? uploadRequest.resumeDocumentsAfter
+    : [];
+
+  if (beforeDocuments.length || afterDocuments.length) {
+    return uniqueDocumentsById([
+      ...beforeDocuments,
+      uploadedDocument,
+      ...afterDocuments,
+    ]);
+  }
+
+  return [uploadedDocument];
+};
+
 const getRequiredDocumentConfig = (requestType) => {
   if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
     return {
+      requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+      choiceMode: REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE,
       documentTypes: [DEFAULT_DOCUMENT_TYPE],
       keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
       message: "요구사항 정의서 생성을 위해 구축요건정의서를 업로드해주세요.",
       existingMessage:
-        "이미 업로드된 구축요건정의서가 있습니다. 이 문서를 기준으로 요구사항 명세서를 생성할까요?",
+        "이미 업로드된 구축요건정의서가 있습니다. 기술협상 회의록을 추가로 반영할 수도 있습니다.",
       label: "구축요건정의서 업로드",
       documentType: DEFAULT_DOCUMENT_TYPE,
+      optionalDocumentType: DOCUMENT_TYPES.MEETING_NOTES,
+      optionalDocumentLabel: TECHNICAL_NEGOTIATION_MEETING_LABEL,
+      optionalUploadLabel: TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL,
+      optionalPrompt: "기술협상 회의록을 추가로 반영하시겠습니까?",
     };
   }
 
@@ -516,13 +572,18 @@ const isValidProjectStartDate = (value = "") => {
   );
 };
 
-const buildProjectContext = (targetProject, documents = []) => {
+const buildProjectContext = (
+  targetProject,
+  documents = [],
+  { includeDocumentIdAliases = false } = {},
+) => {
   const selectedDocuments = documents.filter(Boolean);
+  const selectedDocumentIds = selectedDocuments
+    .map((document) => document.documentId)
+    .filter(Boolean);
 
-  return {
-    selected_document_ids: selectedDocuments
-      .map((document) => document.documentId)
-      .filter(Boolean),
+  const context = {
+    selected_document_ids: selectedDocumentIds,
     selected_documents: selectedDocuments.map(toDocumentContext),
     source_document_type: selectedDocuments[0]?.documentType,
     project_name: targetProject.projectName || "",
@@ -533,6 +594,13 @@ const buildProjectContext = (targetProject, documents = []) => {
       end_date: targetProject.projectEndDate || "",
     },
   };
+
+  if (includeDocumentIdAliases) {
+    context.source_document_ids = selectedDocumentIds;
+    context.document_ids = selectedDocumentIds;
+  }
+
+  return context;
 };
 
 const buildGenerationProgress = (progress, status = "RUNNING") => {
@@ -565,6 +633,130 @@ const buildGenerationProgress = (progress, status = "RUNNING") => {
   };
 };
 
+const getGenerationStepIndex = (progress) => {
+  const safeProgress = Math.max(0, Math.min(100, Math.round(progress)));
+  const activeIndex = GENERATION_PROGRESS_STEPS.findIndex(
+    (step) => safeProgress <= step.progress,
+  );
+  if (safeProgress >= 100) return GENERATION_PROGRESS_STEPS.length - 1;
+  return activeIndex === -1
+    ? GENERATION_PROGRESS_STEPS.length - 2
+    : Math.max(0, activeIndex);
+};
+
+const toFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const normalizedValue =
+    typeof value === "string" ? value.trim().replace(/\s*%$/, "") : value;
+  const numericValue = Number(normalizedValue);
+  return Number.isFinite(numericValue) ? numericValue : null;
+};
+
+const toProgressPercent = (value) => {
+  const numericValue = toFiniteNumber(value);
+  if (numericValue === null) return null;
+  return Math.max(0, Math.min(100, numericValue));
+};
+
+const formatProgressCount = (value) => {
+  const numericValue = toFiniteNumber(value);
+  if (numericValue === null) return "";
+  return Number.isInteger(numericValue)
+    ? String(numericValue)
+    : numericValue.toFixed(1);
+};
+
+const hasPercentNumberText = (value = "") =>
+  /\d+(?:\.\d+)?\s*%/.test(String(value));
+
+const getGenerationProgressPayload = (statusResponse) =>
+  statusResponse?.result?.generation_progress ??
+  statusResponse?.generation_progress ??
+  statusResponse?.pending_action?.result_json?.generation_progress ??
+  statusResponse?.pending_action?.result_json?.result?.generation_progress ??
+  null;
+
+const getGenerationProgressDisplayText = (generationProgress) => {
+  const progressText = String(
+    generationProgress?.progress_text ?? "",
+  ).trim();
+  if (progressText && !hasPercentNumberText(progressText)) {
+    return progressText;
+  }
+
+  const current = toFiniteNumber(generationProgress?.current);
+  const total = toFiniteNumber(generationProgress?.total);
+  if (current !== null && total !== null && total > 0) {
+    return `${formatProgressCount(current)}/${formatProgressCount(total)}`;
+  }
+
+  return "";
+};
+
+const getGenerationProgressValue = (
+  generationProgress,
+  fallbackProgress = GENERATION_PROGRESS_INITIAL_VALUE,
+) => {
+  const explicitProgress = toProgressPercent(generationProgress?.progress);
+  if (explicitProgress !== null) return explicitProgress;
+
+  const current = toFiniteNumber(generationProgress?.current);
+  const total = toFiniteNumber(generationProgress?.total);
+  if (current !== null && total !== null && total > 0) {
+    return Math.max(0, Math.min(100, (current / total) * 100));
+  }
+
+  return fallbackProgress;
+};
+
+const buildGenerationProgressFromStatus = (
+  statusResponse,
+  status = "RUNNING",
+  fallbackProgress,
+) => {
+  const generationProgress = getGenerationProgressPayload(statusResponse);
+  const progress = getGenerationProgressValue(
+    generationProgress,
+    fallbackProgress,
+  );
+
+  return {
+    ...buildGenerationProgress(progress, status),
+    displayText: getGenerationProgressDisplayText(generationProgress),
+    label: GENERATION_PROGRESS_LABEL,
+  };
+};
+
+const createGenerationPollingCancelledError = () => {
+  const error = new Error("진행 상태 확인이 중단되었습니다.");
+  error.name = GENERATION_POLL_CANCELLED_ERROR;
+  return error;
+};
+
+const isGenerationPollingCancelledError = (error) =>
+  error?.name === GENERATION_POLL_CANCELLED_ERROR;
+
+const getGenerationFriendlyErrorMessage = (error) => {
+  const errorText = String(error?.message ?? error ?? "").toLowerCase();
+  if (
+    errorText.includes("failed to fetch") ||
+    errorText.includes("network") ||
+    errorText.includes("load failed") ||
+    errorText.includes("err_connection")
+  ) {
+    return "서버와 연결이 불안정해 진행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (
+    errorText.includes("timeout") ||
+    errorText.includes("timed out") ||
+    errorText.includes("polling timed out")
+  ) {
+    return "요구사항명세서 생성 시간이 예상보다 길어지고 있습니다. 잠시 후 다시 확인해주세요.";
+  }
+
+  return "요구사항명세서 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
+};
+
 const buildGenerationFailureProgress = (failedIndex) => {
   const boundedFailedIndex = Math.max(
     0,
@@ -574,6 +766,8 @@ const buildGenerationFailureProgress = (failedIndex) => {
 
   return {
     progress: failedStep.progress,
+    displayText: "생성 실패",
+    label: GENERATION_PROGRESS_LABEL,
     steps: GENERATION_PROGRESS_STEPS.map((step, index) => {
       if (index < boundedFailedIndex) {
         return {
@@ -656,8 +850,9 @@ function App() {
   const [deletingFileId, setDeletingFileId] = useState("");
   const [downloadingFileId, setDownloadingFileId] = useState("");
   const scrollRef = useRef(null);
-  const progressTimerRef = useRef(null);
-  const progressStartedAtRef = useRef(0);
+  const pollingTimerRef = useRef(null);
+  const pollingRejectRef = useRef(null);
+  const pollingRunIdRef = useRef(0);
   const progressStepIndexRef = useRef(0);
 
   const conversations = project?.conversations ?? [];
@@ -681,61 +876,48 @@ function App() {
     setDownloadingFileId("");
   };
 
-  const clearGenerationProgressTimer = () => {
-    if (progressTimerRef.current) {
-      window.clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
+  const clearGenerationPolling = ({ rejectPending = false } = {}) => {
+    if (pollingTimerRef.current) {
+      window.clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
     }
+    if (rejectPending && pollingRejectRef.current) {
+      pollingRejectRef.current(createGenerationPollingCancelledError());
+    }
+    pollingRejectRef.current = null;
+    pollingRunIdRef.current += 1;
   };
 
   const resetGenerationState = () => {
-    clearGenerationProgressTimer();
+    clearGenerationPolling({ rejectPending: true });
     setGenerationProgress(null);
     setSelectedDocumentIds([]);
     setDocumentStatusMessage("");
   };
 
   const startGenerationProgress = () => {
-    clearGenerationProgressTimer();
-    let stepIndex = 0;
-    progressStartedAtRef.current = Date.now();
-    progressStepIndexRef.current = stepIndex;
-    setGenerationProgress(
-      buildGenerationProgress(GENERATION_PROGRESS_STEPS[stepIndex].progress),
-    );
-    progressTimerRef.current = window.setInterval(() => {
-      stepIndex = Math.min(stepIndex + 1, GENERATION_PROGRESS_STEPS.length - 1);
-      progressStepIndexRef.current = stepIndex;
-      setGenerationProgress(
-        buildGenerationProgress(GENERATION_PROGRESS_STEPS[stepIndex].progress),
-      );
-      if (stepIndex >= GENERATION_PROGRESS_STEPS.length - 2) {
-        clearGenerationProgressTimer();
-      }
-    }, GENERATION_PROGRESS_STEP_INTERVAL_MS);
+    clearGenerationPolling({ rejectPending: true });
+    progressStepIndexRef.current = 0;
+    setGenerationProgress({
+      ...buildGenerationProgress(GENERATION_PROGRESS_INITIAL_VALUE),
+      displayText: "",
+      label: GENERATION_PROGRESS_LABEL,
+    });
   };
 
-  const waitForGenerationProgressMinimum = async () => {
-    const elapsed = Date.now() - progressStartedAtRef.current;
-    const remaining = Math.max(
-      0,
-      GENERATION_PROGRESS_MIN_DURATION_MS - elapsed,
-    );
-    if (remaining > 0) {
-      await wait(remaining);
-    }
-  };
-
-  const completeGenerationProgress = async () => {
-    await waitForGenerationProgressMinimum();
-    clearGenerationProgressTimer();
-    const completedProgress = buildGenerationProgress(100, "COMPLETED");
+  const completeGenerationProgress = () => {
+    clearGenerationPolling();
+    const completedProgress = {
+      ...buildGenerationProgress(100, "COMPLETED"),
+      displayText: "완료",
+      label: "요구사항명세서 생성 완료",
+    };
     setGenerationProgress(completedProgress);
     return completedProgress;
   };
 
   const failGenerationProgress = () => {
-    clearGenerationProgressTimer();
+    clearGenerationPolling();
     const failedProgress = buildGenerationFailureProgress(
       progressStepIndexRef.current,
     );
@@ -743,21 +925,98 @@ function App() {
     return failedProgress;
   };
 
-  const pollGenerationActionStatus = async ({ projectId, actionId }) => {
-    for (let pollCount = 0; pollCount < GENERATION_JOB_MAX_POLLS; pollCount += 1) {
-      const statusResponse = await getChatActionStatus({ projectId, actionId });
-      if (
-        statusResponse.status === GENERATION_ACTION_STATUS.EXECUTED ||
-        statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
-        statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
-      ) {
-        return statusResponse;
-      }
-      await wait(GENERATION_JOB_POLL_INTERVAL_MS);
-    }
-
-    throw new Error("Generation job status polling timed out.");
+  const updateGenerationProgressFromStatus = (statusResponse) => {
+    setGenerationProgress((currentProgressState) => {
+      const nextProgress = buildGenerationProgressFromStatus(
+        statusResponse,
+        "RUNNING",
+        currentProgressState?.progress ?? GENERATION_PROGRESS_INITIAL_VALUE,
+      );
+      progressStepIndexRef.current = getGenerationStepIndex(
+        nextProgress.progress,
+      );
+      return nextProgress;
+    });
   };
+
+  const pollGenerationActionStatus = ({ projectId, actionId }) =>
+    new Promise((resolve, reject) => {
+      if (!projectId || !actionId) {
+        reject(new Error("진행 상태를 확인할 작업 ID를 찾지 못했습니다."));
+        return;
+      }
+
+      clearGenerationPolling({ rejectPending: true });
+
+      const runId = pollingRunIdRef.current;
+      let pollCount = 0;
+      let isPolling = false;
+
+      const stopPolling = () => {
+        if (pollingTimerRef.current) {
+          window.clearInterval(pollingTimerRef.current);
+          pollingTimerRef.current = null;
+        }
+        pollingRejectRef.current = null;
+      };
+
+      const resolvePolling = (statusResponse) => {
+        stopPolling();
+        resolve(statusResponse);
+      };
+
+      const rejectPolling = (error) => {
+        stopPolling();
+        reject(error);
+      };
+
+      const pollOnce = async () => {
+        if (isPolling || pollingRunIdRef.current !== runId) return;
+        isPolling = true;
+        pollCount += 1;
+
+        try {
+          const statusResponse = await getChatActionStatus({
+            projectId,
+            actionId,
+          });
+
+          if (pollingRunIdRef.current !== runId) return;
+
+          if (statusResponse?.status === GENERATION_ACTION_STATUS.EXECUTING) {
+            updateGenerationProgressFromStatus(statusResponse);
+          }
+
+          if (
+            statusResponse?.status === GENERATION_ACTION_STATUS.EXECUTED ||
+            statusResponse?.status === GENERATION_ACTION_STATUS.FAILED ||
+            statusResponse?.status === GENERATION_ACTION_STATUS.CANCELLED
+          ) {
+            resolvePolling(statusResponse);
+            return;
+          }
+
+          if (pollCount >= GENERATION_JOB_MAX_POLLS) {
+            rejectPolling(
+              new Error("Generation job status polling timed out."),
+            );
+          }
+        } catch (error) {
+          if (pollingRunIdRef.current === runId) {
+            rejectPolling(error);
+          }
+        } finally {
+          isPolling = false;
+        }
+      };
+
+      pollingRejectRef.current = rejectPolling;
+      pollingTimerRef.current = window.setInterval(
+        pollOnce,
+        GENERATION_JOB_POLL_INTERVAL_MS,
+      );
+      pollOnce();
+    });
 
   const clearMessageActions = async ({ conversationId, message }) => {
     if (!project || !conversationId || !message?.id) return null;
@@ -805,7 +1064,7 @@ function App() {
     setDocumentError("");
     setDocumentStatusMessage("");
     resetFileManagerState();
-    clearGenerationProgressTimer();
+    clearGenerationPolling({ rejectPending: true });
     setGenerationProgress(null);
     setRecentProjectId(loadedProject.projectId);
 
@@ -868,15 +1127,14 @@ function App() {
   }, [
     activeConversationId,
     activeMessages.length,
+    generationProgress?.displayText,
     generationProgress?.progress,
     isResponding,
   ]);
 
   useEffect(
     () => () => {
-      if (progressTimerRef.current) {
-        window.clearInterval(progressTimerRef.current);
-      }
+      clearGenerationPolling({ rejectPending: true });
     },
     [],
   );
@@ -973,6 +1231,9 @@ function App() {
         submittedProjectDescription,
         submittedProjectStartDate,
       );
+      if (!createdProject?.projectId) {
+        throw new Error(PROJECT_CREATE_RESPONSE_ERROR_MESSAGE);
+      }
       enterProject(createdProject);
     } catch (error) {
       setNewProjectError(
@@ -1187,13 +1448,18 @@ function App() {
     messageText,
     userMessage = null,
     documents = [],
+    requestType = "",
   }) => {
+    const includeDocumentIdAliases =
+      requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
     const assistantMessage = await sendProjectMessage({
       project_id: targetProject.projectId,
       conversation_id: targetConversationId || null,
       user_id: DEFAULT_USER_ID,
       message: messageText,
-      context: buildProjectContext(targetProject, documents),
+      context: buildProjectContext(targetProject, documents, {
+        includeDocumentIdAliases,
+      }),
       permission_scope: DEFAULT_PERMISSION_SCOPE,
     });
     const backendConversationId =
@@ -1243,14 +1509,24 @@ function App() {
     const matchingDocuments = getMatchingDocuments(
       documents,
       requiredDocumentConfig,
+    ).filter(
+      (document) =>
+        requestType !== GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC ||
+        document.documentType !== DOCUMENT_TYPES.MEETING_NOTES,
     );
     const matchedDocument = matchingDocuments[0] ?? null;
+    const optionalDocuments =
+      requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC
+        ? getDocumentsByType(documents, DOCUMENT_TYPES.MEETING_NOTES)
+        : [];
 
     if (matchedDocument) {
       return {
         status: "DOCUMENT_CHOICE_REQUIRED",
         documents: matchingDocuments,
+        optionalDocuments,
         defaultDocument: matchedDocument,
+        defaultOptionalDocument: optionalDocuments[0] ?? null,
         documentConfig: requiredDocumentConfig,
         requestType,
       };
@@ -1319,6 +1595,10 @@ function App() {
               documentType: preparedRequest.documentConfig.documentType,
               originalMessage: trimmedValue,
               resumeAfterUpload: true,
+              requestType: preparedRequest.requestType,
+              checkOptionalMeetingAfterUpload:
+                preparedRequest.requestType ===
+                GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
             },
             commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
@@ -1339,7 +1619,10 @@ function App() {
               originalMessage: trimmedValue,
               documentConfig: preparedRequest.documentConfig,
               documents: preparedRequest.documents,
+              optionalDocuments: preparedRequest.optionalDocuments ?? [],
               defaultDocumentId: preparedRequest.defaultDocument?.documentId,
+              defaultOptionalDocumentId:
+                preparedRequest.defaultOptionalDocument?.documentId,
             },
           },
         });
@@ -1352,6 +1635,7 @@ function App() {
         messageText: trimmedValue,
         userMessage,
         documents: preparedRequest.documents,
+        requestType: preparedRequest.requestType,
       });
       targetProject = backendResult.project;
       targetConversationId = backendResult.conversationId;
@@ -1402,7 +1686,11 @@ function App() {
     sendMessage(commandText);
   };
 
-  const handleAgentUploadFiles = async ({ message, files }) => {
+  const handleAgentUploadFiles = async ({
+    message,
+    files,
+    uploadRequest: uploadRequestOverride = null,
+  }) => {
     if (!project || isUploadingDocument) return;
 
     const uploadFiles = Array.from(files ?? []).filter(Boolean);
@@ -1419,6 +1707,7 @@ function App() {
       const documentChoiceConfig =
         documentChoiceRequest?.documentConfig ?? null;
       const uploadRequest =
+        uploadRequestOverride ??
         message.metadata?.uploadRequest ??
         (documentChoiceRequest
           ? {
@@ -1430,6 +1719,7 @@ function App() {
                 documentChoiceRequest.originalMessage ||
                 "업로드한 문서를 기준으로 진행해줘",
               resumeAfterUpload: true,
+              requestType: documentChoiceConfig?.requestType || "",
             }
           : {});
       const requestedDocumentType =
@@ -1452,6 +1742,7 @@ function App() {
           document.documentType ??
           requestedDocumentType,
         displayLabel:
+          uploadRequest.displayLabel ??
           document.display_label ??
           document.displayLabel ??
           getDocumentDisplayLabel(requestedDocumentType),
@@ -1462,19 +1753,61 @@ function App() {
           message.metadata?.conversationId || activeConversationId,
         message,
       });
+      const originalMessage =
+        uploadRequest.originalMessage || "업로드한 문서를 기준으로 진행해줘";
+      if (
+        uploadRequest.requestType ===
+          GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC &&
+        requestedDocumentType === DEFAULT_DOCUMENT_TYPE &&
+        uploadRequest.checkOptionalMeetingAfterUpload
+      ) {
+        const projectDocuments = await loadProjectDocuments(project.projectId);
+        const meetingDocuments = getDocumentsByType(
+          projectDocuments,
+          DOCUMENT_TYPES.MEETING_NOTES,
+        );
+
+        if (meetingDocuments.length) {
+          const documentConfig = getRequiredDocumentConfig(
+            GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+          );
+          await sendLocalRequiredInfoMessage({
+            targetProject: project,
+            targetConversationId:
+              message.metadata?.conversationId || activeConversationId,
+            content:
+              "구축요건정의서가 업로드되었습니다. 기술협상 회의록을 추가로 반영하시겠습니까?",
+            metadata: {
+              documentChoiceRequest: {
+                originalMessage,
+                documentConfig,
+                documents: [uploadedDocument],
+                optionalDocuments: meetingDocuments,
+                defaultDocumentId: uploadedDocument.documentId,
+                defaultOptionalDocumentId: meetingDocuments[0]?.documentId,
+              },
+            },
+          });
+          return;
+        }
+      }
+
       const shouldResumeAfterUpload =
         uploadRequest.resumeAfterUpload ||
         requestedDocumentType === DEFAULT_DOCUMENT_TYPE ||
         requestedDocumentType === DOCUMENT_TYPES.WBS;
       if (shouldResumeAfterUpload) {
-        const originalMessage =
-          uploadRequest.originalMessage || "업로드한 문서를 기준으로 진행해줘";
+        const resumeDocuments = getUploadResumeDocuments(
+          uploadRequest,
+          uploadedDocument,
+        );
         await sendBackendConversationMessage({
           targetProject: project,
           targetConversationId:
             message.metadata?.conversationId || activeConversationId,
           messageText: originalMessage,
-          documents: [uploadedDocument],
+          documents: resumeDocuments,
+          requestType: uploadRequest.requestType,
         });
         await saveCommandUsage(project.projectId, originalMessage);
         setLastCommandInfo({ commandText: originalMessage });
@@ -1545,6 +1878,10 @@ function App() {
               documentType: preparedRequest.documentConfig.documentType,
               originalMessage,
               resumeAfterUpload: true,
+              requestType: preparedRequest.requestType,
+              checkOptionalMeetingAfterUpload:
+                preparedRequest.requestType ===
+                GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
             },
             commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
@@ -1564,7 +1901,10 @@ function App() {
               originalMessage,
               documentConfig: preparedRequest.documentConfig,
               documents: preparedRequest.documents,
+              optionalDocuments: preparedRequest.optionalDocuments ?? [],
               defaultDocumentId: preparedRequest.defaultDocument?.documentId,
+              defaultOptionalDocumentId:
+                preparedRequest.defaultOptionalDocument?.documentId,
             },
           },
         });
@@ -1576,6 +1916,7 @@ function App() {
         targetConversationId,
         messageText: originalMessage,
         documents: preparedRequest.documents,
+        requestType: preparedRequest.requestType,
       });
       await saveCommandUsage(updatedProject.projectId, originalMessage);
       setLastCommandInfo({ commandText: originalMessage });
@@ -1590,7 +1931,12 @@ function App() {
     }
   };
 
-  const handleDocumentChoice = async ({ message, choice, documentId }) => {
+  const handleDocumentChoice = async ({
+    message,
+    choice,
+    documentId,
+    optionalDocumentId = "",
+  }) => {
     if (!project || isResponding || isUploadingDocument) return;
 
     const targetConversationId =
@@ -1599,8 +1945,14 @@ function App() {
     const documents = Array.isArray(choiceRequest.documents)
       ? choiceRequest.documents
       : [];
+    const optionalDocuments = Array.isArray(choiceRequest.optionalDocuments)
+      ? choiceRequest.optionalDocuments
+      : [];
     const originalMessage =
       choiceRequest.originalMessage || "선택한 문서를 기준으로 진행해줘";
+    const requestType = choiceRequest.documentConfig?.requestType || "";
+    const isRequirementSpecChoice =
+      requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
 
     if (!targetConversationId) {
       setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
@@ -1617,6 +1969,14 @@ function App() {
         (document) => document.documentId === choiceRequest.defaultDocumentId,
       ) ??
       documents[0];
+    const selectedOptionalDocument = optionalDocumentId
+      ? optionalDocuments.find(
+          (document) => document.documentId === optionalDocumentId,
+        )
+      : null;
+    const selectedDocuments = isRequirementSpecChoice
+      ? uniqueDocumentsById([selectedDocument, selectedOptionalDocument])
+      : [selectedDocument];
 
     if (!selectedDocument?.documentId) {
       setDocumentError("선택할 문서 정보를 확인하지 못했습니다.");
@@ -1637,11 +1997,14 @@ function App() {
         targetProject: project,
         targetConversationId,
         messageText: originalMessage,
-        documents: [selectedDocument],
+        documents: selectedDocuments,
+        requestType,
       });
       await saveCommandUsage(project.projectId, originalMessage);
       setLastCommandInfo({ commandText: originalMessage });
-      setSelectedDocumentIds([selectedDocument.documentId]);
+      setSelectedDocumentIds(
+        selectedDocuments.map((document) => document.documentId),
+      );
       setProject(backendResult.project);
     } catch (error) {
       setDocumentError(
@@ -1716,6 +2079,7 @@ function App() {
       const backendConversationId =
         assistantMessage.metadata?.conversationId ?? targetConversationId;
       if (isConfirmGenerationAction) {
+        const pollingActionId = getAssistantActionId(assistantMessage) || actionId;
         if (assistantMessage.metadata?.state === CHAT_STATES.FAILED) {
           const failedProgress = failGenerationProgress();
           assistantMessage = {
@@ -1724,6 +2088,7 @@ function App() {
               "요구사항 정의서 생성 중 문제가 발생했습니다.\n업로드한 구축요건 정의서를 확인한 뒤 다시 시도해주세요.",
             metadata: {
               ...assistantMessage.metadata,
+              actionId: pollingActionId,
               generationProgress: failedProgress,
               pendingAction: null,
               suggestedActions: [],
@@ -1732,16 +2097,22 @@ function App() {
         } else {
           const statusResponse = await pollGenerationActionStatus({
             projectId: project.projectId,
-            actionId,
+            actionId: pollingActionId,
           });
-          if (statusResponse.status === GENERATION_ACTION_STATUS.FAILED) {
+          if (
+            statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
+            statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
+          ) {
             const failedProgress = failGenerationProgress();
             assistantMessage = {
               ...assistantMessage,
-              content: statusResponse.message || assistantMessage.content,
+              content:
+                statusResponse.message ||
+                "요구사항명세서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
               metadata: {
                 ...assistantMessage.metadata,
                 state: CHAT_STATES.FAILED,
+                actionId: pollingActionId,
                 generationProgress: failedProgress,
                 result: statusResponse.result ?? {},
                 downloadFiles: [],
@@ -1751,13 +2122,14 @@ function App() {
               },
             };
           } else {
-            const completedProgress = await completeGenerationProgress();
+            const completedProgress = completeGenerationProgress();
             assistantMessage = {
               ...assistantMessage,
               content: statusResponse.message || assistantMessage.content,
               metadata: {
                 ...assistantMessage.metadata,
                 state: statusResponse.state ?? CHAT_STATES.COMPLETED,
+                actionId: pollingActionId,
                 generationProgress: completedProgress,
                 result: statusResponse.result ?? {},
                 downloadFiles: Array.isArray(statusResponse.download_files)
@@ -1785,20 +2157,24 @@ function App() {
         await loadUploadedFiles(project);
       }
     } catch (error) {
+      if (isConfirmGenerationAction && isGenerationPollingCancelledError(error)) {
+        return;
+      }
       const failedProgress = isConfirmGenerationAction
         ? failGenerationProgress()
         : null;
       if (isConfirmGenerationAction) {
         await wait(400);
       }
+      const fallbackContent = isConfirmGenerationAction
+        ? getGenerationFriendlyErrorMessage(error)
+        : error instanceof Error
+        ? error.message
+        : "대기 작업을 처리하지 못했습니다.";
       const fallbackMessage = {
         id: createChatId("assistant"),
         role: "assistant",
-        content: isConfirmGenerationAction
-          ? "요구사항 정의서 생성 중 문제가 발생했습니다. 업로드한 구축요건 정의서를 확인한 뒤 다시 시도해주세요."
-          : error instanceof Error
-          ? error.message
-          : "대기 작업을 처리하지 못했습니다.",
+        content: fallbackContent,
         createdAt: formatDateTime(),
         metadata: failedProgress
           ? {
@@ -1818,6 +2194,7 @@ function App() {
     } finally {
       setIsResponding(false);
       if (shouldResetGenerationState) {
+        clearGenerationPolling({ rejectPending: true });
         if (action.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION) {
           setGenerationProgress(null);
         }
@@ -3024,10 +3401,11 @@ function ChatMessage({
             isDisabled={isResponding || isUploadingDocument}
             isUploading={isUploadingDocument}
             onChoice={(choice) => onDocumentChoice({ message, ...choice })}
-            onUploadFiles={(files) =>
+            onUploadFiles={(files, uploadRequest) =>
               onAgentUploadFiles({
                 message,
                 files,
+                uploadRequest,
               })
             }
           />
@@ -3132,7 +3510,261 @@ function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
   );
 }
 
-function DocumentChoicePanel({
+function DocumentChoicePanel(props) {
+  const choiceMode = props.request?.documentConfig?.choiceMode;
+  if (choiceMode === REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE) {
+    return <RequirementSpecDocumentChoicePanel {...props} />;
+  }
+
+  return <DefaultDocumentChoicePanel {...props} />;
+}
+
+function RequirementSpecDocumentChoicePanel({
+  request,
+  isDisabled,
+  isUploading,
+  onChoice,
+  onUploadFiles,
+}) {
+  const fileInputRef = useRef(null);
+  const pendingUploadRequestRef = useRef(null);
+  const documents = Array.isArray(request?.documents) ? request.documents : [];
+  const meetingDocuments = Array.isArray(request?.optionalDocuments)
+    ? request.optionalDocuments
+    : [];
+  const defaultDocumentId =
+    request?.defaultDocumentId || documents[0]?.documentId || "";
+  const defaultMeetingDocumentId =
+    request?.defaultOptionalDocumentId ||
+    meetingDocuments[0]?.documentId ||
+    "";
+  const [selectedDocumentId, setSelectedDocumentId] =
+    useState(defaultDocumentId);
+  const [selectedMeetingDocumentId, setSelectedMeetingDocumentId] = useState(
+    defaultMeetingDocumentId,
+  );
+  const [includeMeetingNotes, setIncludeMeetingNotes] = useState(false);
+  const selectedDocument =
+    documents.find((document) => document.documentId === selectedDocumentId) ??
+    documents[0];
+  const selectedMeetingDocument =
+    meetingDocuments.find(
+      (document) => document.documentId === selectedMeetingDocumentId,
+    ) ?? meetingDocuments[0];
+  const baseDocumentSelectId = `${
+    defaultDocumentId || "requirement"
+  }-base-document`;
+  const optionalPrompt =
+    request?.documentConfig?.optionalPrompt ||
+    "기술협상 회의록을 추가로 반영하시겠습니까?";
+
+  useEffect(() => {
+    setSelectedDocumentId(defaultDocumentId);
+    setSelectedMeetingDocumentId(defaultMeetingDocumentId);
+    setIncludeMeetingNotes(false);
+  }, [defaultDocumentId, defaultMeetingDocumentId]);
+
+  if (!documents.length) return null;
+
+  const handlePanelAction = (event, callback) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isDisabled) return;
+    callback();
+  };
+
+  const openFileUpload = (uploadRequest) => {
+    pendingUploadRequestRef.current = uploadRequest;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event) => {
+    event.stopPropagation();
+    onUploadFiles?.(event.target.files, pendingUploadRequestRef.current);
+    pendingUploadRequestRef.current = null;
+    event.target.value = "";
+  };
+
+  const handleGenerate = () => {
+    onChoice({
+      choice: "use_existing",
+      documentId: selectedDocument?.documentId,
+      optionalDocumentId:
+        includeMeetingNotes && selectedMeetingDocument?.documentId
+          ? selectedMeetingDocument.documentId
+          : "",
+    });
+  };
+
+  const buildBaseUploadRequest = () => ({
+    label: "구축요건정의서 업로드",
+    acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+    documentType: DEFAULT_DOCUMENT_TYPE,
+    originalMessage: request?.originalMessage,
+    resumeAfterUpload: true,
+    requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+    resumeDocumentsAfter:
+      includeMeetingNotes && selectedMeetingDocument
+        ? [selectedMeetingDocument]
+        : [],
+  });
+
+  const buildMeetingUploadRequest = () => ({
+    label: TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL,
+    acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+    documentType: DOCUMENT_TYPES.MEETING_NOTES,
+    displayLabel: TECHNICAL_NEGOTIATION_MEETING_LABEL,
+    originalMessage: request?.originalMessage,
+    resumeAfterUpload: true,
+    requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+    resumeDocumentsBefore: selectedDocument ? [selectedDocument] : [],
+  });
+
+  return (
+    <div className="message-document-choice-panel requirement-document-choice-panel">
+      <div className="document-choice-section">
+        <span className="document-choice-section-title">
+          필수 선택: 구축요건정의서
+        </span>
+        <div className="document-choice-summary">
+          <strong>{selectedDocument?.fileName || "구축요건정의서"}</strong>
+          <span>{selectedDocument?.displayLabel || "구축요건정의서"}</span>
+        </div>
+        {documents.length > 1 && (
+          <div className="document-choice-picker">
+            <label htmlFor={baseDocumentSelectId}>
+              구축요건정의서 선택
+            </label>
+            <select
+              id={baseDocumentSelectId}
+              value={selectedDocumentId}
+              disabled={isDisabled}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => setSelectedDocumentId(event.target.value)}
+              aria-label="구축요건정의서 선택"
+            >
+              {documents.map((document) => (
+                <option key={document.documentId} value={document.documentId}>
+                  {document.fileName || document.documentId}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      <div className="document-choice-section">
+        <span className="document-choice-section-title">
+          선택 항목: {TECHNICAL_NEGOTIATION_MEETING_LABEL}
+        </span>
+        <strong className="document-choice-question">{optionalPrompt}</strong>
+        {meetingDocuments.length > 0 ? (
+          <>
+            <label className="document-choice-check">
+              <input
+                type="checkbox"
+                checked={includeMeetingNotes}
+                disabled={isDisabled}
+                onChange={(event) =>
+                  setIncludeMeetingNotes(event.target.checked)
+                }
+              />
+              <span>{TECHNICAL_NEGOTIATION_MEETING_LABEL} 반영</span>
+            </label>
+            {includeMeetingNotes && (
+              <div className="document-choice-picker">
+                <select
+                  value={selectedMeetingDocumentId}
+                  disabled={isDisabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    setSelectedMeetingDocumentId(event.target.value)
+                  }
+                  aria-label={`${TECHNICAL_NEGOTIATION_MEETING_LABEL} 선택`}
+                >
+                  {meetingDocuments.map((document) => (
+                    <option
+                      key={document.documentId}
+                      value={document.documentId}
+                    >
+                      {document.fileName || document.documentId}
+                    </option>
+                  ))}
+                </select>
+                <div className="document-choice-selected">
+                  선택된 {TECHNICAL_NEGOTIATION_MEETING_LABEL}:{" "}
+                  <strong>
+                    {selectedMeetingDocument?.fileName ||
+                      selectedMeetingDocumentId}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="document-choice-selected">
+            업로드된 {TECHNICAL_NEGOTIATION_MEETING_LABEL}이 없습니다.
+            구축요건정의서만으로 생성할 수 있습니다.
+          </div>
+        )}
+      </div>
+
+      <div className="document-choice-actions">
+        <button
+          className="message-upload-button"
+          type="button"
+          disabled={isDisabled || !selectedDocument?.documentId}
+          onClick={(event) => handlePanelAction(event, handleGenerate)}
+        >
+          {includeMeetingNotes
+            ? "선택 문서로 생성"
+            : "구축요건정의서만으로 생성"}
+        </button>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled || isUploading}
+          onClick={(event) =>
+            handlePanelAction(event, () =>
+              openFileUpload(buildMeetingUploadRequest()),
+            )
+          }
+        >
+          {isUploading ? (
+            <>
+              <LoaderCircle size={16} aria-hidden="true" />
+              업로드 중
+            </>
+          ) : (
+            TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL
+          )}
+        </button>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled || isUploading}
+          onClick={(event) =>
+            handlePanelAction(event, () => openFileUpload(buildBaseUploadRequest()))
+          }
+        >
+          새 구축요건정의서 업로드
+        </button>
+        <input
+          ref={fileInputRef}
+          className="message-file-input"
+          type="file"
+          accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
+          disabled={isDisabled || isUploading}
+          onClick={(event) => event.stopPropagation()}
+          onChange={handleFileChange}
+          aria-label="요구사항명세서 생성 문서 업로드"
+        />
+      </div>
+    </div>
+  );
+}
+
+function DefaultDocumentChoicePanel({
   request,
   isDisabled,
   isUploading,
@@ -3436,7 +4068,10 @@ function GenerationProgressMessage({ progressState }) {
               <p>완료되면 아래에 다운로드 버튼을 표시합니다.</p>
             </div>
           </div>
-          <ProgressBar progress={progressState.progress} />
+          <ProgressBar
+            progress={progressState.progress}
+            label={progressState.displayText}
+          />
           <AgentProgress steps={progressState.steps} />
         </div>
       </div>
