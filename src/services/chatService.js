@@ -4,6 +4,14 @@ import { formatDateTime } from "./dateTime.js";
 export const createChatId = (role) =>
   `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const getResponseActionId = (response) =>
+  response?.action_id ??
+  response?.result?.action_id ??
+  response?.result?.job_id ??
+  response?.pending_action?.action_id ??
+  response?.pending_action?.payload?.action_id ??
+  "";
+
 export const createAssistantMessageFromResponse = (response) => ({
   id: response.message_id ?? createChatId("assistant"),
   role: "assistant",
@@ -13,6 +21,7 @@ export const createAssistantMessageFromResponse = (response) => ({
     conversationId: response.conversation_id,
     messageId: response.message_id,
     state: response.state,
+    actionId: getResponseActionId(response),
     pendingAction: response.pending_action ?? null,
     suggestedActions: Array.isArray(response.suggested_actions)
       ? response.suggested_actions

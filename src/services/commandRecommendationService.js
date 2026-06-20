@@ -11,7 +11,7 @@ export const COMMAND_RECOMMENDATION_TYPES = {
 const DEFAULT_COMMANDS = [
   "요구사항 명세서 생성해줘",
   "구축요건정의서를 기준으로 요구사항 정리해줘",
-  "회의록에서 할 일 뽑아줘",
+  "회의록에서 액션아이템 뽑아줘",
   "WBS 기준으로 이번 주 일정 알려줘",
   "WBS 만들어줘",
   "요구사항 정의서가 뭐야?",
@@ -28,17 +28,17 @@ const RELATED_COMMANDS = [
     ],
   },
   {
-    keywords: ["구축요건", "rfp"],
+    keywords: ["구축요건", "RFP", "rfp"],
     commands: [
       "요구사항 명세서 생성해줘",
       "요구사항 정의서가 뭐야?",
-      "회의록에서 할 일 뽑아줘",
+      "회의록에서 액션아이템 뽑아줘",
     ],
   },
   {
     keywords: ["회의록", "할 일", "할일", "todo", "액션아이템"],
     commands: [
-      "회의록에서 할 일 뽑아줘",
+      "회의록에서 액션아이템 뽑아줘",
       "이번 주 해야 할 일 알려줘",
       "완료한 TODO 체크해줘",
     ],
@@ -48,7 +48,7 @@ const RELATED_COMMANDS = [
     commands: [
       "WBS 만들어줘",
       "WBS 기준으로 이번 주 일정 알려줘",
-      "회의록에서 할 일 뽑아줘",
+      "회의록에서 액션아이템 뽑아줘",
     ],
   },
 ];
@@ -89,7 +89,7 @@ export const normalizeCommandText = (commandText = "") =>
 const createRecommendation = (
   commandText,
   type = COMMAND_RECOMMENDATION_TYPES.DEFAULT,
-  reason = "기본 PM 업무 명령어",
+  reason = "기본 PM 업무 명령",
 ) => ({ commandText, type, reason });
 
 const toCompactText = (value = "") =>
@@ -136,7 +136,7 @@ const getHistoryRecommendations = (projectId) => {
       createRecommendation(
         usage.commandText,
         COMMAND_RECOMMENDATION_TYPES.HISTORY,
-        "최근 사용한 명령어",
+        "최근 사용한 명령",
       ),
     );
 };
@@ -160,7 +160,7 @@ export const getCommandRecommendations = async (
     createRecommendation(
       command,
       COMMAND_RECOMMENDATION_TYPES.RELATED,
-      "방금 요청과 관련된 명령어",
+      "방금 요청과 관련된 명령",
     ),
   );
   const historyRecommendations = getHistoryRecommendations(projectId);
