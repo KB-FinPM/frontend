@@ -9,4 +9,5 @@ dist/
 *.log
 __pycache__/
 .pytest_cache/
+.mock_s3/
 .venv/

@@ -39,6 +39,10 @@ import {
   saveCommandUsage,
 } from "./services/commandRecommendationService.js";
 import {
+  getGenerationProgressPayload,
+  normalizeGenerationProgressPayload,
+} from "./services/generationProgressService.js";
+import {
   deleteProjectFile,
   downloadArtifactFile,
   downloadProjectFile,
@@ -663,13 +667,6 @@ const formatProgressCount = (value) => {
 const hasPercentNumberText = (value = "") =>
   /\d+(?:\.\d+)?\s*%/.test(String(value));
 
-const getGenerationProgressPayload = (statusResponse) =>
-  statusResponse?.result?.generation_progress ??
-  statusResponse?.generation_progress ??
-  statusResponse?.pending_action?.result_json?.generation_progress ??
-  statusResponse?.pending_action?.result_json?.result?.generation_progress ??
-  null;
-
 const getGenerationProgressDisplayText = (generationProgress) => {
   const progressText = String(
     generationProgress?.progress_text ?? "",
@@ -709,15 +706,20 @@ const buildGenerationProgressFromStatus = (
   fallbackProgress,
 ) => {
   const generationProgress = getGenerationProgressPayload(statusResponse);
-  const progress = getGenerationProgressValue(
+  const normalizedProgress = normalizeGenerationProgressPayload(
     generationProgress,
     fallbackProgress,
   );
+  const progress = normalizedProgress.progress;
 
   return {
     ...buildGenerationProgress(progress, status),
-    displayText: getGenerationProgressDisplayText(generationProgress),
+    displayText:
+      normalizedProgress.displayText ||
+      getGenerationProgressDisplayText(generationProgress),
     label: GENERATION_PROGRESS_LABEL,
+    subProgressItems: normalizedProgress.subProgressItems,
+    largeDocumentHint: normalizedProgress.largeDocumentHint,
   };
 };
 
@@ -4061,11 +4063,64 @@ function GenerationProgressMessage({ progressState }) {
           <ProgressBar
             progress={progressState.progress}
             label={progressState.displayText}
+            title="전체 진행률"
           />
+          <GenerationSubProgress progressState={progressState} />
           <AgentProgress steps={progressState.steps} />
         </div>
       </div>
     </article>
+  );
+}
+
+function GenerationSubProgress({ progressState }) {
+  const subProgressItems = Array.isArray(progressState?.subProgressItems)
+    ? progressState.subProgressItems
+    : [];
+  if (!subProgressItems.length && !progressState?.largeDocumentHint) {
+    return null;
+  }
+
+  return (
+    <section className="sub-progress-panel" aria-label="세부 처리 진행률">
+      {progressState?.largeDocumentHint && (
+        <p className="sub-progress-hint">
+          문서가 큰 경우 시간이 걸릴 수 있습니다. 세부 처리 상태를 확인하고 있습니다.
+        </p>
+      )}
+      {subProgressItems.map((item, index) => (
+        <div
+          className="sub-progress-item"
+          key={`${item.type || item.label}-${index}`}
+        >
+          {item.hasProgressBar ? (
+            <ProgressBar
+              progress={item.progress}
+              label={item.message}
+              title={item.label}
+              variant="sub"
+            />
+          ) : (
+            <div className="sub-progress-loading" role="status">
+              <LoaderCircle
+                className="sub-progress-spinner"
+                size={14}
+                aria-hidden="true"
+              />
+              <span>{item.message}</span>
+            </div>
+          )}
+        </div>
+      ))}
+      <div className="sub-progress-live" role="status" aria-live="polite">
+        <LoaderCircle
+          className="sub-progress-spinner"
+          size={14}
+          aria-hidden="true"
+        />
+        <span>진행 상태 업데이트를 기다리는 중입니다.</span>
+      </div>
+    </section>
   );
 }
 

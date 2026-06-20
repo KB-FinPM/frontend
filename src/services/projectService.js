@@ -51,7 +51,16 @@ const readActiveConversationIds = () => readJsonMap(ACTIVE_CONVERSATIONS_KEY);
 const writeActiveConversationIds = (activeConversationIds) =>
   writeJsonMap(ACTIVE_CONVERSATIONS_KEY, activeConversationIds);
 
-export const normalizeProjectId = (projectId) => projectId.trim();
+export const normalizeProjectId = (projectId) =>
+  String(projectId ?? "").trim();
+
+const getProjectIdFromResponse = (project) =>
+  normalizeProjectId(project?.project_id ?? project?.projectId ?? "");
+
+const PROJECT_LOAD_ERROR_MESSAGE =
+  "프로젝트 정보를 불러오지 못했습니다. 다시 시도해주세요.";
+const PROJECT_CREATE_RESPONSE_ERROR_MESSAGE =
+  "프로젝트 생성 응답에서 프로젝트 ID를 확인하지 못했습니다. 다시 시도해주세요.";
 
 const PROJECT_START_DATE_ERROR =
   "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
@@ -138,7 +147,11 @@ const sortConversations = (conversations = []) =>
   );
 
 const normalizeProject = (project, source = "db") => {
-  const projectId = project.projectId ?? project.project_id;
+  const projectId = getProjectIdFromResponse(project);
+  if (!projectId) {
+    throw new Error(PROJECT_LOAD_ERROR_MESSAGE);
+  }
+
   const conversations = Array.isArray(project.conversations)
     ? project.conversations.map(normalizeConversation)
     : [];
@@ -201,7 +214,7 @@ const getProjectNotFoundAsNull = async (projectId) => {
 const getProjectOrThrow = async (projectId) => {
   const project = await getProjectById(projectId);
   if (!project) {
-    throw new Error("프로젝트 정보를 찾을 수 없습니다.");
+    throw new Error(PROJECT_LOAD_ERROR_MESSAGE);
   }
   return project;
 };
@@ -255,7 +268,7 @@ export const createProject = async (
   start_date = "",
 ) => {
   const normalizedProjectId = normalizeProjectId(projectId);
-  const normalizedProjectName = projectName.trim();
+  const normalizedProjectName = String(projectName ?? "").trim();
 
   if (!normalizedProjectId) {
     throw new Error("프로젝트 ID를 입력해주세요.");
@@ -276,18 +289,27 @@ export const createProject = async (
     project_id: normalizedProjectId,
     project_name: normalizedProjectName,
     start_date: String(start_date ?? "").trim() || null,
-    description: projectDescription.trim() || null,
+    description: String(projectDescription ?? "").trim() || null,
   });
-  setRecentProjectId(normalizedProjectId);
-
-  const savedProject = mergeProjectSession({
-    ...createdProject,
-    conversations: [],
-  });
-  if (!savedProject) {
-    throw new Error("신규 프로젝트를 저장하지 못했습니다.");
+  const createdProjectId = getProjectIdFromResponse(createdProject);
+  if (!createdProjectId) {
+    throw new Error(PROJECT_CREATE_RESPONSE_ERROR_MESSAGE);
   }
 
+  const persistedProject = await getProjectNotFoundAsNull(createdProjectId);
+  if (!persistedProject) {
+    throw new Error(PROJECT_LOAD_ERROR_MESSAGE);
+  }
+
+  const savedProject = mergeProjectSession({
+    ...persistedProject,
+    conversations: [],
+  });
+  if (!savedProject?.projectId) {
+    throw new Error(PROJECT_LOAD_ERROR_MESSAGE);
+  }
+
+  setRecentProjectId(savedProject.projectId);
   return savedProject;
 };
 
