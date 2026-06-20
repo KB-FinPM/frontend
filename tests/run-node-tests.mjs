@@ -241,6 +241,20 @@ test("createAssistantMessageFromResponse preserves stable download schema", () =
   ]);
 });
 
+test("createAssistantMessageFromResponse preserves correction notices", () => {
+  const message = createAssistantMessageFromResponse({
+    conversation_id: "CONV-001",
+    message_id: "MSG-001",
+    message: "어떤 산출물을 만들까요?",
+    state: "WAITING_REQUIRED_INFO",
+    corrections: [{ source: "화면 설개서", target: "화면설계서" }],
+  });
+
+  assert.deepEqual(message.metadata.corrections, [
+    { source: "화면 설개서", target: "화면설계서" },
+  ]);
+});
+
 test("downloadArtifactFile decodes Korean content-disposition filenames", async () => {
   installBrowserStubs();
   let requestedUrl = "";

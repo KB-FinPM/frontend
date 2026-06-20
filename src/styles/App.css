@@ -864,6 +864,22 @@ p {
   white-space: pre-wrap;
 }
 
+.message-corrections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #38536f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.message-corrections span {
+  border: 1px solid #cfe5e1;
+  border-radius: 6px;
+  background: #f5fbfa;
+  padding: 4px 7px;
+}
+
 .message-action-panel,
 .download-file-list,
 .message-start-date-form > div {

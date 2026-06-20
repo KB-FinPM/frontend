@@ -32,6 +32,11 @@ export const createAssistantMessageFromResponse = (response) => ({
     commandActions: Array.isArray(response.result?.command_actions)
       ? response.result.command_actions
       : [],
+    corrections: Array.isArray(response.corrections)
+      ? response.corrections
+      : Array.isArray(response.result?.corrections)
+        ? response.result.corrections
+        : [],
     downloadFiles: Array.isArray(response.download_files)
       ? response.download_files
       : Array.isArray(response.result?.download_files)

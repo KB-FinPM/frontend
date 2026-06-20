@@ -3333,6 +3333,7 @@ function ChatMessage({
   const scheduleTodoItems = isAssistant
     ? message.metadata?.result?.items ?? []
     : [];
+  const corrections = isAssistant ? message.metadata?.corrections ?? [] : [];
 
   const handleFileChange = (event) => {
     onAgentUploadFiles({
@@ -3355,6 +3356,7 @@ function ChatMessage({
         <div className="message-body">
           <p>{message.content}</p>
         </div>
+        <MessageCorrections corrections={corrections} />
         {uploadRequest && (
           <div className="message-action-panel">
             <button
@@ -3499,6 +3501,23 @@ function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
         </button>
       </div>
     </form>
+  );
+}
+
+function MessageCorrections({ corrections }) {
+  const items = Array.isArray(corrections)
+    ? corrections.filter((item) => item?.source && item?.target)
+    : [];
+  if (!items.length) return null;
+
+  return (
+    <div className="message-corrections" aria-label="입력 해석 보정">
+      {items.slice(0, 3).map((item) => (
+        <span key={`${item.source}-${item.target}`}>
+          ‘{item.source}’을 ‘{item.target}’으로 이해했어요.
+        </span>
+      ))}
+    </div>
   );
 }
 
