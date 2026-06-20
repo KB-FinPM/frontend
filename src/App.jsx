@@ -56,11 +56,8 @@ import { formatDateTime } from "./services/dateTime.js";
 import AgentProgress from "./components/AgentProgress.jsx";
 import ProgressBar from "./components/ProgressBar.jsx";
 
-const DEFAULT_USER_ID = "frontend-user";
-const DEFAULT_PERMISSION_SCOPE = ["project:read"];
 const DEFAULT_DOCUMENT_TYPE =
   DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION;
-const SCREEN_DESIGN_DOCUMENT_TYPE = "SCREEN_DESIGN";
 const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
   ".pdf",
   "application/pdf",
@@ -243,9 +240,6 @@ const getDocumentDisplayLabel = (documentType) => {
   }
   if (documentType === DEFAULT_DOCUMENT_TYPE) {
     return "업로드한 구축요건 정의서";
-  }
-  if (documentType === SCREEN_DESIGN_DOCUMENT_TYPE) {
-    return "업로드한 화면설계서";
   }
   return "업로드한 문서";
 };
@@ -516,7 +510,7 @@ const getRequiredDocumentConfig = (requestType) => {
 
   if (requestType === GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE) {
     return {
-      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC, SCREEN_DESIGN_DOCUMENT_TYPE],
+      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
       keywords: ["요구사항", "요구사항명세", "요구사항정의", "화면설계"],
       message:
         "단위테스트계획서를 생성하기 위해 기준 문서가 필요합니다. 요구사항 정의서나 화면설계서를 업로드하거나 선행 산출물을 먼저 생성해 주세요.",
@@ -1455,12 +1449,10 @@ function App() {
     const assistantMessage = await sendProjectMessage({
       project_id: targetProject.projectId,
       conversation_id: targetConversationId || null,
-      user_id: DEFAULT_USER_ID,
       message: messageText,
       context: buildProjectContext(targetProject, documents, {
         includeDocumentIdAliases,
       }),
-      permission_scope: DEFAULT_PERMISSION_SCOPE,
     });
     const backendConversationId =
       assistantMessage.metadata?.conversationId ?? targetConversationId;
@@ -2063,7 +2055,6 @@ function App() {
       let assistantMessage = await sendProjectMessage({
         project_id: project.projectId,
         conversation_id: targetConversationId,
-        user_id: DEFAULT_USER_ID,
         message: actionMessage,
         context: {},
         action: {
@@ -2074,7 +2065,6 @@ function App() {
             action_id: actionId,
           },
         },
-        permission_scope: DEFAULT_PERMISSION_SCOPE,
       });
       const backendConversationId =
         assistantMessage.metadata?.conversationId ?? targetConversationId;
