@@ -55,7 +55,9 @@ export const normalizeProjectId = (projectId) =>
   String(projectId ?? "").trim();
 
 const getProjectIdFromResponse = (project) =>
-  normalizeProjectId(project?.project_id ?? project?.projectId ?? "");
+  normalizeProjectId(
+    project?.project_id ?? project?.projectId ?? project?.id ?? "",
+  );
 
 const PROJECT_LOAD_ERROR_MESSAGE =
   "프로젝트 정보를 불러오지 못했습니다. 다시 시도해주세요.";
@@ -164,7 +166,8 @@ const normalizeProject = (project, source = "db") => {
 
   return {
     projectId,
-    projectName: project.projectName ?? project.project_name ?? projectId,
+    projectName:
+      project.projectName ?? project.project_name ?? project.name ?? projectId,
     projectStartDate:
       project.projectStartDate ?? project.startDate ?? project.start_date ?? "",
     projectEndDate:

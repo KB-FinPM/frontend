@@ -87,6 +87,27 @@ export const getGenerationProgressPayload = (statusResponse) =>
   statusResponse?.pending_action?.result_json?.result?.generation_progress ??
   null;
 
+export const GENERATION_STAGE_STEP_INDEX = Object.freeze({
+  REQUEST_CONFIRMED: 0,
+  INPUT_AGENT_DOCUMENT_ANALYSIS: 1,
+  CORE_AGENT_EXTRACTION: 2,
+  VALIDATION_AGENT_CHECK: 3,
+  OUTPUT_AGENT_EXPORT: 4,
+  DOCUMENT_GENERATION_COMPLETED: 5,
+});
+
+export const getGenerationStageStepIndex = (statusResponse) => {
+  const generationProgress = getGenerationProgressPayload(statusResponse);
+  const stage = String(generationProgress?.stage ?? "").trim();
+  if (
+    stage &&
+    Object.prototype.hasOwnProperty.call(GENERATION_STAGE_STEP_INDEX, stage)
+  ) {
+    return GENERATION_STAGE_STEP_INDEX[stage];
+  }
+  return null;
+};
+
 export const normalizeGenerationProgressPayload = (
   generationProgress,
   fallbackProgress = 5,

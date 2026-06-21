@@ -8,7 +8,7 @@ import {
   normalizeFetchError,
   parseResponseBody,
 } from "../src/api/client.js";
-import { downloadArtifactFile } from "../src/api/finpmApi.js";
+import { downloadArtifactFile, getProject } from "../src/api/finpmApi.js";
 import { createAssistantMessageFromResponse } from "../src/services/chatService.js";
 import {
   getDefaultCommands,
@@ -16,7 +16,10 @@ import {
   normalizeCommandText,
   saveCommandUsage,
 } from "../src/services/commandRecommendationService.js";
+import { createProject } from "../src/services/projectService.js";
 import {
+  getGenerationProgressPayload,
+  getGenerationStageStepIndex,
   normalizeGenerationProgressPayload,
   normalizeSubProgress,
 } from "../src/services/generationProgressService.js";
@@ -80,7 +83,111 @@ const installBrowserStubs = () => {
 
 
 test("API_BASE_URL falls back to the local backend", () => {
-  assert.equal(API_BASE_URL, "http://localhost:8000");
+  assert.equal(API_BASE_URL, "http://localhost:8000/api");
+});
+
+test("project API requests use the backend /api prefix", async () => {
+  let requestedUrl = "";
+  globalThis.fetch = async (url) => {
+    requestedUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name) =>
+          String(name).toLowerCase() === "content-type"
+            ? "application/json"
+            : "",
+      },
+      json: async () => ({
+        project_id: "PRJ 001",
+        project_name: "API prefix check",
+      }),
+      text: async () => "",
+    };
+  };
+
+  const project = await getProject("PRJ 001");
+
+  assert.equal(
+    requestedUrl,
+    "http://localhost:8000/api/projects/PRJ%20001",
+  );
+  assert.equal(project.project_id, "PRJ 001");
+});
+
+test("createProject follows the id from the create response", async () => {
+  installBrowserStubs();
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({
+      url,
+      method: options.method ?? "GET",
+      body: options.body,
+    });
+
+    if (requests.length === 1) {
+      return {
+        ok: false,
+        status: 404,
+        headers: {
+          get: (name) =>
+            String(name).toLowerCase() === "content-type"
+              ? "application/json"
+              : "",
+        },
+        json: async () => ({ message: "project not found" }),
+        text: async () => "",
+      };
+    }
+
+    if (requests.length === 2) {
+      return {
+        ok: true,
+        status: 201,
+        headers: {
+          get: (name) =>
+            String(name).toLowerCase() === "content-type"
+              ? "application/json"
+              : "",
+        },
+        json: async () => ({ id: "created-id", name: "pmpm" }),
+        text: async () => "",
+      };
+    }
+
+    if (requests.length === 3) {
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) =>
+            String(name).toLowerCase() === "content-type"
+              ? "application/json"
+              : "",
+        },
+        json: async () => ({ id: "created-id", name: "pmpm" }),
+        text: async () => "",
+      };
+    }
+
+    throw new Error(`unexpected request ${requests.length}: ${url}`);
+  };
+
+  const project = await createProject("draft-id", "pmpm");
+
+  assert.equal(project.projectId, "created-id");
+  assert.equal(project.projectName, "pmpm");
+  assert.deepEqual(
+    requests.map((request) => request.url),
+    [
+      "http://localhost:8000/api/projects/draft-id",
+      "http://localhost:8000/api/projects",
+      "http://localhost:8000/api/projects/created-id",
+    ],
+  );
+  assert.equal(requests[1].method, "POST");
+  assert.equal(JSON.parse(requests[1].body).project_id, "draft-id");
 });
 
 test("parseResponseBody returns JSON bodies", async () => {
@@ -88,14 +195,19 @@ test("parseResponseBody returns JSON bodies", async () => {
   assert.deepEqual(body, { success: true });
 });
 
-test("parseResponseBody returns null for invalid JSON", async () => {
-  const body = await parseResponseBody(
-    fakeResponse({
-      jsonBody: new SyntaxError("invalid JSON"),
-      contentType: "application/json",
-    }),
+test("parseResponseBody reports invalid JSON responses", async () => {
+  await assert.rejects(
+    () =>
+      parseResponseBody(
+        fakeResponse({
+          jsonBody: new SyntaxError("invalid JSON"),
+          contentType: "application/json",
+        }),
+      ),
+    (error) =>
+      error instanceof ApiError &&
+      error.message === FRIENDLY_API_ERROR_MESSAGES.PARSE,
   );
-  assert.equal(body, null);
 });
 
 test("parseResponseBody wraps non-empty text bodies", async () => {
@@ -137,6 +249,15 @@ test("normalizeFetchError maps network and timeout errors", () => {
   const timeout = normalizeFetchError(new Error("request timed out"));
   assert(timeout instanceof ApiError);
   assert.equal(timeout.message, FRIENDLY_API_ERROR_MESSAGES.TIMEOUT);
+});
+
+test("normalizeFetchError preserves non-network error messages", () => {
+  const error = normalizeFetchError(
+    new Error("Cannot read properties of undefined"),
+  );
+
+  assert(error instanceof ApiError);
+  assert.equal(error.message, "Cannot read properties of undefined");
 });
 
 test("frontend document constants match backend DocumentType values", () => {
@@ -278,7 +399,10 @@ test("downloadArtifactFile decodes Korean content-disposition filenames", async 
     fileName: "fallback.xlsx",
   });
 
-  assert(requestedUrl.endsWith("/projects/PRJ%20001/artifacts/ART%2FREQ%20001/download"));
+  assert.equal(
+    requestedUrl,
+    "http://localhost:8000/api/projects/PRJ%20001/artifacts/ART%2FREQ%20001/download",
+  );
   assert.equal(result.fileName, "요구사항.xlsx");
 });
 
@@ -390,6 +514,51 @@ test("generation progress uses legacy current total only without sub progress", 
   assert.equal(normalized.progress, 50);
   assert.equal(normalized.displayText, "8/16");
   assert.deepEqual(normalized.subProgressItems, []);
+});
+
+test("generation progress payload falls back to pending action result json", () => {
+  const progress = {
+    stage: "VALIDATION_AGENT_CHECK",
+    stage_label: "Validation Agent 검증 중",
+    progress: 70,
+  };
+
+  assert.deepEqual(
+    getGenerationProgressPayload({
+      result: { generation_progress: null },
+      pending_action: {
+        result_json: {
+          generation_progress: progress,
+        },
+      },
+    }),
+    progress,
+  );
+});
+
+test("generation stage step index prefers status stage over progress value", () => {
+  assert.equal(
+    getGenerationStageStepIndex({
+      result: {
+        generation_progress: {
+          stage: "VALIDATION_AGENT_CHECK",
+          progress: 70,
+        },
+      },
+    }),
+    3,
+  );
+  assert.equal(
+    getGenerationStageStepIndex({
+      result: {
+        generation_progress: {
+          stage: "OUTPUT_AGENT_EXPORT",
+          progress: 70,
+        },
+      },
+    }),
+    4,
+  );
 });
 
 test("generation progress does not treat sub current total as overall progress", () => {

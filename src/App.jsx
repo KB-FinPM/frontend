@@ -39,6 +39,7 @@ import {
   saveCommandUsage,
 } from "./services/commandRecommendationService.js";
 import {
+  getGenerationStageStepIndex,
   getGenerationProgressPayload,
   normalizeGenerationProgressPayload,
 } from "./services/generationProgressService.js";
@@ -106,6 +107,16 @@ const GENERATION_ACTION_STATUS = Object.freeze({
   FAILED: "FAILED",
   CANCELLED: "CANCELLED",
 });
+const SHOULD_LOG_UI_ERRORS = Boolean(import.meta.env?.DEV);
+
+const reportUiError = (scope, error, detail = {}) => {
+  if (!SHOULD_LOG_UI_ERRORS || typeof console === "undefined") return;
+  console.error(`[PM Agent UI ERROR] ${scope}`, {
+    ...detail,
+    error,
+  });
+};
+
 const GENERATION_PROGRESS_STEPS = [
   {
     name: "요청 확인 중",
@@ -449,6 +460,28 @@ const getUploadResumeDocuments = (uploadRequest, uploadedDocument) => {
   return [uploadedDocument];
 };
 
+const getWbsPrecheckDocuments = (precheck = {}) => {
+  const sourceDocuments =
+    precheck.source_documents ?? precheck.sourceDocuments ?? [];
+  if (Array.isArray(sourceDocuments) && sourceDocuments.length) {
+    return sourceDocuments
+      .map(toAttachmentDocument)
+      .filter((document) => document.documentId);
+  }
+
+  const documentType =
+    precheck.source_document_type ??
+    precheck.sourceDocumentType ??
+    DOCUMENT_TYPES.REQUIREMENT_SPEC;
+  const document = {
+    documentId: precheck.source_document_id ?? precheck.sourceDocumentId ?? "",
+    fileName: precheck.source_file_name ?? precheck.sourceFileName ?? "",
+    documentType,
+    displayLabel: getDocumentDisplayLabel(documentType),
+  };
+  return document.documentId ? [document] : [];
+};
+
 const getRequiredDocumentConfig = (requestType) => {
   if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
     return {
@@ -541,6 +574,9 @@ const getRequiredDocumentConfig = (requestType) => {
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
+const requiresProjectStartDate = (requestType) =>
+  requestType === GENERATION_REQUEST_TYPES.WBS_CREATE;
+
 const sanitizeProjectStartDateInput = (value = "") => {
   const text = String(value ?? "");
   const [year = "", month = "", day = ""] = text.split("-");
@@ -573,7 +609,7 @@ const isValidProjectStartDate = (value = "") => {
 const buildProjectContext = (
   targetProject,
   documents = [],
-  { includeDocumentIdAliases = false } = {},
+  { includeDocumentIdAliases = false, extraContext = {} } = {},
 ) => {
   const selectedDocuments = documents.filter(Boolean);
   const selectedDocumentIds = selectedDocuments
@@ -594,11 +630,41 @@ const buildProjectContext = (
   };
 
   if (includeDocumentIdAliases) {
+    const requirementDefinitionDocument = selectedDocuments.find(
+      (document) => document.documentType === DEFAULT_DOCUMENT_TYPE,
+    );
+    const technicalNegotiationMinutesDocument = selectedDocuments.find(
+      (document) => document.documentType === DOCUMENT_TYPES.MEETING_NOTES,
+    );
+
     context.source_document_ids = selectedDocumentIds;
     context.document_ids = selectedDocumentIds;
+    context.requirement_definition_document_id =
+      requirementDefinitionDocument?.documentId ?? null;
+    context.technical_negotiation_minutes_document_id =
+      technicalNegotiationMinutesDocument?.documentId ?? null;
   }
 
-  return context;
+  return {
+    ...context,
+    ...extraContext,
+  };
+};
+
+const sanitizeTodoText = (value = "") =>
+  String(value ?? "")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^>\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const truncateTodoText = (value = "", maxLength = 90) => {
+  const text = sanitizeTodoText(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
 };
 
 const buildGenerationProgress = (progress, status = "RUNNING") => {
@@ -640,6 +706,13 @@ const getGenerationStepIndex = (progress) => {
   return activeIndex === -1
     ? GENERATION_PROGRESS_STEPS.length - 2
     : Math.max(0, activeIndex);
+};
+
+const getGenerationStepIndexFromStatus = (statusResponse, fallbackProgress) => {
+  const stageIndex = getGenerationStageStepIndex(statusResponse);
+  if (stageIndex !== null) return stageIndex;
+
+  return getGenerationStepIndex(fallbackProgress);
 };
 
 const toFiniteNumber = (value) => {
@@ -714,6 +787,7 @@ const buildGenerationProgressFromStatus = (
 
   return {
     ...buildGenerationProgress(progress, status),
+    stage: normalizedProgress.stage,
     displayText:
       normalizedProgress.displayText ||
       getGenerationProgressDisplayText(generationProgress),
@@ -753,7 +827,7 @@ const getGenerationFriendlyErrorMessage = (error) => {
   return "요구사항명세서 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
 };
 
-const buildGenerationFailureProgress = (failedIndex) => {
+const buildGenerationFailureProgress = (failedIndex, sourceProgress = null) => {
   const boundedFailedIndex = Math.max(
     0,
     Math.min(failedIndex, GENERATION_PROGRESS_STEPS.length - 2),
@@ -761,9 +835,11 @@ const buildGenerationFailureProgress = (failedIndex) => {
   const failedStep = GENERATION_PROGRESS_STEPS[boundedFailedIndex];
 
   return {
-    progress: failedStep.progress,
-    displayText: "생성 실패",
-    label: GENERATION_PROGRESS_LABEL,
+    progress: sourceProgress?.progress ?? failedStep.progress,
+    displayText: sourceProgress?.displayText || "생성 실패",
+    label: sourceProgress?.label || GENERATION_PROGRESS_LABEL,
+    subProgressItems: sourceProgress?.subProgressItems ?? [],
+    largeDocumentHint: sourceProgress?.largeDocumentHint ?? false,
     steps: GENERATION_PROGRESS_STEPS.map((step, index) => {
       if (index < boundedFailedIndex) {
         return {
@@ -803,6 +879,47 @@ const getInitialActiveConversationId = (loadedProject) => {
   return hasSavedConversation
     ? savedConversationId
     : loadedProject.conversations[0]?.conversationId ?? "";
+};
+
+const PROJECT_ROUTE_PREFIX = "/projects/";
+
+const getProjectPath = (projectId) =>
+  `${PROJECT_ROUTE_PREFIX}${encodeURIComponent(String(projectId ?? ""))}`;
+
+const getProjectIdFromPathname = (pathname = "") => {
+  if (!pathname.startsWith(PROJECT_ROUTE_PREFIX)) return "";
+
+  const encodedProjectId = pathname
+    .slice(PROJECT_ROUTE_PREFIX.length)
+    .split("/")[0];
+  if (!encodedProjectId) return "";
+
+  try {
+    return decodeURIComponent(encodedProjectId);
+  } catch {
+    return encodedProjectId;
+  }
+};
+
+const getCurrentRouteProjectId = () => {
+  if (typeof window === "undefined") return "";
+  return getProjectIdFromPathname(window.location.pathname);
+};
+
+const syncProjectRoute = (projectId, { replace = false } = {}) => {
+  const normalizedProjectId = String(projectId ?? "").trim();
+  if (typeof window === "undefined" || !normalizedProjectId) return;
+
+  const nextPath = getProjectPath(normalizedProjectId);
+  if (window.location.pathname === nextPath) return;
+
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", nextPath);
+};
+
+const syncEntryRoute = () => {
+  if (typeof window === "undefined" || window.location.pathname === "/") return;
+  window.history.pushState({}, "", "/");
 };
 
 function App() {
@@ -912,10 +1029,26 @@ function App() {
     return completedProgress;
   };
 
-  const failGenerationProgress = () => {
+  const failGenerationProgress = (statusResponse = null) => {
     clearGenerationPolling();
+    const sourceProgress = statusResponse
+      ? buildGenerationProgressFromStatus(
+          statusResponse,
+          "FAILED",
+          generationProgress?.progress ?? GENERATION_PROGRESS_INITIAL_VALUE,
+        )
+      : null;
+    if (statusResponse) {
+      progressStepIndexRef.current = getGenerationStepIndexFromStatus(
+        statusResponse,
+        sourceProgress?.progress ?? GENERATION_PROGRESS_INITIAL_VALUE,
+      );
+    } else if (sourceProgress) {
+      progressStepIndexRef.current = getGenerationStepIndex(sourceProgress.progress);
+    }
     const failedProgress = buildGenerationFailureProgress(
       progressStepIndexRef.current,
+      sourceProgress,
     );
     setGenerationProgress(failedProgress);
     return failedProgress;
@@ -1029,6 +1162,7 @@ function App() {
           uploadRequest: null,
           documentChoiceRequest: null,
           startDateRequest: null,
+          wbsPrecheckRequest: null,
           pendingAction: null,
           suggestedActions: [],
           commandActions: [],
@@ -1039,41 +1173,45 @@ function App() {
     return result.project;
   };
 
-  const enterProject = useCallback((loadedProject) => {
-    const nextActiveConversationId = getInitialActiveConversationId(
-      loadedProject,
-    );
-
-    setProject(loadedProject);
-    setActiveConversationIdState(nextActiveConversationId);
-    setComposerValue("");
-    setEntryProjectId(loadedProject.projectId);
-    setPendingNewProjectId("");
-    setNewProjectName("");
-    setNewProjectStartDate("");
-    setNewProjectDescription("");
-    setNewProjectError("");
-    setConversationActionError("");
-    setDeletingConversationId("");
-    setLastCommandInfo(null);
-    setSelectedDocumentIds([]);
-    setDocumentError("");
-    setDocumentStatusMessage("");
-    resetFileManagerState();
-    clearGenerationPolling({ rejectPending: true });
-    setGenerationProgress(null);
-    setRecentProjectId(loadedProject.projectId);
-
-    if (nextActiveConversationId) {
-      setActiveConversationId(
-        loadedProject.projectId,
-        nextActiveConversationId,
+  const enterProject = useCallback(
+    (loadedProject, { replaceHistory = false } = {}) => {
+      const nextActiveConversationId = getInitialActiveConversationId(
+        loadedProject,
       );
-    }
-  }, []);
+
+      setProject(loadedProject);
+      setActiveConversationIdState(nextActiveConversationId);
+      setComposerValue("");
+      setEntryProjectId(loadedProject.projectId);
+      setPendingNewProjectId("");
+      setNewProjectName("");
+      setNewProjectStartDate("");
+      setNewProjectDescription("");
+      setNewProjectError("");
+      setConversationActionError("");
+      setDeletingConversationId("");
+      setLastCommandInfo(null);
+      setSelectedDocumentIds([]);
+      setDocumentError("");
+      setDocumentStatusMessage("");
+      resetFileManagerState();
+      clearGenerationPolling({ rejectPending: true });
+      setGenerationProgress(null);
+      setRecentProjectId(loadedProject.projectId);
+      syncProjectRoute(loadedProject.projectId, { replace: replaceHistory });
+
+      if (nextActiveConversationId) {
+        setActiveConversationId(
+          loadedProject.projectId,
+          nextActiveConversationId,
+        );
+      }
+    },
+    [],
+  );
 
   const lookupProject = useCallback(
-    async (projectId) => {
+    async (projectId, { replaceHistory = false } = {}) => {
       const nextProjectId = projectId.trim();
 
       if (!nextProjectId) {
@@ -1090,7 +1228,7 @@ function App() {
         const loadedProject = await getProjectById(nextProjectId);
 
         if (loadedProject) {
-          enterProject(loadedProject);
+          enterProject(loadedProject, { replaceHistory });
           return;
         }
 
@@ -1099,6 +1237,7 @@ function App() {
         setNewProjectStartDate("");
         setNewProjectDescription("");
       } catch (error) {
+        reportUiError("lookupProject", error, { projectId: nextProjectId });
         setEntryError(
           error instanceof Error
             ? error.message
@@ -1112,11 +1251,18 @@ function App() {
   );
 
   useEffect(() => {
+    const routeProjectId = getCurrentRouteProjectId();
+    if (routeProjectId) {
+      setEntryProjectId(routeProjectId);
+      lookupProject(routeProjectId, { replaceHistory: true });
+      return;
+    }
+
     const recentProjectId = getRecentProjectId();
     if (recentProjectId) {
       setEntryProjectId(recentProjectId);
     }
-  }, []);
+  }, [lookupProject]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1232,6 +1378,10 @@ function App() {
       }
       enterProject(createdProject);
     } catch (error) {
+      reportUiError("handleCreateProject", error, {
+        projectId: pendingNewProjectId,
+        projectName: submittedProjectName,
+      });
       setNewProjectError(
         error instanceof Error
           ? error.message
@@ -1445,6 +1595,7 @@ function App() {
     userMessage = null,
     documents = [],
     requestType = "",
+    extraContext = {},
   }) => {
     const includeDocumentIdAliases =
       requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
@@ -1454,6 +1605,7 @@ function App() {
       message: messageText,
       context: buildProjectContext(targetProject, documents, {
         includeDocumentIdAliases,
+        extraContext,
       }),
     });
     const backendConversationId =
@@ -1484,13 +1636,36 @@ function App() {
     };
   };
 
+  const ensureProjectStartDateBeforeGeneration = async ({
+    targetProject,
+    targetConversationId,
+    message,
+    originalMessage,
+    requestType,
+  }) => {
+    if (!requiresProjectStartDate(requestType)) return false;
+    if (getProjectStartDate(targetProject)) return false;
+
+    await sendLocalRequiredInfoMessage({
+      targetProject,
+      targetConversationId,
+      content: "WBS 생성을 위해 프로젝트 시작일을 입력해주세요.",
+      metadata: {
+        startDateRequest: {
+          label: "프로젝트 시작일",
+          originalMessage: originalMessage || "WBS 만들어줘",
+          resumeMessageId: message?.id,
+        },
+      },
+    });
+
+    return true;
+  };
+
   const prepareMessageRequest = async ({ messageText, targetProject }) => {
     const requestType = getGenerationRequestType(messageText);
 
-    if (
-      requestType === GENERATION_REQUEST_TYPES.WBS_CREATE &&
-      !getProjectStartDate(targetProject)
-    ) {
+    if (requiresProjectStartDate(requestType) && !getProjectStartDate(targetProject)) {
       return { status: "START_DATE_REQUIRED", requestType };
     }
 
@@ -1645,6 +1820,11 @@ function App() {
       setSelectedDocumentIds([]);
       setDocumentStatusMessage("");
     } catch (error) {
+      reportUiError("sendMessage", error, {
+        projectId: targetProject?.projectId,
+        conversationId: targetConversationId,
+        messageText: trimmedValue,
+      });
       const fallbackMessage = {
         id: createChatId("assistant"),
         role: "assistant",
@@ -1760,30 +1940,28 @@ function App() {
           projectDocuments,
           DOCUMENT_TYPES.MEETING_NOTES,
         );
+        const documentConfig = getRequiredDocumentConfig(
+          GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+        );
 
-        if (meetingDocuments.length) {
-          const documentConfig = getRequiredDocumentConfig(
-            GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-          );
-          await sendLocalRequiredInfoMessage({
-            targetProject: project,
-            targetConversationId:
-              message.metadata?.conversationId || activeConversationId,
-            content:
-              "구축요건정의서가 업로드되었습니다. 기술협상 회의록을 추가로 반영하시겠습니까?",
-            metadata: {
-              documentChoiceRequest: {
-                originalMessage,
-                documentConfig,
-                documents: [uploadedDocument],
-                optionalDocuments: meetingDocuments,
-                defaultDocumentId: uploadedDocument.documentId,
-                defaultOptionalDocumentId: meetingDocuments[0]?.documentId,
-              },
+        await sendLocalRequiredInfoMessage({
+          targetProject: project,
+          targetConversationId:
+            message.metadata?.conversationId || activeConversationId,
+          content:
+            "구축요건정의서가 업로드되었습니다. 기술협상 회의록을 추가로 반영하시겠습니까?",
+          metadata: {
+            documentChoiceRequest: {
+              originalMessage,
+              documentConfig,
+              documents: [uploadedDocument],
+              optionalDocuments: meetingDocuments,
+              defaultDocumentId: uploadedDocument.documentId,
+              defaultOptionalDocumentId: meetingDocuments[0]?.documentId,
             },
-          });
-          return;
-        }
+          },
+        });
+        return;
       }
 
       const shouldResumeAfterUpload =
@@ -1795,10 +1973,21 @@ function App() {
           uploadRequest,
           uploadedDocument,
         );
+        const targetConversationId =
+          message.metadata?.conversationId || activeConversationId;
+        const blockedByStartDate =
+          await ensureProjectStartDateBeforeGeneration({
+            targetProject: project,
+            targetConversationId,
+            message,
+            originalMessage,
+            requestType: uploadRequest.requestType,
+          });
+        if (blockedByStartDate) return;
+
         await sendBackendConversationMessage({
           targetProject: project,
-          targetConversationId:
-            message.metadata?.conversationId || activeConversationId,
+          targetConversationId,
           messageText: originalMessage,
           documents: resumeDocuments,
           requestType: uploadRequest.requestType,
@@ -1811,6 +2000,10 @@ function App() {
         );
       }
     } catch (error) {
+      reportUiError("handleAgentUploadFiles", error, {
+        projectId: project?.projectId,
+        documentType: uploadRequestOverride?.documentType,
+      });
       setDocumentError(
         error instanceof Error
           ? error.message
@@ -1915,6 +2108,10 @@ function App() {
       await saveCommandUsage(updatedProject.projectId, originalMessage);
       setLastCommandInfo({ commandText: originalMessage });
     } catch (error) {
+      reportUiError("handleStartDateSubmit", error, {
+        projectId: project?.projectId,
+        startDate: normalizedStartDate,
+      });
       setDocumentError(
         error instanceof Error
           ? error.message
@@ -1987,6 +2184,16 @@ function App() {
         conversationId: targetConversationId,
         message,
       });
+      const blockedByStartDate =
+        await ensureProjectStartDateBeforeGeneration({
+          targetProject: project,
+          targetConversationId,
+          message,
+          originalMessage,
+          requestType,
+        });
+      if (blockedByStartDate) return;
+
       const backendResult = await sendBackendConversationMessage({
         targetProject: project,
         targetConversationId,
@@ -2001,10 +2208,127 @@ function App() {
       );
       setProject(backendResult.project);
     } catch (error) {
+      reportUiError("handleDocumentChoice", error, {
+        projectId: project?.projectId,
+        documentId,
+        optionalDocumentId,
+      });
       setDocumentError(
         error instanceof Error
           ? error.message
           : "선택한 문서로 요청을 진행하지 못했습니다.",
+      );
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
+  const handleWbsPrecheckChoice = async ({ message, choice }) => {
+    if (!project || isResponding || isUploadingDocument) return;
+
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    const precheck = message.metadata?.wbsPrecheckRequest ?? {};
+    const originalMessage =
+      precheck.original_message ?? precheck.originalMessage ?? "WBS 만들어줘";
+    const sourceDocuments = getWbsPrecheckDocuments(precheck);
+
+    if (!targetConversationId) {
+      setConversationActionError("WBS 생성 확인을 진행할 대화 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setIsResponding(true);
+    setConversationActionError("");
+    setDocumentError("");
+    setDocumentStatusMessage("");
+
+    try {
+      await clearMessageActions({
+        conversationId: targetConversationId,
+        message,
+      });
+
+      if (choice === "cancel") {
+        setDocumentStatusMessage("WBS 생성을 취소했습니다.");
+        return;
+      }
+
+      if (choice === "choose_other") {
+        const documentConfig = getRequiredDocumentConfig(
+          GENERATION_REQUEST_TYPES.WBS_CREATE,
+        );
+        const documents = await loadProjectDocuments(project.projectId);
+        const matchingDocuments = getMatchingDocuments(
+          documents,
+          documentConfig,
+        );
+
+        if (matchingDocuments.length) {
+          await sendLocalRequiredInfoMessage({
+            targetProject: project,
+            targetConversationId,
+            content: "다른 요구사항 명세서를 선택해주세요.",
+            metadata: {
+              documentChoiceRequest: {
+                originalMessage,
+                documentConfig,
+                documents: matchingDocuments,
+                optionalDocuments: [],
+                defaultDocumentId: matchingDocuments[0]?.documentId,
+              },
+            },
+          });
+          return;
+        }
+
+        await sendLocalRequiredInfoMessage({
+          targetProject: project,
+          targetConversationId,
+          content: documentConfig.message,
+          metadata: {
+            uploadRequest: {
+              label: documentConfig.label,
+              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
+              documentType: documentConfig.documentType,
+              originalMessage,
+              resumeAfterUpload: true,
+              requestType: GENERATION_REQUEST_TYPES.WBS_CREATE,
+            },
+            commandActions: documentConfig.commandActions ?? [],
+          },
+        });
+        return;
+      }
+
+      if (!sourceDocuments.length) {
+        setDocumentError("WBS 기준 문서 정보를 확인하지 못했습니다.");
+        return;
+      }
+
+      const backendResult = await sendBackendConversationMessage({
+        targetProject: project,
+        targetConversationId,
+        messageText: originalMessage,
+        documents: sourceDocuments,
+        requestType: GENERATION_REQUEST_TYPES.WBS_CREATE,
+        extraContext: {
+          requirements_confirmed: true,
+          wbs_requirements_confirmed: true,
+        },
+      });
+      await saveCommandUsage(project.projectId, originalMessage);
+      setLastCommandInfo({ commandText: originalMessage });
+      setProject(backendResult.project);
+    } catch (error) {
+      reportUiError("handleWbsPrecheckChoice", error, {
+        projectId: project?.projectId,
+        choice,
+      });
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "WBS 생성 확인을 처리하지 못했습니다.",
       );
     } finally {
       setIsResponding(false);
@@ -2095,7 +2419,7 @@ function App() {
             statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
             statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
           ) {
-            const failedProgress = failGenerationProgress();
+            const failedProgress = failGenerationProgress(statusResponse);
             assistantMessage = {
               ...assistantMessage,
               content:
@@ -2152,6 +2476,11 @@ function App() {
       if (isConfirmGenerationAction && isGenerationPollingCancelledError(error)) {
         return;
       }
+      reportUiError("handleSuggestedActionClick", error, {
+        projectId: project?.projectId,
+        actionId,
+        isConfirmGenerationAction,
+      });
       const failedProgress = isConfirmGenerationAction
         ? failGenerationProgress()
         : null;
@@ -2232,6 +2561,10 @@ function App() {
         fileName: file.file_name || "요구사항명세서.xlsx",
       });
     } catch (error) {
+      reportUiError("handleDownloadGeneratedFile", error, {
+        projectId: project?.projectId,
+        artifactId: file.artifact_id,
+      });
       setDocumentError(
         error instanceof Error
           ? error.message
@@ -2262,6 +2595,10 @@ function App() {
       setEditingConversationId("");
       setEditingConversationTitle("");
     } catch (error) {
+      reportUiError("handleConversationTitleSubmit", error, {
+        projectId: project?.projectId,
+        conversationId: editingConversationId,
+      });
       setConversationActionError(
         error instanceof Error
           ? error.message
@@ -2288,6 +2625,10 @@ function App() {
         setEditingConversationTitle("");
       }
     } catch (error) {
+      reportUiError("handleDeleteConversation", error, {
+        projectId: project?.projectId,
+        conversationId,
+      });
       setConversationActionError(
         error instanceof Error ? error.message : "대화를 삭제하지 못했습니다.",
       );
@@ -2296,6 +2637,7 @@ function App() {
 
   const handleChangeProject = () => {
     clearRecentProjectId();
+    syncEntryRoute();
     setProject(null);
     setActiveConversationIdState("");
     setComposerValue("");
@@ -2367,6 +2709,9 @@ function App() {
       setProject(updatedProject);
       setIsSettingsOpen(false);
     } catch (error) {
+      reportUiError("handleSettingsSubmit", error, {
+        projectId: project?.projectId,
+      });
       setSettingsError(
         error instanceof Error
           ? error.message
@@ -2474,6 +2819,7 @@ function App() {
                   onStartDateSubmit={handleStartDateSubmit}
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
+                  onWbsPrecheckChoice={handleWbsPrecheckChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
                   onCommandActionClick={handleCommandActionClick}
                 />
@@ -3294,6 +3640,7 @@ function ChatMessage({
   onStartDateSubmit,
   onDownloadFile,
   onDocumentChoice,
+  onWbsPrecheckChoice,
   onSuggestedActionClick,
   onCommandActionClick,
 }) {
@@ -3326,6 +3673,10 @@ function ChatMessage({
   const startDateRequest =
     isAssistant && !actionsResolved
       ? message.metadata?.startDateRequest
+      : null;
+  const wbsPrecheckRequest =
+    isAssistant && !actionsResolved
+      ? message.metadata?.wbsPrecheckRequest
       : null;
   const generationProgressResult = isAssistant
     ? message.metadata?.generationProgress
@@ -3412,6 +3763,15 @@ function ChatMessage({
             onSubmit={onStartDateSubmit}
           />
         )}
+        {wbsPrecheckRequest && (
+          <WbsPrecheckPanel
+            request={wbsPrecheckRequest}
+            isDisabled={isResponding || isUploadingDocument}
+            onChoice={(choice) =>
+              onWbsPrecheckChoice?.({ message, choice })
+            }
+          />
+        )}
         {generationProgressResult && (
           <GenerationProgressResult
             progressState={generationProgressResult}
@@ -3462,6 +3822,77 @@ function ChatMessage({
         )}
       </div>
     </article>
+  );
+}
+
+function WbsPrecheckPanel({ request, isDisabled, onChoice }) {
+  const documents = getWbsPrecheckDocuments(request);
+  const sourceDocument = documents[0] ?? {};
+  const sourceFileName =
+    request?.source_file_name ??
+    request?.sourceFileName ??
+    sourceDocument.fileName ??
+    "요구사항명세서";
+  const sourceLabel =
+    sourceDocument.displayLabel ||
+    getDocumentDisplayLabel(
+      request?.source_document_type ?? request?.sourceDocumentType,
+    );
+  const projectStartDate =
+    request?.project_start_date ?? request?.projectStartDate ?? "미입력";
+
+  const handlePanelAction = (event, choice) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isDisabled) return;
+    onChoice?.(choice);
+  };
+
+  return (
+    <div className="message-document-choice-panel wbs-precheck-panel">
+      <div className="document-choice-section">
+        <span className="document-choice-section-title">
+          WBS 생성 전 요건
+        </span>
+        <div className="document-choice-summary">
+          <strong>{sourceFileName}</strong>
+          <span>{sourceLabel}</span>
+        </div>
+        <div className="document-choice-selected">
+          프로젝트 시작일: <strong>{projectStartDate}</strong>
+        </div>
+        <strong className="document-choice-question">
+          이 문서가 WBS 생성 기준으로 확정된 요구사항인가요?
+        </strong>
+      </div>
+
+      <div className="document-choice-actions">
+        <button
+          className="message-upload-button"
+          type="button"
+          disabled={isDisabled}
+          onClick={(event) => handlePanelAction(event, "confirm")}
+        >
+          확정됨, WBS 생성
+        </button>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled}
+          onClick={(event) => handlePanelAction(event, "choose_other")}
+        >
+          다른 문서 선택
+        </button>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled}
+          onClick={(event) => handlePanelAction(event, "cancel")}
+        >
+          취소
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -3614,6 +4045,7 @@ function RequirementSpecDocumentChoicePanel({
     originalMessage: request?.originalMessage,
     resumeAfterUpload: true,
     requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+    checkOptionalMeetingAfterUpload: true,
     resumeDocumentsAfter:
       includeMeetingNotes && selectedMeetingDocument
         ? [selectedMeetingDocument]
@@ -3998,15 +4430,22 @@ function ScheduleTodoResult({ items }) {
           </tr>
         </thead>
         <tbody>
-          {todos.map((todo, index) => (
-            <tr key={todo.todo_id ?? `${todo.title}-${index}`}>
-              <td>{todo.title || "제목 없음"}</td>
-              <td>{todo.assignee || "담당자 미정"}</td>
-              <td>{todo.due_date || "기한 미정"}</td>
-              <td>{todo.related_document || "회의록 기반 신규 TODO"}</td>
-              <td>{todo.status || "확인 필요"}</td>
-            </tr>
-          ))}
+          {todos.map((todo, index) => {
+            const title = sanitizeTodoText(todo.title || "제목 없음");
+            const evidence = sanitizeTodoText(todo.evidence || title);
+            return (
+              <tr key={todo.todo_id ?? `${todo.title}-${index}`}>
+                <td title={evidence}>{truncateTodoText(title)}</td>
+                <td>{sanitizeTodoText(todo.assignee) || "담당자 미정"}</td>
+                <td>{sanitizeTodoText(todo.due_date) || "기한 미정"}</td>
+                <td>
+                  {sanitizeTodoText(todo.related_document) ||
+                    "회의록 기반 신규 TODO"}
+                </td>
+                <td>{sanitizeTodoText(todo.status) || "확인 필요"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

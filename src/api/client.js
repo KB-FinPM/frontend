@@ -1,7 +1,13 @@
 const viteEnv = import.meta.env ?? {};
 
-export const API_BASE_URL =
-  viteEnv.VITE_API_BASE_URL || "http://localhost:8000";
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api";
+
+const normalizeBaseUrl = (baseUrl) =>
+  String(baseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+
+const SHOULD_LOG_API_ERRORS = Boolean(viteEnv.DEV);
+
+export const API_BASE_URL = normalizeBaseUrl(viteEnv.VITE_API_BASE_URL);
 
 export class ApiError extends Error {
   constructor(message, { status, data } = {}) {
@@ -18,10 +24,12 @@ export const FRIENDLY_API_ERROR_MESSAGES = Object.freeze({
   TIMEOUT: "요청 처리 시간이 길어지고 있습니다. 잠시 후 다시 시도해주세요.",
   SERVER: "서버 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
   AUTH: "요청 권한이 없습니다. 권한을 확인한 뒤 다시 시도해주세요.",
+  PARSE:
+    "서버 응답을 JSON으로 해석하지 못했습니다. 콘솔의 응답 내용을 확인해주세요.",
   DEFAULT: "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
 });
 
-const buildUrl = (path) => {
+export const buildUrl = (path) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE_URL}${normalizedPath}`;
 };
@@ -32,8 +40,14 @@ export const parseResponseBody = async (response) => {
   if (contentType.includes("application/json")) {
     try {
       return await response.json();
-    } catch {
-      return null;
+    } catch (error) {
+      throw new ApiError(FRIENDLY_API_ERROR_MESSAGES.PARSE, {
+        status: response.status,
+        data: {
+          contentType,
+          originalMessage: String(error?.message ?? error ?? ""),
+        },
+      });
     }
   }
 
@@ -108,26 +122,61 @@ export const normalizeFetchError = (error) => {
     });
   }
 
-  return new ApiError(FRIENDLY_API_ERROR_MESSAGES.NETWORK, {
-    data: { originalMessage: String(error?.message ?? error ?? "") },
+  return new ApiError(
+    error instanceof Error && error.message
+      ? error.message
+      : FRIENDLY_API_ERROR_MESSAGES.DEFAULT,
+    {
+      data: { originalMessage: String(error?.message ?? error ?? "") },
+    },
+  );
+};
+
+const safeRequestOptionsForLog = (options = {}) => {
+  const { signal, ...safeOptions } = options;
+  return safeOptions;
+};
+
+const logApiClientError = ({ url, path, options, response, data, error }) => {
+  if (!SHOULD_LOG_API_ERRORS || typeof console === "undefined") return;
+
+  console.error("[API CLIENT ERROR]", {
+    url,
+    path,
+    options: safeRequestOptionsForLog(options),
+    status: response?.status,
+    statusText: response?.statusText,
+    data,
+    error,
   });
 };
 
 const request = async (path, options = {}) => {
+  const url = buildUrl(path);
   let response;
   try {
-    response = await fetch(buildUrl(path), options);
+    response = await fetch(url, options);
   } catch (error) {
-    throw normalizeFetchError(error);
+    const normalizedError = normalizeFetchError(error);
+    logApiClientError({ url, path, options, error: normalizedError });
+    throw normalizedError;
   }
 
-  const data = await parseResponseBody(response);
+  let data;
+  try {
+    data = await parseResponseBody(response);
+  } catch (error) {
+    logApiClientError({ url, path, options, response, error });
+    throw error;
+  }
 
   if (!response.ok || data?.success === false) {
-    throw new ApiError(getFriendlyHttpErrorMessage(data, response), {
+    const error = new ApiError(getFriendlyHttpErrorMessage(data, response), {
       status: response.status,
       data,
     });
+    logApiClientError({ url, path, options, response, data, error });
+    throw error;
   }
 
   return data;

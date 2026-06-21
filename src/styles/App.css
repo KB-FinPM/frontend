@@ -825,7 +825,15 @@ p {
   max-width: min(760px, 100%);
 }
 
+.chat-message.assistant .message-stack,
+.chat-message:not(.user) .message-stack {
+  width: min(760px, 100%);
+  max-width: min(760px, 100%);
+}
+
 .chat-message.user .message-stack {
+  width: fit-content;
+  max-width: min(760px, 100%);
   justify-items: end;
 }
 
@@ -881,17 +889,25 @@ p {
 }
 
 .message-action-panel,
+.suggested-action-list,
+.document-choice-actions,
 .download-file-list,
 .message-start-date-form > div {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  justify-content: flex-start;
   gap: 8px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .message-start-date-form {
   display: grid;
   gap: 8px;
-  width: min(420px, 100%);
+  width: min(760px, 100%);
   padding: 12px;
   border: 1px solid #d7e3f4;
   border-radius: 8px;
@@ -929,13 +945,18 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+  max-width: 100%;
   min-height: 36px;
   border: 0;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
+  overflow: hidden;
   text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-upload-button,
@@ -971,10 +992,16 @@ p {
   animation: spin 900ms linear infinite;
 }
 
+.suggested-action-button svg,
+.message-upload-button svg,
+.download-file-link svg {
+  flex: 0 0 auto;
+}
+
 .message-document-choice-panel {
   display: grid;
   gap: 10px;
-  width: min(520px, 100%);
+  width: min(760px, 100%);
   padding: 12px;
   border: 1px solid #d7e3f4;
   border-radius: 8px;
@@ -1034,12 +1061,6 @@ p {
   height: 16px;
   margin: 0;
   accent-color: #1f6ed4;
-}
-
-.document-choice-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .document-choice-picker,
@@ -1119,19 +1140,22 @@ p {
   border-bottom: 0;
 }
 
-.suggested-action-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .suggested-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  max-width: 100%;
   min-height: 34px;
   padding: 0 12px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .suggested-action-button.primary {
@@ -1997,6 +2021,18 @@ p {
 
   .message-body {
     width: 100%;
+  }
+
+  .chat-message.assistant .message-stack,
+  .chat-message:not(.user) .message-stack {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .suggested-action-button,
+  .message-upload-button,
+  .download-file-link {
+    max-width: 100%;
   }
 
   .settings-actions {

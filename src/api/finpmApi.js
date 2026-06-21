@@ -1,6 +1,6 @@
 import {
-  API_BASE_URL,
   ApiError,
+  buildUrl,
   getFriendlyHttpErrorMessage,
   normalizeFetchError,
   parseResponseBody,
@@ -11,11 +11,6 @@ import {
 const encodePathSegment = (value) => encodeURIComponent(String(value ?? ""));
 
 export { ApiError };
-
-const buildApiUrl = (path) => {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${API_BASE_URL}${normalizedPath}`;
-};
 
 const fileNameFromContentDisposition = (header, fallbackFileName) => {
   if (!header) return fallbackFileName;
@@ -125,7 +120,7 @@ export const downloadArtifactFile = async ({
   let response;
   try {
     response = await fetch(
-      buildApiUrl(
+      buildUrl(
         `/projects/${encodePathSegment(projectId)}/artifacts/${encodePathSegment(
           artifactId,
         )}/download`,
@@ -178,7 +173,7 @@ export const downloadProjectFile = async ({
   let response;
   try {
     response = await fetch(
-      buildApiUrl(
+      buildUrl(
         `/projects/${encodePathSegment(projectId)}/files/${encodePathSegment(
           fileId,
         )}/download`,
