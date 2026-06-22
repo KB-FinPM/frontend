@@ -91,11 +91,17 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   SCREEN_DESIGN_CREATE: "SCREEN_DESIGN_CREATE",
   UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
-const REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE =
-  "REQUIREMENT_SPEC_SOURCE_SELECTION";
-const TECHNICAL_NEGOTIATION_MEETING_LABEL = "기술협상 회의록";
-const TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL =
-  "기술협상 회의록 업로드";
+const DOCUMENT_GENERATION_COPY = Object.freeze({
+  existingCheck: "참고할 기존 문서가 있나요?",
+  existingChoice: "기존 문서를 기준으로 생성할까요?",
+  uploadOrCreate:
+    "참고할 문서를 업로드해주세요.\n문서 없이 바로 생성하려면 생성 버튼을 눌러주세요.",
+  start: "문서 생성을 시작하겠습니다.",
+  uploadLabel: "참고 문서 업로드",
+  useExisting: "기존 문서 기반으로 생성",
+  createNew: "새 문서로 생성",
+  directCreate: "생성",
+});
 const GENERATION_PROGRESS_INITIAL_VALUE = 5;
 const GENERATION_PROGRESS_LABEL = "요구사항명세서 생성 중";
 const GENERATION_JOB_POLL_INTERVAL_MS = 3000;
@@ -428,9 +434,6 @@ const getMatchingDocuments = (documents, config) =>
     );
   });
 
-const getDocumentsByType = (documents, documentType) =>
-  documents.filter((document) => document.documentType === documentType);
-
 const uniqueDocumentsById = (documents = []) => {
   const seen = new Set();
   return documents.filter((document) => {
@@ -460,65 +463,40 @@ const getUploadResumeDocuments = (uploadRequest, uploadedDocument) => {
   return [uploadedDocument];
 };
 
-const getWbsPrecheckDocuments = (precheck = {}) => {
-  const sourceDocuments =
-    precheck.source_documents ?? precheck.sourceDocuments ?? [];
-  if (Array.isArray(sourceDocuments) && sourceDocuments.length) {
-    return sourceDocuments
-      .map(toAttachmentDocument)
-      .filter((document) => document.documentId);
-  }
-
-  const documentType =
-    precheck.source_document_type ??
-    precheck.sourceDocumentType ??
-    DOCUMENT_TYPES.REQUIREMENT_SPEC;
-  const document = {
-    documentId: precheck.source_document_id ?? precheck.sourceDocumentId ?? "",
-    fileName: precheck.source_file_name ?? precheck.sourceFileName ?? "",
-    documentType,
-    displayLabel: getDocumentDisplayLabel(documentType),
-  };
-  return document.documentId ? [document] : [];
-};
-
 const getRequiredDocumentConfig = (requestType) => {
+  const commonCommandActions = [
+    {
+      label: DOCUMENT_GENERATION_COPY.directCreate,
+      directCreate: true,
+      requestType,
+    },
+  ];
+  const commonConfig = {
+    requestType,
+    message: DOCUMENT_GENERATION_COPY.uploadOrCreate,
+    existingMessage: DOCUMENT_GENERATION_COPY.existingChoice,
+    label: DOCUMENT_GENERATION_COPY.uploadLabel,
+    commandActions: commonCommandActions,
+  };
+
   if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
     return {
+      ...commonConfig,
       requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-      choiceMode: REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE,
       documentTypes: [DEFAULT_DOCUMENT_TYPE],
       keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
-      message: "요구사항 정의서 생성을 위해 구축요건정의서를 업로드해주세요.",
-      existingMessage:
-        "이미 업로드된 구축요건정의서가 있습니다. 기술협상 회의록을 추가로 반영할 수도 있습니다.",
-      label: "구축요건정의서 업로드",
       documentType: DEFAULT_DOCUMENT_TYPE,
-      optionalDocumentType: DOCUMENT_TYPES.MEETING_NOTES,
-      optionalDocumentLabel: TECHNICAL_NEGOTIATION_MEETING_LABEL,
-      optionalUploadLabel: TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL,
-      optionalPrompt: "기술협상 회의록을 추가로 반영하시겠습니까?",
     };
   }
 
   if (requestType === GENERATION_REQUEST_TYPES.WBS_CREATE) {
     return {
+      ...commonConfig,
       documentTypes: [
         DOCUMENT_TYPES.REQUIREMENT_SPEC,
       ],
       keywords: ["요구사항", "요구사항명세", "요구사항정의"],
-      message:
-        "WBS 생성을 위해 기준 문서가 필요합니다. 요구사항 정의서를 업로드하거나 먼저 생성해 주세요.",
-      existingMessage:
-        "이미 업로드된 요구사항 명세서가 있습니다. 이 문서를 기준으로 WBS를 생성할까요?",
-      label: "요구사항 정의서 업로드",
       documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-      commandActions: [
-        {
-          label: "요구사항 정의서 생성",
-          message: "요구사항 정의서 생성해줘",
-        },
-      ],
     };
   }
 
@@ -528,43 +506,19 @@ const getRequiredDocumentConfig = (requestType) => {
 
   if (requestType === GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE) {
     return {
+      ...commonConfig,
       documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
       keywords: ["요구사항", "요구사항명세", "요구사항정의", "rfp", "기획서"],
-      message:
-        "화면설계서를 생성하기 위해 기준 문서가 필요합니다. 요구사항 정의서를 업로드하거나 먼저 생성해 주세요.",
-      existingMessage:
-        "이미 업로드된 요구사항 정의서가 있습니다. 이 문서를 기준으로 화면설계서를 생성할까요?",
-      label: "요구사항 정의서 업로드",
       documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-      commandActions: [
-        {
-          label: "요구사항 정의서 생성",
-          message: "요구사항 정의서 생성해줘",
-        },
-      ],
     };
   }
 
   if (requestType === GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE) {
     return {
+      ...commonConfig,
       documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
       keywords: ["요구사항", "요구사항명세", "요구사항정의", "화면설계"],
-      message:
-        "단위테스트계획서를 생성하기 위해 기준 문서가 필요합니다. 요구사항 정의서나 화면설계서를 업로드하거나 선행 산출물을 먼저 생성해 주세요.",
-      existingMessage:
-        "이미 업로드된 기준 문서가 있습니다. 이 문서를 기준으로 단위테스트계획서를 생성할까요?",
-      label: "기준 문서 업로드",
       documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-      commandActions: [
-        {
-          label: "화면설계서 생성",
-          message: "요구사항 정의서를 기준으로 화면설계서 생성해줘",
-        },
-        {
-          label: "요구사항 정의서 생성",
-          message: "요구사항 정의서 생성해줘",
-        },
-      ],
     };
   }
 
@@ -575,7 +529,7 @@ const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
 const requiresProjectStartDate = (requestType) =>
-  requestType === GENERATION_REQUEST_TYPES.WBS_CREATE;
+  false;
 
 const sanitizeProjectStartDateInput = (value = "") => {
   const text = String(value ?? "");
@@ -1162,7 +1116,6 @@ function App() {
           uploadRequest: null,
           documentChoiceRequest: null,
           startDateRequest: null,
-          wbsPrecheckRequest: null,
           pendingAction: null,
           suggestedActions: [],
           commandActions: [],
@@ -1684,18 +1637,11 @@ function App() {
         document.documentType !== DOCUMENT_TYPES.MEETING_NOTES,
     );
     const matchedDocument = matchingDocuments[0] ?? null;
-    const optionalDocuments =
-      requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC
-        ? getDocumentsByType(documents, DOCUMENT_TYPES.MEETING_NOTES)
-        : [];
-
     if (matchedDocument) {
       return {
         status: "DOCUMENT_CHOICE_REQUIRED",
         documents: matchingDocuments,
-        optionalDocuments,
         defaultDocument: matchedDocument,
-        defaultOptionalDocument: optionalDocuments[0] ?? null,
         documentConfig: requiredDocumentConfig,
         requestType,
       };
@@ -1765,9 +1711,6 @@ function App() {
               originalMessage: trimmedValue,
               resumeAfterUpload: true,
               requestType: preparedRequest.requestType,
-              checkOptionalMeetingAfterUpload:
-                preparedRequest.requestType ===
-                GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
             },
             commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
@@ -1788,10 +1731,7 @@ function App() {
               originalMessage: trimmedValue,
               documentConfig: preparedRequest.documentConfig,
               documents: preparedRequest.documents,
-              optionalDocuments: preparedRequest.optionalDocuments ?? [],
               defaultDocumentId: preparedRequest.defaultDocument?.documentId,
-              defaultOptionalDocumentId:
-                preparedRequest.defaultOptionalDocument?.documentId,
             },
           },
         });
@@ -1929,41 +1869,6 @@ function App() {
       });
       const originalMessage =
         uploadRequest.originalMessage || "업로드한 문서를 기준으로 진행해줘";
-      if (
-        uploadRequest.requestType ===
-          GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC &&
-        requestedDocumentType === DEFAULT_DOCUMENT_TYPE &&
-        uploadRequest.checkOptionalMeetingAfterUpload
-      ) {
-        const projectDocuments = await loadProjectDocuments(project.projectId);
-        const meetingDocuments = getDocumentsByType(
-          projectDocuments,
-          DOCUMENT_TYPES.MEETING_NOTES,
-        );
-        const documentConfig = getRequiredDocumentConfig(
-          GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-        );
-
-        await sendLocalRequiredInfoMessage({
-          targetProject: project,
-          targetConversationId:
-            message.metadata?.conversationId || activeConversationId,
-          content:
-            "구축요건정의서가 업로드되었습니다. 기술협상 회의록을 추가로 반영하시겠습니까?",
-          metadata: {
-            documentChoiceRequest: {
-              originalMessage,
-              documentConfig,
-              documents: [uploadedDocument],
-              optionalDocuments: meetingDocuments,
-              defaultDocumentId: uploadedDocument.documentId,
-              defaultOptionalDocumentId: meetingDocuments[0]?.documentId,
-            },
-          },
-        });
-        return;
-      }
-
       const shouldResumeAfterUpload =
         uploadRequest.resumeAfterUpload ||
         requestedDocumentType === DEFAULT_DOCUMENT_TYPE ||
@@ -1973,6 +1878,7 @@ function App() {
           uploadRequest,
           uploadedDocument,
         );
+        setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
         const targetConversationId =
           message.metadata?.conversationId || activeConversationId;
         const blockedByStartDate =
@@ -2066,9 +1972,6 @@ function App() {
               originalMessage,
               resumeAfterUpload: true,
               requestType: preparedRequest.requestType,
-              checkOptionalMeetingAfterUpload:
-                preparedRequest.requestType ===
-                GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
             },
             commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
@@ -2088,10 +1991,7 @@ function App() {
               originalMessage,
               documentConfig: preparedRequest.documentConfig,
               documents: preparedRequest.documents,
-              optionalDocuments: preparedRequest.optionalDocuments ?? [],
               defaultDocumentId: preparedRequest.defaultDocument?.documentId,
-              defaultOptionalDocumentId:
-                preparedRequest.defaultOptionalDocument?.documentId,
             },
           },
         });
@@ -2136,14 +2036,9 @@ function App() {
     const documents = Array.isArray(choiceRequest.documents)
       ? choiceRequest.documents
       : [];
-    const optionalDocuments = Array.isArray(choiceRequest.optionalDocuments)
-      ? choiceRequest.optionalDocuments
-      : [];
     const originalMessage =
       choiceRequest.originalMessage || "선택한 문서를 기준으로 진행해줘";
     const requestType = choiceRequest.documentConfig?.requestType || "";
-    const isRequirementSpecChoice =
-      requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
 
     if (!targetConversationId) {
       setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
@@ -2154,20 +2049,58 @@ function App() {
       return;
     }
 
+    if (choice === "create_new") {
+      setIsResponding(true);
+      setConversationActionError("");
+      setDocumentError("");
+      setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
+
+      try {
+        await clearMessageActions({
+          conversationId: targetConversationId,
+          message,
+        });
+        const backendResult = await sendBackendConversationMessage({
+          targetProject: project,
+          targetConversationId,
+          messageText: originalMessage,
+          documents: [],
+          requestType,
+          extraContext: {
+            document_generation_mode: "new_document",
+            source_document_ids: [],
+            document_ids: [],
+            selected_document_ids: [],
+            selected_documents: [],
+          },
+        });
+        await saveCommandUsage(project.projectId, originalMessage);
+        setLastCommandInfo({ commandText: originalMessage });
+        setSelectedDocumentIds([]);
+        setProject(backendResult.project);
+      } catch (error) {
+        reportUiError("handleDocumentChoiceCreateNew", error, {
+          projectId: project?.projectId,
+          requestType,
+        });
+        setDocumentError(
+          error instanceof Error
+            ? error.message
+            : "새 문서 생성을 시작하지 못했습니다.",
+        );
+      } finally {
+        setIsResponding(false);
+      }
+      return;
+    }
+
     const selectedDocument =
       documents.find((document) => document.documentId === documentId) ??
       documents.find(
         (document) => document.documentId === choiceRequest.defaultDocumentId,
       ) ??
       documents[0];
-    const selectedOptionalDocument = optionalDocumentId
-      ? optionalDocuments.find(
-          (document) => document.documentId === optionalDocumentId,
-        )
-      : null;
-    const selectedDocuments = isRequirementSpecChoice
-      ? uniqueDocumentsById([selectedDocument, selectedOptionalDocument])
-      : [selectedDocument];
+    const selectedDocuments = uniqueDocumentsById([selectedDocument]);
 
     if (!selectedDocument?.documentId) {
       setDocumentError("선택할 문서 정보를 확인하지 못했습니다.");
@@ -2177,7 +2110,7 @@ function App() {
     setIsResponding(true);
     setConversationActionError("");
     setDocumentError("");
-    setDocumentStatusMessage("");
+    setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
 
     try {
       await clearMessageActions({
@@ -2217,118 +2150,6 @@ function App() {
         error instanceof Error
           ? error.message
           : "선택한 문서로 요청을 진행하지 못했습니다.",
-      );
-    } finally {
-      setIsResponding(false);
-    }
-  };
-
-  const handleWbsPrecheckChoice = async ({ message, choice }) => {
-    if (!project || isResponding || isUploadingDocument) return;
-
-    const targetConversationId =
-      message.metadata?.conversationId || activeConversationId;
-    const precheck = message.metadata?.wbsPrecheckRequest ?? {};
-    const originalMessage =
-      precheck.original_message ?? precheck.originalMessage ?? "WBS 만들어줘";
-    const sourceDocuments = getWbsPrecheckDocuments(precheck);
-
-    if (!targetConversationId) {
-      setConversationActionError("WBS 생성 확인을 진행할 대화 정보를 확인하지 못했습니다.");
-      return;
-    }
-
-    setIsResponding(true);
-    setConversationActionError("");
-    setDocumentError("");
-    setDocumentStatusMessage("");
-
-    try {
-      await clearMessageActions({
-        conversationId: targetConversationId,
-        message,
-      });
-
-      if (choice === "cancel") {
-        setDocumentStatusMessage("WBS 생성을 취소했습니다.");
-        return;
-      }
-
-      if (choice === "choose_other") {
-        const documentConfig = getRequiredDocumentConfig(
-          GENERATION_REQUEST_TYPES.WBS_CREATE,
-        );
-        const documents = await loadProjectDocuments(project.projectId);
-        const matchingDocuments = getMatchingDocuments(
-          documents,
-          documentConfig,
-        );
-
-        if (matchingDocuments.length) {
-          await sendLocalRequiredInfoMessage({
-            targetProject: project,
-            targetConversationId,
-            content: "다른 요구사항 명세서를 선택해주세요.",
-            metadata: {
-              documentChoiceRequest: {
-                originalMessage,
-                documentConfig,
-                documents: matchingDocuments,
-                optionalDocuments: [],
-                defaultDocumentId: matchingDocuments[0]?.documentId,
-              },
-            },
-          });
-          return;
-        }
-
-        await sendLocalRequiredInfoMessage({
-          targetProject: project,
-          targetConversationId,
-          content: documentConfig.message,
-          metadata: {
-            uploadRequest: {
-              label: documentConfig.label,
-              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
-              documentType: documentConfig.documentType,
-              originalMessage,
-              resumeAfterUpload: true,
-              requestType: GENERATION_REQUEST_TYPES.WBS_CREATE,
-            },
-            commandActions: documentConfig.commandActions ?? [],
-          },
-        });
-        return;
-      }
-
-      if (!sourceDocuments.length) {
-        setDocumentError("WBS 기준 문서 정보를 확인하지 못했습니다.");
-        return;
-      }
-
-      const backendResult = await sendBackendConversationMessage({
-        targetProject: project,
-        targetConversationId,
-        messageText: originalMessage,
-        documents: sourceDocuments,
-        requestType: GENERATION_REQUEST_TYPES.WBS_CREATE,
-        extraContext: {
-          requirements_confirmed: true,
-          wbs_requirements_confirmed: true,
-        },
-      });
-      await saveCommandUsage(project.projectId, originalMessage);
-      setLastCommandInfo({ commandText: originalMessage });
-      setProject(backendResult.project);
-    } catch (error) {
-      reportUiError("handleWbsPrecheckChoice", error, {
-        projectId: project?.projectId,
-        choice,
-      });
-      setDocumentError(
-        error instanceof Error
-          ? error.message
-          : "WBS 생성 확인을 처리하지 못했습니다.",
       );
     } finally {
       setIsResponding(false);
@@ -2530,6 +2351,61 @@ function App() {
 
   const handleCommandActionClick = async (message, action) => {
     if (!project || isResponding) return;
+
+    if (action?.directCreate) {
+      const targetConversationId =
+        message.metadata?.conversationId || activeConversationId;
+      const uploadRequest = message.metadata?.uploadRequest ?? {};
+      const commandText = String(
+        uploadRequest.originalMessage ||
+          action?.message ||
+          action?.command ||
+          action?.label ||
+          "",
+      ).trim();
+      if (!commandText || !targetConversationId) return;
+
+      setIsResponding(true);
+      setConversationActionError("");
+      setDocumentError("");
+      setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
+
+      try {
+        await clearMessageActions({
+          conversationId: targetConversationId,
+          message,
+        });
+        await sendBackendConversationMessage({
+          targetProject: project,
+          targetConversationId,
+          messageText: commandText,
+          documents: [],
+          requestType: action.requestType || uploadRequest.requestType || "",
+          extraContext: {
+            document_generation_mode: "direct_create",
+            source_document_ids: [],
+            document_ids: [],
+            selected_document_ids: [],
+            selected_documents: [],
+          },
+        });
+        await saveCommandUsage(project.projectId, commandText);
+        setLastCommandInfo({ commandText });
+      } catch (error) {
+        reportUiError("handleDirectCreateActionClick", error, {
+          projectId: project?.projectId,
+          requestType: action.requestType || uploadRequest.requestType,
+        });
+        setDocumentError(
+          error instanceof Error
+            ? error.message
+            : "문서 생성을 시작하지 못했습니다.",
+        );
+      } finally {
+        setIsResponding(false);
+      }
+      return;
+    }
 
     const commandText = String(
       action?.message || action?.command || action?.label || "",
@@ -2819,7 +2695,6 @@ function App() {
                   onStartDateSubmit={handleStartDateSubmit}
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
-                  onWbsPrecheckChoice={handleWbsPrecheckChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
                   onCommandActionClick={handleCommandActionClick}
                 />
@@ -3640,7 +3515,6 @@ function ChatMessage({
   onStartDateSubmit,
   onDownloadFile,
   onDocumentChoice,
-  onWbsPrecheckChoice,
   onSuggestedActionClick,
   onCommandActionClick,
 }) {
@@ -3673,10 +3547,6 @@ function ChatMessage({
   const startDateRequest =
     isAssistant && !actionsResolved
       ? message.metadata?.startDateRequest
-      : null;
-  const wbsPrecheckRequest =
-    isAssistant && !actionsResolved
-      ? message.metadata?.wbsPrecheckRequest
       : null;
   const generationProgressResult = isAssistant
     ? message.metadata?.generationProgress
@@ -3763,15 +3633,6 @@ function ChatMessage({
             onSubmit={onStartDateSubmit}
           />
         )}
-        {wbsPrecheckRequest && (
-          <WbsPrecheckPanel
-            request={wbsPrecheckRequest}
-            isDisabled={isResponding || isUploadingDocument}
-            onChoice={(choice) =>
-              onWbsPrecheckChoice?.({ message, choice })
-            }
-          />
-        )}
         {generationProgressResult && (
           <GenerationProgressResult
             progressState={generationProgressResult}
@@ -3822,77 +3683,6 @@ function ChatMessage({
         )}
       </div>
     </article>
-  );
-}
-
-function WbsPrecheckPanel({ request, isDisabled, onChoice }) {
-  const documents = getWbsPrecheckDocuments(request);
-  const sourceDocument = documents[0] ?? {};
-  const sourceFileName =
-    request?.source_file_name ??
-    request?.sourceFileName ??
-    sourceDocument.fileName ??
-    "요구사항명세서";
-  const sourceLabel =
-    sourceDocument.displayLabel ||
-    getDocumentDisplayLabel(
-      request?.source_document_type ?? request?.sourceDocumentType,
-    );
-  const projectStartDate =
-    request?.project_start_date ?? request?.projectStartDate ?? "미입력";
-
-  const handlePanelAction = (event, choice) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (isDisabled) return;
-    onChoice?.(choice);
-  };
-
-  return (
-    <div className="message-document-choice-panel wbs-precheck-panel">
-      <div className="document-choice-section">
-        <span className="document-choice-section-title">
-          WBS 생성 전 요건
-        </span>
-        <div className="document-choice-summary">
-          <strong>{sourceFileName}</strong>
-          <span>{sourceLabel}</span>
-        </div>
-        <div className="document-choice-selected">
-          프로젝트 시작일: <strong>{projectStartDate}</strong>
-        </div>
-        <strong className="document-choice-question">
-          이 문서가 WBS 생성 기준으로 확정된 요구사항인가요?
-        </strong>
-      </div>
-
-      <div className="document-choice-actions">
-        <button
-          className="message-upload-button"
-          type="button"
-          disabled={isDisabled}
-          onClick={(event) => handlePanelAction(event, "confirm")}
-        >
-          확정됨, WBS 생성
-        </button>
-        <button
-          className="message-upload-button secondary"
-          type="button"
-          disabled={isDisabled}
-          onClick={(event) => handlePanelAction(event, "choose_other")}
-        >
-          다른 문서 선택
-        </button>
-        <button
-          className="message-upload-button secondary"
-          type="button"
-          disabled={isDisabled}
-          onClick={(event) => handlePanelAction(event, "cancel")}
-        >
-          취소
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -3953,290 +3743,29 @@ function MessageCorrections({ corrections }) {
 }
 
 function DocumentChoicePanel(props) {
-  const choiceMode = props.request?.documentConfig?.choiceMode;
-  if (choiceMode === REQUIREMENT_SPEC_DOCUMENT_CHOICE_MODE) {
-    return <RequirementSpecDocumentChoicePanel {...props} />;
-  }
-
   return <DefaultDocumentChoicePanel {...props} />;
-}
-
-function RequirementSpecDocumentChoicePanel({
-  request,
-  isDisabled,
-  isUploading,
-  onChoice,
-  onUploadFiles,
-}) {
-  const fileInputRef = useRef(null);
-  const pendingUploadRequestRef = useRef(null);
-  const documents = Array.isArray(request?.documents) ? request.documents : [];
-  const meetingDocuments = Array.isArray(request?.optionalDocuments)
-    ? request.optionalDocuments
-    : [];
-  const defaultDocumentId =
-    request?.defaultDocumentId || documents[0]?.documentId || "";
-  const defaultMeetingDocumentId =
-    request?.defaultOptionalDocumentId ||
-    meetingDocuments[0]?.documentId ||
-    "";
-  const [selectedDocumentId, setSelectedDocumentId] =
-    useState(defaultDocumentId);
-  const [selectedMeetingDocumentId, setSelectedMeetingDocumentId] = useState(
-    defaultMeetingDocumentId,
-  );
-  const [includeMeetingNotes, setIncludeMeetingNotes] = useState(false);
-  const selectedDocument =
-    documents.find((document) => document.documentId === selectedDocumentId) ??
-    documents[0];
-  const selectedMeetingDocument =
-    meetingDocuments.find(
-      (document) => document.documentId === selectedMeetingDocumentId,
-    ) ?? meetingDocuments[0];
-  const baseDocumentSelectId = `${
-    defaultDocumentId || "requirement"
-  }-base-document`;
-  const optionalPrompt =
-    request?.documentConfig?.optionalPrompt ||
-    "기술협상 회의록을 추가로 반영하시겠습니까?";
-
-  useEffect(() => {
-    setSelectedDocumentId(defaultDocumentId);
-    setSelectedMeetingDocumentId(defaultMeetingDocumentId);
-    setIncludeMeetingNotes(false);
-  }, [defaultDocumentId, defaultMeetingDocumentId]);
-
-  if (!documents.length) return null;
-
-  const handlePanelAction = (event, callback) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (isDisabled) return;
-    callback();
-  };
-
-  const openFileUpload = (uploadRequest) => {
-    pendingUploadRequestRef.current = uploadRequest;
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event) => {
-    event.stopPropagation();
-    onUploadFiles?.(event.target.files, pendingUploadRequestRef.current);
-    pendingUploadRequestRef.current = null;
-    event.target.value = "";
-  };
-
-  const handleGenerate = () => {
-    onChoice({
-      choice: "use_existing",
-      documentId: selectedDocument?.documentId,
-      optionalDocumentId:
-        includeMeetingNotes && selectedMeetingDocument?.documentId
-          ? selectedMeetingDocument.documentId
-          : "",
-    });
-  };
-
-  const buildBaseUploadRequest = () => ({
-    label: "구축요건정의서 업로드",
-    acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
-    documentType: DEFAULT_DOCUMENT_TYPE,
-    originalMessage: request?.originalMessage,
-    resumeAfterUpload: true,
-    requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-    checkOptionalMeetingAfterUpload: true,
-    resumeDocumentsAfter:
-      includeMeetingNotes && selectedMeetingDocument
-        ? [selectedMeetingDocument]
-        : [],
-  });
-
-  const buildMeetingUploadRequest = () => ({
-    label: TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL,
-    acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
-    documentType: DOCUMENT_TYPES.MEETING_NOTES,
-    displayLabel: TECHNICAL_NEGOTIATION_MEETING_LABEL,
-    originalMessage: request?.originalMessage,
-    resumeAfterUpload: true,
-    requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-    resumeDocumentsBefore: selectedDocument ? [selectedDocument] : [],
-  });
-
-  return (
-    <div className="message-document-choice-panel requirement-document-choice-panel">
-      <div className="document-choice-section">
-        <span className="document-choice-section-title">
-          필수 선택: 구축요건정의서
-        </span>
-        <div className="document-choice-summary">
-          <strong>{selectedDocument?.fileName || "구축요건정의서"}</strong>
-          <span>{selectedDocument?.displayLabel || "구축요건정의서"}</span>
-        </div>
-        {documents.length > 1 && (
-          <div className="document-choice-picker">
-            <label htmlFor={baseDocumentSelectId}>
-              구축요건정의서 선택
-            </label>
-            <select
-              id={baseDocumentSelectId}
-              value={selectedDocumentId}
-              disabled={isDisabled}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => setSelectedDocumentId(event.target.value)}
-              aria-label="구축요건정의서 선택"
-            >
-              {documents.map((document) => (
-                <option key={document.documentId} value={document.documentId}>
-                  {document.fileName || document.documentId}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      <div className="document-choice-section">
-        <span className="document-choice-section-title">
-          선택 항목: {TECHNICAL_NEGOTIATION_MEETING_LABEL}
-        </span>
-        <strong className="document-choice-question">{optionalPrompt}</strong>
-        {meetingDocuments.length > 0 ? (
-          <>
-            <label className="document-choice-check">
-              <input
-                type="checkbox"
-                checked={includeMeetingNotes}
-                disabled={isDisabled}
-                onChange={(event) =>
-                  setIncludeMeetingNotes(event.target.checked)
-                }
-              />
-              <span>{TECHNICAL_NEGOTIATION_MEETING_LABEL} 반영</span>
-            </label>
-            {includeMeetingNotes && (
-              <div className="document-choice-picker">
-                <select
-                  value={selectedMeetingDocumentId}
-                  disabled={isDisabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    setSelectedMeetingDocumentId(event.target.value)
-                  }
-                  aria-label={`${TECHNICAL_NEGOTIATION_MEETING_LABEL} 선택`}
-                >
-                  {meetingDocuments.map((document) => (
-                    <option
-                      key={document.documentId}
-                      value={document.documentId}
-                    >
-                      {document.fileName || document.documentId}
-                    </option>
-                  ))}
-                </select>
-                <div className="document-choice-selected">
-                  선택된 {TECHNICAL_NEGOTIATION_MEETING_LABEL}:{" "}
-                  <strong>
-                    {selectedMeetingDocument?.fileName ||
-                      selectedMeetingDocumentId}
-                  </strong>
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="document-choice-selected">
-            업로드된 {TECHNICAL_NEGOTIATION_MEETING_LABEL}이 없습니다.
-            구축요건정의서만으로 생성할 수 있습니다.
-          </div>
-        )}
-      </div>
-
-      <div className="document-choice-actions">
-        <button
-          className="message-upload-button"
-          type="button"
-          disabled={isDisabled || !selectedDocument?.documentId}
-          onClick={(event) => handlePanelAction(event, handleGenerate)}
-        >
-          {includeMeetingNotes
-            ? "선택 문서로 생성"
-            : "구축요건정의서만으로 생성"}
-        </button>
-        <button
-          className="message-upload-button secondary"
-          type="button"
-          disabled={isDisabled || isUploading}
-          onClick={(event) =>
-            handlePanelAction(event, () =>
-              openFileUpload(buildMeetingUploadRequest()),
-            )
-          }
-        >
-          {isUploading ? (
-            <>
-              <LoaderCircle size={16} aria-hidden="true" />
-              업로드 중
-            </>
-          ) : (
-            TECHNICAL_NEGOTIATION_MEETING_UPLOAD_LABEL
-          )}
-        </button>
-        <button
-          className="message-upload-button secondary"
-          type="button"
-          disabled={isDisabled || isUploading}
-          onClick={(event) =>
-            handlePanelAction(event, () => openFileUpload(buildBaseUploadRequest()))
-          }
-        >
-          새 구축요건정의서 업로드
-        </button>
-        <input
-          ref={fileInputRef}
-          className="message-file-input"
-          type="file"
-          accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
-          disabled={isDisabled || isUploading}
-          onClick={(event) => event.stopPropagation()}
-          onChange={handleFileChange}
-          aria-label="요구사항명세서 생성 문서 업로드"
-        />
-      </div>
-    </div>
-  );
 }
 
 function DefaultDocumentChoicePanel({
   request,
   isDisabled,
-  isUploading,
   onChoice,
-  onUploadFiles,
 }) {
-  const fileInputRef = useRef(null);
   const documents = Array.isArray(request?.documents) ? request.documents : [];
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
     useState(defaultDocumentId);
-  const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false);
-  const [isDocumentPickerOpen, setIsDocumentPickerOpen] = useState(false);
   const defaultDocument =
     documents.find((document) => document.documentId === defaultDocumentId) ??
     documents[0];
   const selectedDocument =
     documents.find((document) => document.documentId === selectedDocumentId) ??
     defaultDocument;
-  const uploadLabel = request?.documentConfig?.label || "새 문서 업로드";
-  const acceptedTypes = Array.isArray(request?.documentConfig?.acceptedTypes)
-    ? request.documentConfig.acceptedTypes
-    : DOCUMENT_UPLOAD_ACCEPTED_TYPES;
+  const documentSelectId = `${defaultDocumentId || "document"}-source-document`;
 
   useEffect(() => {
     setSelectedDocumentId(defaultDocumentId);
-    setIsUploadPanelOpen(false);
-    setIsDocumentPickerOpen(false);
   }, [defaultDocumentId]);
 
   if (!documents.length) return null;
@@ -4248,18 +3777,33 @@ function DefaultDocumentChoicePanel({
     callback();
   };
 
-  const handleFileChange = (event) => {
-    event.stopPropagation();
-    onUploadFiles?.(event.target.files);
-    event.target.value = "";
-  };
-
   return (
     <div className="message-document-choice-panel">
+      <strong className="document-choice-question">
+        {DOCUMENT_GENERATION_COPY.existingChoice}
+      </strong>
       <div className="document-choice-summary">
-        <strong>{defaultDocument?.fileName || "업로드된 문서"}</strong>
-        <span>{defaultDocument?.displayLabel || "기존 문서"}</span>
+        <strong>{selectedDocument?.fileName || "업로드된 문서"}</strong>
+        <span>{selectedDocument?.displayLabel || "기존 문서"}</span>
       </div>
+      {documents.length > 1 && (
+        <div className="document-choice-picker">
+          <label htmlFor={documentSelectId}>기존 문서 선택</label>
+          <select
+            id={documentSelectId}
+            value={selectedDocumentId}
+            disabled={isDisabled}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setSelectedDocumentId(event.target.value)}
+          >
+            {documents.map((document) => (
+              <option key={document.documentId} value={document.documentId}>
+                {document.fileName || document.documentId}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="document-choice-actions">
         <button
           className="message-upload-button"
@@ -4269,125 +3813,28 @@ function DefaultDocumentChoicePanel({
             handlePanelAction(event, () =>
               onChoice({
                 choice: "use_existing",
-                documentId: defaultDocument?.documentId,
+                documentId: selectedDocument?.documentId,
               }),
             )
           }
         >
-          기존 문서 사용
+          {DOCUMENT_GENERATION_COPY.useExisting}
         </button>
         <button
           className="message-upload-button secondary"
           type="button"
           disabled={isDisabled}
           onClick={(event) =>
-            handlePanelAction(event, () => {
-              setIsUploadPanelOpen(true);
-              setIsDocumentPickerOpen(false);
-            })
+            handlePanelAction(event, () =>
+              onChoice({
+                choice: "create_new",
+              }),
+            )
           }
         >
-          새 문서 업로드
+          {DOCUMENT_GENERATION_COPY.createNew}
         </button>
-        {documents.length > 1 && (
-          <button
-            className="message-upload-button secondary"
-            type="button"
-            disabled={isDisabled}
-            onClick={(event) =>
-              handlePanelAction(event, () => {
-                setIsDocumentPickerOpen(true);
-                setIsUploadPanelOpen(false);
-              })
-            }
-          >
-            다른 문서 선택
-          </button>
-        )}
       </div>
-      {isDocumentPickerOpen && documents.length > 1 && (
-        <div className="document-choice-picker">
-          <select
-            value={selectedDocumentId}
-            disabled={isDisabled}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => setSelectedDocumentId(event.target.value)}
-            aria-label="다른 문서 선택"
-          >
-            {documents.map((document) => (
-              <option key={document.documentId} value={document.documentId}>
-                {document.fileName || document.documentId}
-              </option>
-            ))}
-          </select>
-          <div className="document-choice-selected">
-            선택된 문서:{" "}
-            <strong>{selectedDocument?.fileName || selectedDocumentId}</strong>
-          </div>
-          <button
-            className="message-upload-button"
-            type="button"
-            disabled={isDisabled || !selectedDocumentId}
-            onClick={(event) =>
-              handlePanelAction(event, () =>
-                onChoice({
-                  choice: "select_other",
-                  documentId: selectedDocumentId,
-                }),
-              )
-            }
-          >
-            이 문서로 생성
-          </button>
-        </div>
-      )}
-      {isUploadPanelOpen && (
-        <div className="document-choice-upload-panel">
-          <div className="document-choice-upload-copy">
-            <strong>새 기준 문서 업로드</strong>
-            <span>업로드가 완료되면 새 문서를 기준으로 생성이 진행됩니다.</span>
-          </div>
-          <div className="document-choice-actions">
-            <button
-              className="message-upload-button"
-              type="button"
-              disabled={isDisabled || isUploading}
-              onClick={(event) =>
-                handlePanelAction(event, () => fileInputRef.current?.click())
-              }
-            >
-              {isUploading ? (
-                <>
-                  <LoaderCircle size={16} aria-hidden="true" />
-                  업로드 중
-                </>
-              ) : (
-                uploadLabel
-              )}
-            </button>
-            <button
-              className="message-upload-button secondary"
-              type="button"
-              disabled={isDisabled || isUploading}
-              onClick={(event) =>
-                handlePanelAction(event, () => setIsUploadPanelOpen(false))
-              }
-            >
-              취소
-            </button>
-            <input
-              ref={fileInputRef}
-              className="message-file-input"
-              type="file"
-              accept={acceptedTypes.join(",")}
-              disabled={isDisabled || isUploading}
-              onClick={(event) => event.stopPropagation()}
-              onChange={handleFileChange}
-              aria-label={uploadLabel}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
