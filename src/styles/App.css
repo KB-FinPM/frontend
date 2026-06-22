@@ -1135,7 +1135,8 @@ p {
 .document-choice-file-row {
   display: grid;
   grid-template-columns: 1fr;
-  align-items: stretch;
+  align-items: start;
+  justify-items: start;
   gap: 6px;
   min-width: 0;
 }
@@ -1147,8 +1148,10 @@ p {
 }
 
 .document-source-control {
-  width: 100%;
+  width: min(100%, 360px);
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 38px;
   padding: 0 12px;
   border: 1px solid #cfd7e6;
@@ -1161,8 +1164,8 @@ p {
 }
 
 .document-choice-source-select {
-  width: 100%;
   min-width: 0;
+  max-width: 100%;
 }
 
 .document-source-control:disabled,
@@ -1174,8 +1177,10 @@ p {
 .document-upload-control {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
+  text-align: left;
+  overflow: hidden;
   cursor: pointer;
 }
 
@@ -2055,9 +2060,7 @@ p {
 
 .uploaded-file-meta {
   display: grid;
-  grid-template-columns:
-    minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 0.9fr)
-    minmax(0, 1.5fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
   gap: 10px;
   margin: 0;
 }

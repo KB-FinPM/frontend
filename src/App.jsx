@@ -510,6 +510,39 @@ const getFileExtension = (fileName = "") => {
   return dotIndex >= 0 ? name.slice(dotIndex + 1).toUpperCase() : "";
 };
 
+const MIME_FILE_TYPE_LABELS = Object.freeze({
+  "application/pdf": "PDF",
+  "application/msword": "DOC",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "DOCX",
+  "application/vnd.ms-excel": "XLS",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    "XLSX",
+  "application/vnd.ms-powerpoint": "PPT",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    "PPTX",
+  "application/haansofthwp": "HWP",
+  "application/x-hwp": "HWP",
+  "text/plain": "TXT",
+  "text/csv": "CSV",
+});
+
+const formatFileType = (fileName = "", fallback = "") => {
+  const extension = getFileExtension(fileName);
+  if (extension) return extension;
+
+  const fallbackValue = String(fallback || "").trim();
+  if (!fallbackValue) return "기타";
+
+  const normalizedFallback = fallbackValue.toLowerCase();
+  if (MIME_FILE_TYPE_LABELS[normalizedFallback]) {
+    return MIME_FILE_TYPE_LABELS[normalizedFallback];
+  }
+
+  if (normalizedFallback.includes("/")) return "기타";
+  return fallbackValue.toUpperCase();
+};
+
 const formatFileSize = (value) => {
   const size = Number(value);
   if (!Number.isFinite(size) || size <= 0) return "파일크기 정보 없음";
@@ -525,8 +558,8 @@ const formatFileSize = (value) => {
   }`;
 };
 
-const formatFileUploadedAt = (value) => {
-  if (!value) return "업로드 시간 정보 없음";
+const formatFileUploadedAt = (value, label = "업로드 시간") => {
+  if (!value) return `${label} 정보 없음`;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
   return parsed.toLocaleString("ko-KR", {
@@ -564,9 +597,8 @@ const normalizeUploadedFile = (file) => {
     file.file_type ??
     file.fileType ??
     file.content_type ??
-    file.contentType ??
-    getFileExtension(fileName);
-  const fileType = resolvedFileType || "확인 불가";
+    file.contentType;
+  const fileType = formatFileType(fileName, resolvedFileType);
 
   return {
     fileId,
@@ -627,7 +659,10 @@ const normalizeGeneratedFile = (file) => {
   return {
     fileId: file.artifact_id ?? file.artifactId ?? file.file_id ?? file.id ?? "",
     fileName,
-    fileType: getFileExtension(fileName) || artifactType || "생성 파일",
+    fileType: formatFileType(
+      fileName,
+      file.file_type ?? file.fileType ?? file.content_type ?? file.contentType,
+    ),
     artifactType,
     fileSize:
       file.file_size ??
@@ -3845,8 +3880,8 @@ function FileManagerModal({
               </div>
               <dl className="uploaded-file-meta">
                 <div>
-                  <dt>문서구분</dt>
-                  <dd>{documentLabel}</dd>
+                  <dt>{timeLabel}</dt>
+                  <dd>{formatFileUploadedAt(timeValue, timeLabel)}</dd>
                 </div>
                 <div>
                   <dt>파일크기</dt>
@@ -3855,10 +3890,6 @@ function FileManagerModal({
                 <div>
                   <dt>파일유형</dt>
                   <dd>{file.fileType}</dd>
-                </div>
-                <div>
-                  <dt>{timeLabel}</dt>
-                  <dd>{formatFileUploadedAt(timeValue)}</dd>
                 </div>
               </dl>
               <div className="uploaded-file-actions">
