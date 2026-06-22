@@ -89,7 +89,14 @@ export const listProjectFiles = async (projectId) => {
     return await requestJson(`/projects/${encodePathSegment(projectId)}/files`);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
-      return listDocuments(projectId);
+      const [uploadedFiles, generatedFiles] = await Promise.all([
+        listDocuments(projectId),
+        listArtifacts(projectId),
+      ]);
+      return {
+        uploaded_files: uploadedFiles,
+        generated_files: generatedFiles,
+      };
     }
     throw error;
   }
