@@ -95,6 +95,9 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   SCREEN_DESIGN_CREATE: "SCREEN_DESIGN_CREATE",
   UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
+const DOCUMENT_CONTEXT_REQUEST_TYPES = Object.freeze({
+  MEETING_TODO_EXTRACTION: "MEETING_TODO_EXTRACTION",
+});
 const FILE_MANAGER_TABS = Object.freeze({
   UPLOADED: "uploaded",
   GENERATED: "generated",
@@ -280,6 +283,31 @@ const hasGenerationSignal = (normalized = "") =>
   normalized.includes("추출") ||
   normalized.includes("초안");
 
+const isMeetingTodoExtractionRequest = (value = "") => {
+  const normalized = normalizeCommandText(value);
+  const hasMeetingSource =
+    normalized.includes("회의록") ||
+    normalized.includes("회의내용") ||
+    normalized.includes("미팅") ||
+    normalized.includes("meeting");
+  const hasTodoTarget =
+    normalized.includes("todo") ||
+    normalized.includes("할일") ||
+    normalized.includes("해야할일") ||
+    normalized.includes("액션아이템") ||
+    normalized.includes("후속작업") ||
+    normalized.includes("업무");
+  const hasExtractionAction =
+    normalized.includes("뽑") ||
+    normalized.includes("추출") ||
+    normalized.includes("정리") ||
+    normalized.includes("체크") ||
+    normalized.includes("확인") ||
+    normalized.includes("알려");
+
+  return hasMeetingSource && hasTodoTarget && hasExtractionAction;
+};
+
 const getGenerationRequestType = (value = "") => {
   const normalized = normalizeCommandText(value);
   const hasRequirementTarget =
@@ -318,6 +346,15 @@ const getGenerationRequestType = (value = "") => {
   }
   if (hasRequirementTarget && isGeneration) {
     return GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
+  }
+  return "";
+};
+
+const getMessageDocumentRequestType = (value = "") => {
+  const generationRequestType = getGenerationRequestType(value);
+  if (generationRequestType) return generationRequestType;
+  if (isMeetingTodoExtractionRequest(value)) {
+    return DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION;
   }
   return "";
 };
@@ -401,6 +438,34 @@ const getOutputFormats = (relation) =>
 
 const getDefaultOutputFormat = (relation) => getOutputFormats(relation)[0]?.value || "xlsx";
 
+const MEETING_TODO_DOCUMENT_CONFIG = Object.freeze({
+  requestType: DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION,
+  targetArtifactType: "ACTION_ITEMS",
+  targetLabel: "회의록 TODO",
+  panelTitle: "회의록 TODO 추출",
+  actionLabel: "TODO 추출하기",
+  primarySource: {
+    documentType: DOCUMENT_TYPES.MEETING_NOTES,
+    label: "기술협상회의록",
+    keywords: ["기술협상", "회의록", "미팅", "meeting"],
+    required: true,
+  },
+  optionalSources: [],
+  outputFormats: [],
+  defaultOutputFormat: "",
+  hideOutputFormat: true,
+  message:
+    "회의록에서 TODO를 추출하려면 회의록 내용을 붙여넣거나 파일을 업로드해 주세요.",
+  existingMessage:
+    "이미 업로드된 회의록이 있습니다. 기존 회의록을 사용하거나 새 회의록을 업로드해 주세요.",
+  startMessage: "회의록에서 TODO를 추출하고 있습니다.",
+  label: "회의록 업로드",
+  documentTypes: [DOCUMENT_TYPES.MEETING_NOTES],
+  keywords: ["기술협상", "회의록", "미팅", "meeting"],
+  documentType: DOCUMENT_TYPES.MEETING_NOTES,
+  commandActions: [],
+});
+
 const getGenerationAssistantMessage = ({
   requestType,
   relation,
@@ -451,6 +516,25 @@ const getGenerationAssistantMessage = ({
     }를 기준으로 생성합니다.`,
     "기준 문서와 파일 형식을 확인한 뒤 생성해 주세요.",
   ].join("\n");
+};
+
+const getDocumentContextAssistantMessage = ({
+  requestType,
+  documentConfig,
+  relation,
+  hasPrimaryDocument,
+}) => {
+  if (requestType === DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION) {
+    return hasPrimaryDocument
+      ? documentConfig.existingMessage || MEETING_TODO_DOCUMENT_CONFIG.existingMessage
+      : documentConfig.message || MEETING_TODO_DOCUMENT_CONFIG.message;
+  }
+
+  return getGenerationAssistantMessage({
+    requestType,
+    relation,
+    hasPrimaryDocument,
+  });
 };
 
 const getOutputFormatLabel = (formats, value) =>
@@ -877,6 +961,13 @@ const getRequiredDocumentConfig = (requestType) => {
     ),
     commandActions: [],
   };
+};
+
+const getDocumentContextConfig = (requestType) => {
+  if (requestType === DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION) {
+    return MEETING_TODO_DOCUMENT_CONFIG;
+  }
+  return getRequiredDocumentConfig(requestType);
 };
 
 const getProjectStartDate = (project) =>
@@ -2163,9 +2254,9 @@ function App() {
   };
 
   const prepareMessageRequest = async ({ messageText, targetProject }) => {
-    const requestType = getGenerationRequestType(messageText);
+    const requestType = getMessageDocumentRequestType(messageText);
 
-    const requiredDocumentConfig = getRequiredDocumentConfig(requestType);
+    const requiredDocumentConfig = getDocumentContextConfig(requestType);
     if (!requiredDocumentConfig) {
       return { status: "READY", documents: [], requestType };
     }
@@ -2192,8 +2283,9 @@ function App() {
     const uniqueOptionalDocuments = uniqueDocumentsById(optionalDocuments);
     const matchedDocument = matchingDocuments[0] ?? null;
     const buildAssistantMessage = (hasPrimaryDocument) =>
-      getGenerationAssistantMessage({
+      getDocumentContextAssistantMessage({
         requestType,
+        documentConfig: requiredDocumentConfig,
         relation: requiredDocumentConfig.relation,
         hasPrimaryDocument,
       });
@@ -2474,8 +2566,9 @@ function App() {
               : [];
             return {
               ...currentMessage,
-              content: getGenerationAssistantMessage({
+              content: getDocumentContextAssistantMessage({
                 requestType: nextRequestType,
+                documentConfig: nextChoiceRequest.documentConfig ?? {},
                 relation: nextRelation,
                 hasPrimaryDocument: nextDocuments.some(
                   (documentItem) => documentItem?.documentId,
@@ -2506,13 +2599,21 @@ function App() {
       const shouldResumeAfterUpload =
         uploadRequest.resumeAfterUpload ||
         requestedDocumentType === DEFAULT_DOCUMENT_TYPE ||
-        requestedDocumentType === DOCUMENT_TYPES.WBS;
+        requestedDocumentType === DOCUMENT_TYPES.WBS ||
+        requestedDocumentType === DOCUMENT_TYPES.MEETING_NOTES;
       if (shouldResumeAfterUpload) {
         const resumeDocuments = getUploadResumeDocuments(
           uploadRequest,
           uploadedDocument,
         );
-        setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
+        const isMeetingTodoUpload =
+          requestedDocumentType === DOCUMENT_TYPES.MEETING_NOTES;
+        setDocumentStatusMessage(
+          uploadRequest.startMessage ||
+            (isMeetingTodoUpload
+              ? MEETING_TODO_DOCUMENT_CONFIG.startMessage
+              : DOCUMENT_GENERATION_COPY.start),
+        );
         const targetConversationId =
           message.metadata?.conversationId || activeConversationId;
         await sendBackendConversationMessage({
@@ -2521,12 +2622,14 @@ function App() {
           messageText: originalMessage,
           documents: resumeDocuments,
           requestType: uploadRequest.requestType,
-          extraContext: {
-            output_format:
-              uploadRequest.outputFormat ||
-              getDefaultOutputFormat(getRelation(uploadRequest.requestType)),
-            document_generation_mode: "upload",
-          },
+          extraContext: isMeetingTodoUpload
+            ? { schedule_action: "EXTRACT_TODOS_FROM_MEETING" }
+            : {
+                output_format:
+                  uploadRequest.outputFormat ||
+                  getDefaultOutputFormat(getRelation(uploadRequest.requestType)),
+                document_generation_mode: "upload",
+              },
         });
         await saveCommandUsage(project.projectId, originalMessage);
         setLastCommandInfo({ commandText: originalMessage });
@@ -2568,11 +2671,14 @@ function App() {
     const originalMessage =
       choiceRequest.originalMessage || "선택한 문서를 기준으로 진행해줘";
     const requestType = choiceRequest.documentConfig?.requestType || "";
-    const selectedOutputFormat =
-      outputFormat ||
-      choiceRequest.outputFormat ||
-      choiceRequest.documentConfig?.defaultOutputFormat ||
-      getDefaultOutputFormat(getRelation(requestType));
+    const isMeetingTodoRequest =
+      requestType === DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION;
+    const selectedOutputFormat = isMeetingTodoRequest
+      ? ""
+      : outputFormat ||
+        choiceRequest.outputFormat ||
+        choiceRequest.documentConfig?.defaultOutputFormat ||
+        getDefaultOutputFormat(getRelation(requestType));
 
     if (!targetConversationId) {
       setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
@@ -2604,7 +2710,9 @@ function App() {
     setIsResponding(true);
     setConversationActionError("");
     setDocumentError("");
-    setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
+    setDocumentStatusMessage(
+      choiceRequest.documentConfig?.startMessage || DOCUMENT_GENERATION_COPY.start,
+    );
 
     try {
       await clearMessageActions({
@@ -2617,10 +2725,12 @@ function App() {
         messageText: originalMessage,
         documents: selectedDocuments,
         requestType,
-        extraContext: {
-          document_generation_mode: "use_existing",
-          output_format: selectedOutputFormat,
-        },
+        extraContext: isMeetingTodoRequest
+          ? { schedule_action: "EXTRACT_TODOS_FROM_MEETING" }
+          : {
+              document_generation_mode: "use_existing",
+              output_format: selectedOutputFormat,
+            },
       });
       await saveCommandUsage(project.projectId, originalMessage);
       setLastCommandInfo({ commandText: originalMessage });
@@ -4131,6 +4241,8 @@ function ChatMessage({
     uploadRequest?.outputFormats ??
     uploadRequest?.documentConfig?.outputFormats ??
     [];
+  const shouldShowUploadOutputFormat =
+    !uploadRequest?.hideOutputFormat && uploadOutputFormats.length > 0;
   const uploadDefaultOutputFormat =
     uploadRequest?.outputFormat ||
     uploadOutputFormats[0]?.value ||
@@ -4150,7 +4262,9 @@ function ChatMessage({
       uploadRequest: uploadRequest
         ? {
             ...uploadRequest,
-            outputFormat: selectedUploadOutputFormat,
+            ...(shouldShowUploadOutputFormat
+              ? { outputFormat: selectedUploadOutputFormat }
+              : {}),
           }
         : null,
     });
@@ -4173,12 +4287,14 @@ function ChatMessage({
         <MessageCorrections corrections={corrections} />
         {uploadRequest && (
           <div className="message-action-panel">
-            <GenerationOutputFormatField
-              formats={uploadOutputFormats}
-              value={selectedUploadOutputFormat}
-              onChange={setSelectedUploadOutputFormat}
-              isDisabled={isResponding || isUploadingDocument}
-            />
+            {shouldShowUploadOutputFormat && (
+              <GenerationOutputFormatField
+                formats={uploadOutputFormats}
+                value={selectedUploadOutputFormat}
+                onChange={setSelectedUploadOutputFormat}
+                isDisabled={isResponding || isUploadingDocument}
+              />
+            )}
             <button
               className="message-upload-button"
               type="button"
@@ -4361,9 +4477,14 @@ function DefaultDocumentChoicePanel({
   const documentConfig = request?.documentConfig ?? {};
   const relation = documentConfig.relation ?? getRelation(documentConfig.requestType);
   const primarySource = relation?.primarySource ?? documentConfig.primarySource;
-  const optionalSource = relation?.optionalSources?.[0] ?? null;
+  const optionalSource =
+    relation?.optionalSources?.[0] ?? documentConfig.optionalSources?.[0] ?? null;
   const outputFormats =
-    request?.outputFormats ?? documentConfig.outputFormats ?? getOutputFormats(relation);
+    request?.outputFormats ??
+    documentConfig.outputFormats ??
+    (relation ? getOutputFormats(relation) : []);
+  const shouldShowOutputFormat =
+    !documentConfig.hideOutputFormat && outputFormats.length > 0;
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
@@ -4383,7 +4504,7 @@ function DefaultDocumentChoicePanel({
   const [selectedOutputFormat, setSelectedOutputFormat] = useState(
     request?.outputFormat ||
       documentConfig.defaultOutputFormat ||
-      getDefaultOutputFormat(relation),
+      (relation ? getDefaultOutputFormat(relation) : ""),
   );
   const [draggingUploadSlot, setDraggingUploadSlot] = useState("");
   const primaryFileInputRef = useRef(null);
@@ -4408,6 +4529,9 @@ function DefaultDocumentChoicePanel({
   const primaryUseName = `${panelId}-primary-use-existing`;
   const optionalUseName = `${panelId}-optional-use-existing`;
   const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
+  const panelTitle = documentConfig.panelTitle || `${targetLabel} 생성`;
+  const actionLabel =
+    documentConfig.actionLabel || DOCUMENT_GENERATION_COPY.generate;
   const primaryLabel = primarySource?.label || "기준 문서";
   const optionalLabel = optionalSource?.label || "추가 자료";
   const hasSelectedPrimaryDocument = Boolean(
@@ -4421,7 +4545,9 @@ function DefaultDocumentChoicePanel({
     optionalSource &&
       (!includeOptionalDocument || !selectedOptionalDocument?.documentId),
   );
-  const canGenerate = hasSelectedPrimaryDocument && Boolean(selectedOutputFormat);
+  const canGenerate =
+    hasSelectedPrimaryDocument &&
+    (!shouldShowOutputFormat || Boolean(selectedOutputFormat));
   const generateDisabledTitle = !hasSelectedPrimaryDocument
     ? `${primaryLabel}를 선택하거나 업로드해 주세요.`
     : undefined;
@@ -4443,7 +4569,7 @@ function DefaultDocumentChoicePanel({
     setSelectedOutputFormat(
       request?.outputFormat ||
         documentConfig.defaultOutputFormat ||
-      getDefaultOutputFormat(relation),
+        (relation ? getDefaultOutputFormat(relation) : ""),
     );
   }, [request?.outputFormat, documentConfig.defaultOutputFormat, relation]);
 
@@ -4505,7 +4631,7 @@ function DefaultDocumentChoicePanel({
 
   return (
     <div className="message-document-choice-panel">
-      <strong className="document-choice-title">{targetLabel} 생성</strong>
+      <strong className="document-choice-title">{panelTitle}</strong>
       <section className="document-choice-section document-choice-slot">
         <div className="document-choice-file-row">
           <label
@@ -4718,12 +4844,14 @@ function DefaultDocumentChoicePanel({
           />
         </section>
       )}
-      <GenerationOutputFormatField
-        formats={outputFormats}
-        value={selectedOutputFormat}
-        onChange={setSelectedOutputFormat}
-        isDisabled={isDisabled}
-      />
+      {shouldShowOutputFormat && (
+        <GenerationOutputFormatField
+          formats={outputFormats}
+          value={selectedOutputFormat}
+          onChange={setSelectedOutputFormat}
+          isDisabled={isDisabled}
+        />
+      )}
       <div className="document-choice-actions">
         <button
           className="message-upload-button"
@@ -4744,7 +4872,7 @@ function DefaultDocumentChoicePanel({
           }
           title={generateDisabledTitle}
         >
-          {DOCUMENT_GENERATION_COPY.generate}
+          {actionLabel}
         </button>
       </div>
     </div>
