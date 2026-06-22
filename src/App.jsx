@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Bot,
@@ -401,6 +401,9 @@ const getGenerationAssistantMessage = ({
     "기준 문서와 파일 형식을 확인한 뒤 생성해 주세요.",
   ].join("\n");
 };
+
+const getDocumentExplanationCommand = (label = "문서") =>
+  `${label || "문서"} 설명해줘`;
 
 const getOutputFormatLabel = (formats, value) =>
   formats.find((format) => format.value === value)?.label ||
@@ -2215,6 +2218,12 @@ function App() {
     sendMessage(commandText);
   };
 
+  const handleDocumentExplanation = ({ commandText }) => {
+    const trimmedCommand = String(commandText || "").trim();
+    if (!trimmedCommand || isResponding || isUploadingDocument) return;
+    sendMessage(trimmedCommand);
+  };
+
   const handleAgentUploadFiles = async ({
     message,
     files,
@@ -2985,6 +2994,7 @@ function App() {
                   onAgentUploadFiles={handleAgentUploadFiles}
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
+                  onDocumentExplanation={handleDocumentExplanation}
                   onSuggestedActionClick={handleSuggestedActionClick}
                   onCommandActionClick={handleCommandActionClick}
                 />
@@ -3932,6 +3942,7 @@ function ChatMessage({
   onAgentUploadFiles,
   onDownloadFile,
   onDocumentChoice,
+  onDocumentExplanation,
   onSuggestedActionClick,
   onCommandActionClick,
 }) {
@@ -4059,6 +4070,12 @@ function ChatMessage({
             isDisabled={isResponding || isUploadingDocument}
             isUploading={isUploadingDocument}
             onChoice={(choice) => onDocumentChoice({ message, ...choice })}
+            onExplain={(explainRequest) =>
+              onDocumentExplanation?.({
+                message,
+                ...explainRequest,
+              })
+            }
             onUploadFiles={(files, uploadRequest) =>
               onAgentUploadFiles({
                 message,
@@ -4182,8 +4199,10 @@ function DefaultDocumentChoicePanel({
   isDisabled,
   isUploading = false,
   onChoice,
+  onExplain,
   onUploadFiles,
 }) {
+  const panelId = useId().replace(/:/g, "");
   const documents = Array.isArray(request?.documents) ? request.documents : [];
   const optionalDocuments = Array.isArray(request?.optionalDocuments)
     ? request.optionalDocuments
@@ -4232,10 +4251,10 @@ function DefaultDocumentChoicePanel({
     optionalDocuments.find(
       (document) => document.documentId === selectedOptionalDocumentId,
     ) ?? optionalDocuments[0];
-  const documentSelectId = `${defaultDocumentId || "document"}-source-document`;
-  const optionalDocumentSelectId = `${
-    selectedOptionalDocumentId || "optional-document"
-  }-source-document`;
+  const documentSelectId = `${panelId}-primary-source-document`;
+  const optionalDocumentSelectId = `${panelId}-optional-source-document`;
+  const primaryUseName = `${panelId}-primary-use-existing`;
+  const optionalUseName = `${panelId}-optional-use-existing`;
   const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
   const primaryLabel = primarySource?.label || "기준 문서";
   const optionalLabel = optionalSource?.label || "추가 자료";
@@ -4251,18 +4270,8 @@ function DefaultDocumentChoicePanel({
       (!includeOptionalDocument || !selectedOptionalDocument?.documentId),
   );
   const canGenerate = hasSelectedPrimaryDocument && Boolean(selectedOutputFormat);
-  const primaryDisplayName = hasSelectedPrimaryDocument
-    ? selectedDocument?.fileName || "선택된 문서"
-    : documents.length
-      ? "새 문서 업로드"
-      : "없음";
-  const optionalDisplayName = hasSelectedOptionalDocument
-    ? selectedOptionalDocument?.fileName || "선택된 문서"
-    : optionalDocuments.length
-      ? "사용 안 함"
-      : "없음";
   const generateDisabledTitle = !hasSelectedPrimaryDocument
-    ? `${primaryLabel}를 업로드하거나 기존 문서를 사용해 주세요.`
+    ? `${primaryLabel}를 선택하거나 업로드해 주세요.`
     : undefined;
 
   useEffect(() => {
@@ -4311,47 +4320,26 @@ function DefaultDocumentChoicePanel({
     callback();
   };
 
+  const handleChoiceLabelClick = (event, callback) => {
+    event.stopPropagation();
+    if (isDisabled) return;
+    callback();
+  };
+
   return (
     <div className="message-document-choice-panel">
       <strong className="document-choice-title">{targetLabel} 생성</strong>
       <section className="document-choice-section document-choice-slot">
         <strong className="document-choice-section-title">기준 문서</strong>
-        <p className="document-choice-file-line">
-          <span>{primaryLabel}:</span>
-          <strong>{primaryDisplayName}</strong>
-        </p>
-        {documents.length > 0 && (
-          <fieldset className="document-choice-radio-row">
-            <legend className="sr-only">{primaryLabel} 사용 여부</legend>
-            <span className="document-choice-radio-label">기존 문서 사용</span>
-            <label className="document-choice-check">
-              <input
-                type="radio"
-                name={`${documentSelectId}-use-primary`}
-                checked={usePrimaryDocument}
-                disabled={isDisabled}
-                onChange={() => setUsePrimaryDocument(true)}
-              />
-              <span>예</span>
-            </label>
-            <label className="document-choice-check">
-              <input
-                type="radio"
-                name={`${documentSelectId}-use-primary`}
-                checked={!usePrimaryDocument}
-                disabled={isDisabled}
-                onChange={() => setUsePrimaryDocument(false)}
-              />
-              <span>아니오</span>
-            </label>
-          </fieldset>
-        )}
-        {hasSelectedPrimaryDocument && documents.length > 1 && (
-          <div className="document-choice-picker">
-            <label htmlFor={documentSelectId}>선택된 문서</label>
+        <div className="document-choice-file-row">
+          <label className="document-choice-file-label" htmlFor={documentSelectId}>
+            {primaryLabel}
+          </label>
+          {usePrimaryDocument && documents.length > 0 ? (
             <select
               id={documentSelectId}
-              value={selectedDocumentId}
+              className="document-choice-source-select"
+              value={selectedDocument?.documentId || ""}
               disabled={isDisabled}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => setSelectedDocumentId(event.target.value)}
@@ -4362,7 +4350,49 @@ function DefaultDocumentChoicePanel({
                 </option>
               ))}
             </select>
-          </div>
+          ) : (
+            <span className="document-choice-file-placeholder">
+              {documents.length > 0 ? "새 문서 업로드" : "기존 문서 없음"}
+            </span>
+          )}
+        </div>
+        {documents.length > 0 && (
+          <fieldset className="document-choice-radio-row">
+            <legend className="sr-only">{primaryLabel} 사용 여부</legend>
+            <span className="document-choice-radio-label">기존 문서 사용</span>
+            <label
+              className="document-choice-check"
+              onClick={(event) =>
+                handleChoiceLabelClick(event, () => setUsePrimaryDocument(true))
+              }
+            >
+              <input
+                type="radio"
+                name={primaryUseName}
+                checked={usePrimaryDocument}
+                disabled={isDisabled}
+                onClick={(event) => event.stopPropagation()}
+                onChange={() => setUsePrimaryDocument(true)}
+              />
+              <span>예</span>
+            </label>
+            <label
+              className="document-choice-check"
+              onClick={(event) =>
+                handleChoiceLabelClick(event, () => setUsePrimaryDocument(false))
+              }
+            >
+              <input
+                type="radio"
+                name={primaryUseName}
+                checked={!usePrimaryDocument}
+                disabled={isDisabled}
+                onClick={(event) => event.stopPropagation()}
+                onChange={() => setUsePrimaryDocument(false)}
+              />
+              <span>아니오</span>
+            </label>
+          </fieldset>
         )}
         {shouldShowPrimaryUpload && (
           <div className="document-choice-upload-panel">
@@ -4382,7 +4412,7 @@ function DefaultDocumentChoicePanel({
               )}
             </button>
             <p className="document-choice-upload-copy">
-              {primaryLabel}를 업로드해야 생성할 수 있습니다.
+              {primaryLabel}를 선택하거나 업로드해 주세요.
             </p>
           </div>
         )}
@@ -4401,46 +4431,17 @@ function DefaultDocumentChoicePanel({
           <strong className="document-choice-section-title">
             추가 자료 · 선택
           </strong>
-          <p className="document-choice-file-line">
-            <span>{optionalLabel}:</span>
-            <strong>{optionalDisplayName}</strong>
-          </p>
-          {optionalDocuments.length > 0 && (
-            <fieldset className="document-choice-radio-row">
-              <legend className="sr-only">{optionalLabel} 사용 여부</legend>
-              <span className="document-choice-radio-label">기존 문서 사용</span>
-              <label className="document-choice-check">
-                <input
-                  type="radio"
-                  name={`${optionalDocumentSelectId}-include-optional`}
-                  checked={includeOptionalDocument}
-                  disabled={isDisabled}
-                  onChange={() => {
-                    setIncludeOptionalDocument(true);
-                    setSelectedOptionalDocumentIds([
-                      selectedOptionalDocument?.documentId,
-                    ].filter(Boolean));
-                  }}
-                />
-                <span>예</span>
-              </label>
-              <label className="document-choice-check">
-                <input
-                  type="radio"
-                  name={`${optionalDocumentSelectId}-include-optional`}
-                  checked={!includeOptionalDocument}
-                  disabled={isDisabled}
-                  onChange={() => setIncludeOptionalDocument(false)}
-                />
-                <span>아니오</span>
-              </label>
-            </fieldset>
-          )}
-          {hasSelectedOptionalDocument && optionalDocuments.length > 1 && (
-            <div className="document-choice-picker">
-              <label htmlFor={optionalDocumentSelectId}>선택된 문서</label>
+          <div className="document-choice-file-row">
+            <label
+              className="document-choice-file-label"
+              htmlFor={optionalDocumentSelectId}
+            >
+              {optionalLabel}
+            </label>
+            {includeOptionalDocument && optionalDocuments.length > 0 ? (
               <select
                 id={optionalDocumentSelectId}
+                className="document-choice-source-select"
                 value={selectedOptionalDocumentId}
                 disabled={isDisabled}
                 onClick={(event) => event.stopPropagation()}
@@ -4454,7 +4455,61 @@ function DefaultDocumentChoicePanel({
                   </option>
                 ))}
               </select>
-            </div>
+            ) : (
+              <span className="document-choice-file-placeholder">
+                {optionalDocuments.length > 0 ? "새 문서 업로드" : "기존 문서 없음"}
+              </span>
+            )}
+          </div>
+          {optionalDocuments.length > 0 && (
+            <fieldset className="document-choice-radio-row">
+              <legend className="sr-only">{optionalLabel} 사용 여부</legend>
+              <span className="document-choice-radio-label">기존 문서 사용</span>
+              <label
+                className="document-choice-check"
+                onClick={(event) =>
+                  handleChoiceLabelClick(event, () => {
+                    setIncludeOptionalDocument(true);
+                    setSelectedOptionalDocumentIds([
+                      selectedOptionalDocument?.documentId,
+                    ].filter(Boolean));
+                  })
+                }
+              >
+                <input
+                  type="radio"
+                  name={optionalUseName}
+                  checked={includeOptionalDocument}
+                  disabled={isDisabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => {
+                    setIncludeOptionalDocument(true);
+                    setSelectedOptionalDocumentIds([
+                      selectedOptionalDocument?.documentId,
+                    ].filter(Boolean));
+                  }}
+                />
+                <span>예</span>
+              </label>
+              <label
+                className="document-choice-check"
+                onClick={(event) =>
+                  handleChoiceLabelClick(event, () =>
+                    setIncludeOptionalDocument(false),
+                  )
+                }
+              >
+                <input
+                  type="radio"
+                  name={optionalUseName}
+                  checked={!includeOptionalDocument}
+                  disabled={isDisabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => setIncludeOptionalDocument(false)}
+                />
+                <span>아니오</span>
+              </label>
+            </fieldset>
           )}
           {shouldShowOptionalUpload && (
             <div className="document-choice-upload-panel">
@@ -4497,6 +4552,23 @@ function DefaultDocumentChoicePanel({
         onChange={setSelectedOutputFormat}
         isDisabled={isDisabled}
       />
+      <div className="document-choice-description-option">
+        <span>문서 설명도 확인할 수 있어요.</span>
+        <button
+          className="message-upload-button secondary"
+          type="button"
+          disabled={isDisabled || isUploading}
+          onClick={(event) =>
+            handlePanelAction(event, () =>
+              onExplain?.({
+                commandText: getDocumentExplanationCommand(targetLabel),
+              }),
+            )
+          }
+        >
+          설명 보기
+        </button>
+      </div>
       <div className="document-choice-actions">
         <button
           className="message-upload-button"

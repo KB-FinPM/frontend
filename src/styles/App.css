@@ -1062,8 +1062,13 @@ p {
   align-items: center;
   gap: 8px;
   color: #344054;
+  cursor: pointer;
   font-size: 13px;
   font-weight: 700;
+}
+
+.document-choice-check:has(input:disabled) {
+  cursor: not-allowed;
 }
 
 .document-choice-check input {
@@ -1121,6 +1126,56 @@ p {
   color: #173a67;
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.document-choice-file-row {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(180px, 320px);
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.document-choice-file-label {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.document-choice-source-select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #101828;
+  background: #ffffff;
+  font-size: 13px;
+}
+
+.document-choice-source-select:disabled {
+  color: #667085;
+  background: #f9fafb;
+}
+
+.document-choice-file-placeholder {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.document-choice-description-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .document-output-format {
