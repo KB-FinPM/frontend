@@ -29,7 +29,6 @@ export const createAssistantMessageFromResponse = (response) => ({
     result: response.result ?? {},
     uploadRequest: response.result?.upload_request ?? null,
     documentChoiceRequest: response.result?.document_choice_request ?? null,
-    startDateRequest: response.result?.start_date_request ?? null,
     commandActions: Array.isArray(response.result?.command_actions)
       ? response.result.command_actions
       : [],

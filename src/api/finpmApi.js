@@ -112,6 +112,17 @@ export const getArtifact = ({ projectId, artifactId }) =>
     )}`,
   );
 
+export const updateArtifactFileName = ({ projectId, artifactId, fileName }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/artifacts/${encodePathSegment(
+      artifactId,
+    )}`,
+    {
+      method: "PATCH",
+      body: { file_name: fileName },
+    },
+  );
+
 export const downloadArtifactFile = async ({
   projectId,
   artifactId,

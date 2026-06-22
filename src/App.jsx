@@ -50,6 +50,7 @@ import {
   getChatActionStatus,
   listProjectFiles,
   listDocuments,
+  updateArtifactFileName,
   uploadDocument,
 } from "./api/finpmApi.js";
 import {
@@ -68,6 +69,8 @@ const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
   "application/pdf",
   ".docx",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".pptx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".xlsx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".xls",
@@ -93,14 +96,74 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
 });
 const DOCUMENT_GENERATION_COPY = Object.freeze({
   existingCheck: "참고할 기존 문서가 있나요?",
-  existingChoice: "기존 문서를 기준으로 생성할까요?",
-  uploadOrCreate:
-    "참고할 문서를 업로드해주세요.\n문서 없이 바로 생성하려면 생성 버튼을 눌러주세요.",
+  existingChoice: "기준 문서를 확인해주세요.",
+  uploadOrCreate: "생성 기준 문서를 업로드해주세요.",
   start: "문서 생성을 시작하겠습니다.",
-  uploadLabel: "참고 문서 업로드",
-  useExisting: "기존 문서 기반으로 생성",
+  uploadLabel: "기준 문서 업로드",
+  useExisting: "이 문서로 생성",
   createNew: "새 문서로 생성",
   directCreate: "생성",
+});
+const OUTPUT_FORMAT_LABELS = Object.freeze({
+  xlsx: "Excel(.xlsx)",
+  pptx: "PowerPoint(.pptx)",
+});
+const GENERATION_DOCUMENT_RELATIONS = Object.freeze({
+  [GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC]: {
+    targetArtifactType: "REQUIREMENT_SPEC",
+    targetLabel: "요구사항명세서",
+    primarySource: {
+      documentType: DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION,
+      label: "구축요건정의서",
+      keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
+      required: true,
+    },
+    optionalSources: [
+      {
+        documentType: DOCUMENT_TYPES.MEETING_NOTES,
+        label: "기술협상회의록",
+        keywords: ["기술협상", "회의록", "meeting"],
+        optional: true,
+      },
+    ],
+    outputFormats: [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }],
+  },
+  [GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE]: {
+    targetArtifactType: "SCREEN_DESIGN",
+    targetLabel: "화면설계서",
+    primarySource: {
+      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+      label: "요구사항명세서",
+      keywords: ["요구사항", "요구사항명세", "요구사항정의"],
+      required: true,
+    },
+    optionalSources: [],
+    outputFormats: [{ value: "pptx", label: OUTPUT_FORMAT_LABELS.pptx }],
+  },
+  [GENERATION_REQUEST_TYPES.WBS_CREATE]: {
+    targetArtifactType: "WBS",
+    targetLabel: "WBS",
+    primarySource: {
+      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+      label: "요구사항명세서",
+      keywords: ["요구사항", "요구사항명세", "요구사항정의"],
+      required: true,
+    },
+    optionalSources: [],
+    outputFormats: [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }],
+  },
+  [GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE]: {
+    targetArtifactType: "UNITTEST_SPEC",
+    targetLabel: "단위테스트케이스",
+    primarySource: {
+      documentType: DOCUMENT_TYPES.SCREEN_DESIGN,
+      label: "화면설계서",
+      keywords: ["화면설계", "화면정의", "screen"],
+      required: true,
+    },
+    optionalSources: [],
+    outputFormats: [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }],
+  },
 });
 const GENERATION_PROGRESS_INITIAL_VALUE = 5;
 const GENERATION_PROGRESS_LABEL = "요구사항명세서 생성 중";
@@ -255,6 +318,9 @@ const getGenerationRequestType = (value = "") => {
 
 const getDocumentDisplayLabel = (documentType) => {
   if (documentType === DOCUMENT_TYPES.WBS) return "업로드한 WBS";
+  if (documentType === DOCUMENT_TYPES.SCREEN_DESIGN) {
+    return "업로드한 화면설계서";
+  }
   if (documentType === DOCUMENT_TYPES.MEETING_NOTES) return "업로드한 회의록";
   if (documentType === DOCUMENT_TYPES.REQUIREMENT_SPEC) {
     return "업로드한 요구사항 명세서";
@@ -264,6 +330,40 @@ const getDocumentDisplayLabel = (documentType) => {
   }
   return "업로드한 문서";
 };
+
+const getRelation = (requestType) => GENERATION_DOCUMENT_RELATIONS[requestType] ?? null;
+
+const getOutputFormats = (relation) =>
+  Array.isArray(relation?.outputFormats) && relation.outputFormats.length
+    ? relation.outputFormats
+    : [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }];
+
+const getDefaultOutputFormat = (relation) => getOutputFormats(relation)[0]?.value || "xlsx";
+
+const formatRelationSourceLabels = (relation, optionalDocuments = []) => {
+  const labels = [relation?.primarySource?.label].filter(Boolean);
+  if (optionalDocuments.length) {
+    const optionalLabels = relation?.optionalSources?.map((source) => source.label) ?? [];
+    labels.push(...optionalLabels);
+  }
+  if (labels.length <= 1) return labels[0] || "기준 문서";
+  return `${labels.slice(0, -1).join(", ")}와 ${labels[labels.length - 1]}`;
+};
+
+const getRelationQuestion = (relation, optionalDocuments = []) =>
+  `${formatRelationSourceLabels(relation, optionalDocuments)}를 기준으로 ${
+    relation?.targetLabel || "산출물"
+  }를 생성할까요?`;
+
+const getRelationUploadMessage = (relation) =>
+  `${relation?.targetLabel || "산출물"}를 생성하려면 기준이 되는 ${
+    relation?.primarySource?.label || "참고 문서"
+  }가 필요합니다.\n참고 문서를 업로드하거나, 문서 없이 바로 생성하려면 생성 버튼을 눌러주세요.`;
+
+const getOutputFormatLabel = (formats, value) =>
+  formats.find((format) => format.value === value)?.label ||
+  OUTPUT_FORMAT_LABELS[value] ||
+  value;
 
 const toDocumentContext = (document) => {
   const documentType =
@@ -395,6 +495,8 @@ const normalizeUploadedFile = (file) => {
 const normalizeUploadedFileListResponse = (response) => {
   const files =
     (Array.isArray(response) && response) ||
+    response?.uploaded_files ||
+    response?.uploadedFiles ||
     response?.files ||
     response?.items ||
     response?.documents ||
@@ -407,6 +509,43 @@ const normalizeUploadedFileListResponse = (response) => {
     .map(normalizeUploadedFile)
     .filter((file) => file.fileId || file.fileName);
 };
+
+const normalizeGeneratedFile = (file) => {
+  const fileName =
+    file.file_name ??
+    file.fileName ??
+    file.name ??
+    file.artifact_name ??
+    "생성 파일";
+  const artifactType = file.artifact_type ?? file.artifactType ?? "";
+  return {
+    fileId: file.artifact_id ?? file.artifactId ?? file.file_id ?? file.id ?? "",
+    fileName,
+    fileType: getFileExtension(fileName) || artifactType || "생성 파일",
+    artifactType,
+    version: file.version ?? null,
+    createdAt: file.created_at ?? file.createdAt ?? "",
+    updatedAt: file.updated_at ?? file.updatedAt ?? "",
+    raw: file,
+  };
+};
+
+const normalizeGeneratedFileListResponse = (response) => {
+  const files =
+    response?.generated_files ||
+    response?.generatedFiles ||
+    response?.artifacts ||
+    response?.result?.generated_files ||
+    [];
+  return (Array.isArray(files) ? files : [])
+    .map(normalizeGeneratedFile)
+    .filter((file) => file.fileId || file.fileName);
+};
+
+const normalizeProjectFileBuckets = (response) => ({
+  uploaded: normalizeUploadedFileListResponse(response),
+  generated: normalizeGeneratedFileListResponse(response),
+});
 
 const compactText = (value = "") =>
   String(value)
@@ -464,72 +603,47 @@ const getUploadResumeDocuments = (uploadRequest, uploadedDocument) => {
 };
 
 const getRequiredDocumentConfig = (requestType) => {
+  const relation = getRelation(requestType);
+  if (!relation || requestType === GENERATION_REQUEST_TYPES.WBS_REFERENCE) {
+    return null;
+  }
+  const outputFormats = getOutputFormats(relation);
   const commonCommandActions = [
     {
       label: DOCUMENT_GENERATION_COPY.directCreate,
       directCreate: true,
       requestType,
+      outputFormat: getDefaultOutputFormat(relation),
     },
   ];
-  const commonConfig = {
+
+  return {
     requestType,
-    message: DOCUMENT_GENERATION_COPY.uploadOrCreate,
-    existingMessage: DOCUMENT_GENERATION_COPY.existingChoice,
-    label: DOCUMENT_GENERATION_COPY.uploadLabel,
+    relation,
+    targetArtifactType: relation.targetArtifactType,
+    targetLabel: relation.targetLabel,
+    primarySource: relation.primarySource,
+    optionalSources: relation.optionalSources ?? [],
+    outputFormats,
+    defaultOutputFormat: getDefaultOutputFormat(relation),
+    message: getRelationUploadMessage(relation),
+    existingMessage: getRelationQuestion(relation),
+    label: `${relation.primarySource.label} 업로드`,
+    documentTypes: [relation.primarySource.documentType],
+    keywords: relation.primarySource.keywords ?? [],
+    documentType: relation.primarySource.documentType,
+    optionalDocumentTypes: (relation.optionalSources ?? []).map(
+      (source) => source.documentType,
+    ),
+    optionalKeywords: (relation.optionalSources ?? []).flatMap(
+      (source) => source.keywords ?? [],
+    ),
     commandActions: commonCommandActions,
   };
-
-  if (requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC) {
-    return {
-      ...commonConfig,
-      requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
-      documentTypes: [DEFAULT_DOCUMENT_TYPE],
-      keywords: ["구축요건", "요건정의", "rfp", "제안요청"],
-      documentType: DEFAULT_DOCUMENT_TYPE,
-    };
-  }
-
-  if (requestType === GENERATION_REQUEST_TYPES.WBS_CREATE) {
-    return {
-      ...commonConfig,
-      documentTypes: [
-        DOCUMENT_TYPES.REQUIREMENT_SPEC,
-      ],
-      keywords: ["요구사항", "요구사항명세", "요구사항정의"],
-      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-    };
-  }
-
-  if (requestType === GENERATION_REQUEST_TYPES.WBS_REFERENCE) {
-    return null;
-  }
-
-  if (requestType === GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE) {
-    return {
-      ...commonConfig,
-      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
-      keywords: ["요구사항", "요구사항명세", "요구사항정의", "rfp", "기획서"],
-      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-    };
-  }
-
-  if (requestType === GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE) {
-    return {
-      ...commonConfig,
-      documentTypes: [DOCUMENT_TYPES.REQUIREMENT_SPEC],
-      keywords: ["요구사항", "요구사항명세", "요구사항정의", "화면설계"],
-      documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-    };
-  }
-
-  return null;
 };
 
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
-
-const requiresProjectStartDate = (requestType) =>
-  false;
 
 const sanitizeProjectStartDateInput = (value = "") => {
   const text = String(value ?? "");
@@ -909,13 +1023,16 @@ function App() {
   const [generationProgress, setGenerationProgress] = useState(null);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [fileBuckets, setFileBuckets] = useState({ uploaded: [], generated: [] });
   const [isLoadingUploadedFiles, setIsLoadingUploadedFiles] = useState(false);
   const [fileManagerError, setFileManagerError] = useState("");
   const [fileActionError, setFileActionError] = useState("");
   const [pendingDeleteFile, setPendingDeleteFile] = useState(null);
   const [deletingFileId, setDeletingFileId] = useState("");
   const [downloadingFileId, setDownloadingFileId] = useState("");
+  const [editingGeneratedFileId, setEditingGeneratedFileId] = useState("");
+  const [renamingGeneratedFileId, setRenamingGeneratedFileId] = useState("");
+  const [generatedFileNameDraft, setGeneratedFileNameDraft] = useState("");
   const scrollRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingRejectRef = useRef(null);
@@ -934,13 +1051,16 @@ function App() {
 
   const resetFileManagerState = () => {
     setIsFileManagerOpen(false);
-    setUploadedFiles([]);
+    setFileBuckets({ uploaded: [], generated: [] });
     setIsLoadingUploadedFiles(false);
     setFileManagerError("");
     setFileActionError("");
     setPendingDeleteFile(null);
     setDeletingFileId("");
     setDownloadingFileId("");
+    setEditingGeneratedFileId("");
+    setRenamingGeneratedFileId("");
+    setGeneratedFileNameDraft("");
   };
 
   const clearGenerationPolling = ({ rejectPending = false } = {}) => {
@@ -1101,6 +1221,82 @@ function App() {
       pollOnce();
     });
 
+  const resolveGenerationStartedAssistantMessage = async (
+    assistantMessage,
+    { projectId, requestType },
+  ) => {
+    if (!getRequiredDocumentConfig(requestType)) {
+      return assistantMessage;
+    }
+
+    const pollingActionId = getAssistantActionId(assistantMessage);
+    if (!pollingActionId) {
+      setGenerationProgress(null);
+      return assistantMessage;
+    }
+
+    if (assistantMessage.metadata?.state === CHAT_STATES.FAILED) {
+      const failedProgress = failGenerationProgress();
+      return {
+        ...assistantMessage,
+        metadata: {
+          ...assistantMessage.metadata,
+          actionId: pollingActionId,
+          generationProgress: failedProgress,
+          pendingAction: null,
+          suggestedActions: [],
+        },
+      };
+    }
+
+    const statusResponse = await pollGenerationActionStatus({
+      projectId,
+      actionId: pollingActionId,
+    });
+    if (
+      statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
+      statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
+    ) {
+      const failedProgress = failGenerationProgress(statusResponse);
+      return {
+        ...assistantMessage,
+        content:
+          statusResponse.message ||
+          "문서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        metadata: {
+          ...assistantMessage.metadata,
+          state: CHAT_STATES.FAILED,
+          actionId: pollingActionId,
+          generationProgress: failedProgress,
+          result: statusResponse.result ?? {},
+          downloadFiles: [],
+          pendingAction: null,
+          suggestedActions: [],
+          rawResponse: statusResponse,
+        },
+      };
+    }
+
+    const completedProgress = completeGenerationProgress();
+    return {
+      ...assistantMessage,
+      content: statusResponse.message || assistantMessage.content,
+      metadata: {
+        ...assistantMessage.metadata,
+        state: statusResponse.state ?? CHAT_STATES.COMPLETED,
+        actionId: pollingActionId,
+        generationProgress: completedProgress,
+        result: statusResponse.result ?? {},
+        downloadFiles: Array.isArray(statusResponse.download_files)
+          ? statusResponse.download_files
+          : [],
+        pendingAction: null,
+        suggestedActions: [],
+        rawResponse: statusResponse,
+      },
+    };
+  };
+
   const clearMessageActions = async ({ conversationId, message }) => {
     if (!project || !conversationId || !message?.id) return null;
 
@@ -1115,7 +1311,6 @@ function App() {
           actionResolved: true,
           uploadRequest: null,
           documentChoiceRequest: null,
-          startDateRequest: null,
           pendingAction: null,
           suggestedActions: [],
           commandActions: [],
@@ -1395,7 +1590,7 @@ function App() {
 
   const loadUploadedFiles = async (targetProject = project) => {
     if (!targetProject?.projectId) {
-      setUploadedFiles([]);
+      setFileBuckets({ uploaded: [], generated: [] });
       setFileManagerError("프로젝트를 먼저 선택해주세요.");
       return;
     }
@@ -1406,9 +1601,9 @@ function App() {
 
     try {
       const response = await listProjectFiles(targetProject.projectId);
-      setUploadedFiles(normalizeUploadedFileListResponse(response));
+      setFileBuckets(normalizeProjectFileBuckets(response));
     } catch {
-      setUploadedFiles([]);
+      setFileBuckets({ uploaded: [], generated: [] });
       setFileManagerError(
         "파일 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
       );
@@ -1421,7 +1616,7 @@ function App() {
     setIsFileManagerOpen(true);
     setPendingDeleteFile(null);
     if (!project) {
-      setUploadedFiles([]);
+      setFileBuckets({ uploaded: [], generated: [] });
       setFileManagerError("프로젝트를 먼저 선택해주세요.");
       return;
     }
@@ -1488,14 +1683,96 @@ function App() {
         projectId: project.projectId,
         fileId: pendingDeleteFile.fileId,
       });
-      setUploadedFiles((files) =>
-        files.filter((file) => file.fileId !== pendingDeleteFile.fileId),
-      );
+      setFileBuckets((currentBuckets) => ({
+        ...currentBuckets,
+        uploaded: currentBuckets.uploaded.filter(
+          (file) => file.fileId !== pendingDeleteFile.fileId,
+        ),
+      }));
       setPendingDeleteFile(null);
     } catch {
       setFileActionError("파일 삭제 중 오류가 발생했습니다.");
     } finally {
       setDeletingFileId("");
+    }
+  };
+
+  const handleDownloadGeneratedFile = async (file) => {
+    if (!project?.projectId) {
+      setFileActionError("프로젝트를 먼저 선택해주세요.");
+      return;
+    }
+    if (!file?.fileId) {
+      setFileActionError("다운로드할 생성 파일 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setDownloadingFileId(file.fileId);
+    setFileActionError("");
+
+    try {
+      await downloadArtifactFile({
+        projectId: project.projectId,
+        artifactId: file.fileId,
+        fileName: file.fileName,
+      });
+    } catch {
+      setFileActionError("생성 파일 다운로드 중 오류가 발생했습니다.");
+    } finally {
+      setDownloadingFileId("");
+    }
+  };
+
+  const handleStartGeneratedFileRename = (file) => {
+    setEditingGeneratedFileId(file.fileId);
+    setGeneratedFileNameDraft(file.fileName || "");
+    setFileActionError("");
+  };
+
+  const handleCancelGeneratedFileRename = () => {
+    setEditingGeneratedFileId("");
+    setGeneratedFileNameDraft("");
+    setFileActionError("");
+  };
+
+  const handleSaveGeneratedFileRename = async (file) => {
+    if (!project?.projectId || !file?.fileId) {
+      setFileActionError("수정할 생성 파일 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    const nextFileName = generatedFileNameDraft.trim();
+    if (!nextFileName) {
+      setFileActionError("파일명을 입력해주세요.");
+      return;
+    }
+
+    setRenamingGeneratedFileId(file.fileId);
+    setFileActionError("");
+
+    try {
+      const updatedArtifact = await updateArtifactFileName({
+        projectId: project.projectId,
+        artifactId: file.fileId,
+        fileName: nextFileName,
+      });
+      const updatedFile = normalizeGeneratedFile(updatedArtifact);
+      setFileBuckets((currentBuckets) => ({
+        ...currentBuckets,
+        generated: currentBuckets.generated.map((generatedFile) =>
+          generatedFile.fileId === file.fileId ? updatedFile : generatedFile,
+        ),
+      }));
+      setEditingGeneratedFileId("");
+      setGeneratedFileNameDraft("");
+    } catch (error) {
+      setFileActionError(
+        error instanceof Error
+          ? error.message
+          : "생성 파일명을 수정하지 못했습니다.",
+      );
+    } finally {
+      setRenamingGeneratedFileId("");
     }
   };
 
@@ -1552,7 +1829,10 @@ function App() {
   }) => {
     const includeDocumentIdAliases =
       requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
-    const assistantMessage = await sendProjectMessage({
+    if (getRequiredDocumentConfig(requestType)) {
+      startGenerationProgress();
+    }
+    let assistantMessage = await sendProjectMessage({
       project_id: targetProject.projectId,
       conversation_id: targetConversationId || null,
       message: messageText,
@@ -1566,6 +1846,13 @@ function App() {
     if (!backendConversationId) {
       throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
     }
+    assistantMessage = await resolveGenerationStartedAssistantMessage(
+      assistantMessage,
+      {
+        projectId: targetProject.projectId,
+        requestType,
+      },
+    );
 
     const messageResult = await addMessagesToConversation(
       targetProject.projectId,
@@ -1589,38 +1876,8 @@ function App() {
     };
   };
 
-  const ensureProjectStartDateBeforeGeneration = async ({
-    targetProject,
-    targetConversationId,
-    message,
-    originalMessage,
-    requestType,
-  }) => {
-    if (!requiresProjectStartDate(requestType)) return false;
-    if (getProjectStartDate(targetProject)) return false;
-
-    await sendLocalRequiredInfoMessage({
-      targetProject,
-      targetConversationId,
-      content: "WBS 생성을 위해 프로젝트 시작일을 입력해주세요.",
-      metadata: {
-        startDateRequest: {
-          label: "프로젝트 시작일",
-          originalMessage: originalMessage || "WBS 만들어줘",
-          resumeMessageId: message?.id,
-        },
-      },
-    });
-
-    return true;
-  };
-
   const prepareMessageRequest = async ({ messageText, targetProject }) => {
     const requestType = getGenerationRequestType(messageText);
-
-    if (requiresProjectStartDate(requestType) && !getProjectStartDate(targetProject)) {
-      return { status: "START_DATE_REQUIRED", requestType };
-    }
 
     const requiredDocumentConfig = getRequiredDocumentConfig(requestType);
     if (!requiredDocumentConfig) {
@@ -1631,16 +1888,27 @@ function App() {
     const matchingDocuments = getMatchingDocuments(
       documents,
       requiredDocumentConfig,
-    ).filter(
-      (document) =>
-        requestType !== GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC ||
-        document.documentType !== DOCUMENT_TYPES.MEETING_NOTES,
     );
+    const optionalDocuments = (requiredDocumentConfig.optionalSources ?? [])
+      .flatMap((source) =>
+        getMatchingDocuments(documents, {
+          documentTypes: [source.documentType],
+          keywords: source.keywords ?? [],
+        }),
+      )
+      .filter(
+        (document) =>
+          !matchingDocuments.some(
+            (primaryDocument) =>
+              primaryDocument.documentId === document.documentId,
+          ),
+      );
     const matchedDocument = matchingDocuments[0] ?? null;
     if (matchedDocument) {
       return {
         status: "DOCUMENT_CHOICE_REQUIRED",
         documents: matchingDocuments,
+        optionalDocuments: uniqueDocumentsById(optionalDocuments),
         defaultDocument: matchedDocument,
         documentConfig: requiredDocumentConfig,
         requestType,
@@ -1681,22 +1949,6 @@ function App() {
         targetProject,
       });
 
-      if (preparedRequest.status === "START_DATE_REQUIRED") {
-        await sendLocalRequiredInfoMessage({
-          targetProject,
-          targetConversationId,
-          userMessage,
-          content: "WBS 생성을 위해 프로젝트 시작일을 입력해주세요.",
-          metadata: {
-            startDateRequest: {
-              label: "프로젝트 시작일",
-              originalMessage: trimmedValue,
-            },
-          },
-        });
-        return;
-      }
-
       if (preparedRequest.status === "UPLOAD_REQUIRED") {
         await sendLocalRequiredInfoMessage({
           targetProject,
@@ -1711,6 +1963,8 @@ function App() {
               originalMessage: trimmedValue,
               resumeAfterUpload: true,
               requestType: preparedRequest.requestType,
+              outputFormats: preparedRequest.documentConfig.outputFormats,
+              outputFormat: preparedRequest.documentConfig.defaultOutputFormat,
             },
             commandActions: preparedRequest.documentConfig.commandActions ?? [],
           },
@@ -1731,7 +1985,10 @@ function App() {
               originalMessage: trimmedValue,
               documentConfig: preparedRequest.documentConfig,
               documents: preparedRequest.documents,
+              optionalDocuments: preparedRequest.optionalDocuments,
               defaultDocumentId: preparedRequest.defaultDocument?.documentId,
+              outputFormats: preparedRequest.documentConfig.outputFormats,
+              outputFormat: preparedRequest.documentConfig.defaultOutputFormat,
             },
           },
         });
@@ -1834,6 +2091,12 @@ function App() {
                 "업로드한 문서를 기준으로 진행해줘",
               resumeAfterUpload: true,
               requestType: documentChoiceConfig?.requestType || "",
+              outputFormats:
+                documentChoiceRequest.outputFormats ??
+                documentChoiceConfig?.outputFormats,
+              outputFormat:
+                documentChoiceRequest.outputFormat ??
+                documentChoiceConfig?.defaultOutputFormat,
             }
           : {});
       const requestedDocumentType =
@@ -1881,22 +2144,18 @@ function App() {
         setDocumentStatusMessage(DOCUMENT_GENERATION_COPY.start);
         const targetConversationId =
           message.metadata?.conversationId || activeConversationId;
-        const blockedByStartDate =
-          await ensureProjectStartDateBeforeGeneration({
-            targetProject: project,
-            targetConversationId,
-            message,
-            originalMessage,
-            requestType: uploadRequest.requestType,
-          });
-        if (blockedByStartDate) return;
-
         await sendBackendConversationMessage({
           targetProject: project,
           targetConversationId,
           messageText: originalMessage,
           documents: resumeDocuments,
           requestType: uploadRequest.requestType,
+          extraContext: {
+            output_format:
+              uploadRequest.outputFormat ||
+              getDefaultOutputFormat(getRelation(uploadRequest.requestType)),
+            document_generation_mode: "upload",
+          },
         });
         await saveCommandUsage(project.projectId, originalMessage);
         setLastCommandInfo({ commandText: originalMessage });
@@ -1920,113 +2179,12 @@ function App() {
     }
   };
 
-  const handleStartDateSubmit = async ({ message, startDate }) => {
-    if (!project || isResponding) return;
-
-    const normalizedStartDate = String(startDate ?? "").trim();
-    const targetConversationId =
-      message.metadata?.conversationId || activeConversationId;
-    const originalMessage =
-      message.metadata?.startDateRequest?.originalMessage || "WBS 만들어줘";
-
-    if (!targetConversationId) {
-      setDocumentError("프로젝트 시작일을 저장할 대화 정보를 확인하지 못했습니다.");
-      return;
-    }
-    if (!isValidProjectStartDate(normalizedStartDate) || !normalizedStartDate) {
-      setDocumentError(PROJECT_START_DATE_ERROR);
-      return;
-    }
-
-    setIsResponding(true);
-    setDocumentError("");
-    setDocumentStatusMessage("");
-
-    try {
-      const updatedProject = await updateProject(project.projectId, {
-        projectName: project.projectName,
-        projectDescription: project.projectDescription,
-        start_date: normalizedStartDate,
-      });
-      setProject(updatedProject);
-      await clearMessageActions({
-        conversationId: targetConversationId,
-        message,
-      });
-
-      const preparedRequest = await prepareMessageRequest({
-        messageText: originalMessage,
-        targetProject: updatedProject,
-      });
-
-      if (preparedRequest.status === "UPLOAD_REQUIRED") {
-        await sendLocalRequiredInfoMessage({
-          targetProject: updatedProject,
-          targetConversationId,
-          content: preparedRequest.documentConfig.message,
-          metadata: {
-            uploadRequest: {
-              label: preparedRequest.documentConfig.label,
-              acceptedTypes: DOCUMENT_UPLOAD_ACCEPTED_TYPES,
-              documentType: preparedRequest.documentConfig.documentType,
-              originalMessage,
-              resumeAfterUpload: true,
-              requestType: preparedRequest.requestType,
-            },
-            commandActions: preparedRequest.documentConfig.commandActions ?? [],
-          },
-        });
-        return;
-      }
-
-      if (preparedRequest.status === "DOCUMENT_CHOICE_REQUIRED") {
-        await sendLocalRequiredInfoMessage({
-          targetProject: updatedProject,
-          targetConversationId,
-          content:
-            preparedRequest.documentConfig.existingMessage ||
-            "이미 업로드된 문서가 있습니다. 이 문서를 기준으로 진행할까요?",
-          metadata: {
-            documentChoiceRequest: {
-              originalMessage,
-              documentConfig: preparedRequest.documentConfig,
-              documents: preparedRequest.documents,
-              defaultDocumentId: preparedRequest.defaultDocument?.documentId,
-            },
-          },
-        });
-        return;
-      }
-
-      await sendBackendConversationMessage({
-        targetProject: updatedProject,
-        targetConversationId,
-        messageText: originalMessage,
-        documents: preparedRequest.documents,
-        requestType: preparedRequest.requestType,
-      });
-      await saveCommandUsage(updatedProject.projectId, originalMessage);
-      setLastCommandInfo({ commandText: originalMessage });
-    } catch (error) {
-      reportUiError("handleStartDateSubmit", error, {
-        projectId: project?.projectId,
-        startDate: normalizedStartDate,
-      });
-      setDocumentError(
-        error instanceof Error
-          ? error.message
-          : "프로젝트 시작일을 저장하지 못했습니다.",
-      );
-    } finally {
-      setIsResponding(false);
-    }
-  };
-
   const handleDocumentChoice = async ({
     message,
     choice,
     documentId,
-    optionalDocumentId = "",
+    optionalDocumentIds = [],
+    outputFormat = "",
   }) => {
     if (!project || isResponding || isUploadingDocument) return;
 
@@ -2039,6 +2197,11 @@ function App() {
     const originalMessage =
       choiceRequest.originalMessage || "선택한 문서를 기준으로 진행해줘";
     const requestType = choiceRequest.documentConfig?.requestType || "";
+    const selectedOutputFormat =
+      outputFormat ||
+      choiceRequest.outputFormat ||
+      choiceRequest.documentConfig?.defaultOutputFormat ||
+      getDefaultOutputFormat(getRelation(requestType));
 
     if (!targetConversationId) {
       setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
@@ -2072,6 +2235,7 @@ function App() {
             document_ids: [],
             selected_document_ids: [],
             selected_documents: [],
+            output_format: selectedOutputFormat,
           },
         });
         await saveCommandUsage(project.projectId, originalMessage);
@@ -2100,7 +2264,16 @@ function App() {
         (document) => document.documentId === choiceRequest.defaultDocumentId,
       ) ??
       documents[0];
-    const selectedDocuments = uniqueDocumentsById([selectedDocument]);
+    const optionalDocuments = Array.isArray(choiceRequest.optionalDocuments)
+      ? choiceRequest.optionalDocuments
+      : [];
+    const selectedOptionalDocuments = optionalDocuments.filter((document) =>
+      optionalDocumentIds.includes(document.documentId),
+    );
+    const selectedDocuments = uniqueDocumentsById([
+      selectedDocument,
+      ...selectedOptionalDocuments,
+    ]);
 
     if (!selectedDocument?.documentId) {
       setDocumentError("선택할 문서 정보를 확인하지 못했습니다.");
@@ -2117,22 +2290,16 @@ function App() {
         conversationId: targetConversationId,
         message,
       });
-      const blockedByStartDate =
-        await ensureProjectStartDateBeforeGeneration({
-          targetProject: project,
-          targetConversationId,
-          message,
-          originalMessage,
-          requestType,
-        });
-      if (blockedByStartDate) return;
-
       const backendResult = await sendBackendConversationMessage({
         targetProject: project,
         targetConversationId,
         messageText: originalMessage,
         documents: selectedDocuments,
         requestType,
+        extraContext: {
+          document_generation_mode: "use_existing",
+          output_format: selectedOutputFormat,
+        },
       });
       await saveCommandUsage(project.projectId, originalMessage);
       setLastCommandInfo({ commandText: originalMessage });
@@ -2144,7 +2311,7 @@ function App() {
       reportUiError("handleDocumentChoice", error, {
         projectId: project?.projectId,
         documentId,
-        optionalDocumentId,
+        optionalDocumentIds,
       });
       setDocumentError(
         error instanceof Error
@@ -2387,6 +2554,12 @@ function App() {
             document_ids: [],
             selected_document_ids: [],
             selected_documents: [],
+            output_format:
+              action.outputFormat ||
+              uploadRequest.outputFormat ||
+              getDefaultOutputFormat(
+                getRelation(action.requestType || uploadRequest.requestType || ""),
+              ),
           },
         });
         await saveCommandUsage(project.projectId, commandText);
@@ -2692,7 +2865,6 @@ function App() {
                   isResponding={isResponding}
                   isUploadingDocument={isUploadingDocument}
                   onAgentUploadFiles={handleAgentUploadFiles}
-                  onStartDateSubmit={handleStartDateSubmit}
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
@@ -2787,19 +2959,27 @@ function App() {
       {isFileManagerOpen && (
         <FileManagerModal
           project={project}
-          files={uploadedFiles}
+          fileBuckets={fileBuckets}
           isLoading={isLoadingUploadedFiles}
           error={fileManagerError}
           actionError={fileActionError}
           pendingDeleteFile={pendingDeleteFile}
           deletingFileId={deletingFileId}
           downloadingFileId={downloadingFileId}
+          editingGeneratedFileId={editingGeneratedFileId}
+          renamingGeneratedFileId={renamingGeneratedFileId}
+          generatedFileNameDraft={generatedFileNameDraft}
+          onGeneratedFileNameDraftChange={setGeneratedFileNameDraft}
           onRefresh={() => loadUploadedFiles(project)}
           onClose={closeFileManager}
-          onDownload={handleDownloadUploadedFile}
+          onDownloadUploaded={handleDownloadUploadedFile}
+          onDownloadGenerated={handleDownloadGeneratedFile}
           onRequestDelete={handleRequestDeleteUploadedFile}
           onCancelDelete={handleCancelDeleteUploadedFile}
           onConfirmDelete={handleConfirmDeleteUploadedFile}
+          onStartGeneratedRename={handleStartGeneratedFileRename}
+          onCancelGeneratedRename={handleCancelGeneratedFileRename}
+          onSaveGeneratedRename={handleSaveGeneratedFileRename}
         />
       )}
     </main>
@@ -3304,21 +3484,36 @@ function ProjectSettingsModal({
 
 function FileManagerModal({
   project,
-  files,
+  fileBuckets,
   isLoading,
   error,
   actionError,
   pendingDeleteFile,
   deletingFileId,
   downloadingFileId,
+  editingGeneratedFileId,
+  renamingGeneratedFileId,
+  generatedFileNameDraft,
+  onGeneratedFileNameDraftChange,
   onRefresh,
   onClose,
-  onDownload,
+  onDownloadUploaded,
+  onDownloadGenerated,
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
+  onStartGeneratedRename,
+  onCancelGeneratedRename,
+  onSaveGeneratedRename,
 }) {
   const hasProject = Boolean(project?.projectId);
+  const uploadedFiles = Array.isArray(fileBuckets?.uploaded)
+    ? fileBuckets.uploaded
+    : [];
+  const generatedFiles = Array.isArray(fileBuckets?.generated)
+    ? fileBuckets.generated
+    : [];
+  const hasFiles = uploadedFiles.length > 0 || generatedFiles.length > 0;
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3331,7 +3526,7 @@ function FileManagerModal({
         <header className="settings-modal-header">
           <div>
             <span>Files</span>
-            <h2 id="file-manager-title">업로드 파일 목록</h2>
+            <h2 id="file-manager-title">파일 목록</h2>
           </div>
           <button
             className="icon-button"
@@ -3370,99 +3565,221 @@ function FileManagerModal({
             </div>
           ) : error ? (
             <p className="form-error">{error}</p>
-          ) : files.length ? (
-            <ul className="uploaded-file-list">
-              {files.map((file) => {
-                const isPendingDelete =
-                  pendingDeleteFile?.fileId === file.fileId;
-                const isDeleting = deletingFileId === file.fileId;
-                const isDownloading = downloadingFileId === file.fileId;
+          ) : hasFiles ? (
+            <div className="file-manager-sections">
+              <section className="file-manager-section">
+                <h3>업로드한 파일</h3>
+                {uploadedFiles.length ? (
+                  <ul className="uploaded-file-list">
+                    {uploadedFiles.map((file) => {
+                      const isPendingDelete =
+                        pendingDeleteFile?.fileId === file.fileId;
+                      const isDeleting = deletingFileId === file.fileId;
+                      const isDownloading = downloadingFileId === file.fileId;
 
-                return (
-                  <li
-                    className="uploaded-file-item"
-                    key={`${file.fileId}-${file.fileName}`}
-                  >
-                    <div className="uploaded-file-main">
-                      <FileText size={18} aria-hidden="true" />
-                      <div>
-                        <strong>{file.fileName}</strong>
-                        <span>{file.documentLabel}</span>
-                      </div>
-                    </div>
-                    <dl className="uploaded-file-meta">
-                      <div>
-                        <dt>유형</dt>
-                        <dd>{file.fileType}</dd>
-                      </div>
-                      <div>
-                        <dt>업로드 시간</dt>
-                        <dd>{formatFileUploadedAt(file.uploadedAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>크기</dt>
-                        <dd>{formatFileSize(file.fileSize)}</dd>
-                      </div>
-                      <div>
-                        <dt>문서 구분</dt>
-                        <dd>{file.documentLabel}</dd>
-                      </div>
-                    </dl>
-                    <div className="uploaded-file-actions">
-                      <button
-                        className="mini-action-button"
-                        type="button"
-                        disabled={isDeleting || isDownloading}
-                        onClick={() => onDownload(file)}
-                      >
-                        {isDownloading ? (
-                          <>
-                            <LoaderCircle size={14} aria-hidden="true" />
-                            다운로드 중
-                          </>
-                        ) : (
-                          <>
-                            <Download size={14} aria-hidden="true" />
-                            다운로드
-                          </>
-                        )}
-                      </button>
-                      <button
-                        className="mini-action-button danger"
-                        type="button"
-                        disabled={isDeleting || isDownloading}
-                        onClick={() => onRequestDelete(file)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                        삭제
-                      </button>
-                    </div>
-                    {isPendingDelete && (
-                      <div className="file-delete-confirm">
-                        <button
-                          className="mini-action-button"
-                          type="button"
-                          disabled={isDeleting}
-                          onClick={onCancelDelete}
+                      return (
+                        <li
+                          className="uploaded-file-item"
+                          key={`${file.fileId}-${file.fileName}`}
                         >
-                          취소
-                        </button>
-                        <button
-                          className="mini-action-button danger"
-                          type="button"
-                          disabled={isDeleting}
-                          onClick={onConfirmDelete}
+                          <div className="uploaded-file-main">
+                            <FileText size={18} aria-hidden="true" />
+                            <div>
+                              <strong>{file.fileName}</strong>
+                              <span>{file.documentLabel}</span>
+                            </div>
+                          </div>
+                          <dl className="uploaded-file-meta">
+                            <div>
+                              <dt>유형</dt>
+                              <dd>{file.fileType}</dd>
+                            </div>
+                            <div>
+                              <dt>업로드 시간</dt>
+                              <dd>{formatFileUploadedAt(file.uploadedAt)}</dd>
+                            </div>
+                            <div>
+                              <dt>크기</dt>
+                              <dd>{formatFileSize(file.fileSize)}</dd>
+                            </div>
+                            <div>
+                              <dt>문서 구분</dt>
+                              <dd>{file.documentLabel}</dd>
+                            </div>
+                          </dl>
+                          <div className="uploaded-file-actions">
+                            <button
+                              className="mini-action-button"
+                              type="button"
+                              disabled={isDeleting || isDownloading}
+                              onClick={() => onDownloadUploaded(file)}
+                            >
+                              {isDownloading ? (
+                                <>
+                                  <LoaderCircle size={14} aria-hidden="true" />
+                                  다운로드 중
+                                </>
+                              ) : (
+                                <>
+                                  <Download size={14} aria-hidden="true" />
+                                  다운로드
+                                </>
+                              )}
+                            </button>
+                            <button
+                              className="mini-action-button danger"
+                              type="button"
+                              disabled={isDeleting || isDownloading}
+                              onClick={() => onRequestDelete(file)}
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                              삭제
+                            </button>
+                          </div>
+                          {isPendingDelete && (
+                            <div className="file-delete-confirm">
+                              <button
+                                className="mini-action-button"
+                                type="button"
+                                disabled={isDeleting}
+                                onClick={onCancelDelete}
+                              >
+                                취소
+                              </button>
+                              <button
+                                className="mini-action-button danger"
+                                type="button"
+                                disabled={isDeleting}
+                                onClick={onConfirmDelete}
+                              >
+                                {isDeleting ? "삭제 중" : "확인"}
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="file-manager-section-empty">업로드한 파일이 없습니다.</p>
+                )}
+              </section>
+
+              <section className="file-manager-section">
+                <h3>생성한 파일</h3>
+                {generatedFiles.length ? (
+                  <ul className="uploaded-file-list">
+                    {generatedFiles.map((file) => {
+                      const isDownloading = downloadingFileId === file.fileId;
+                      const isEditing = editingGeneratedFileId === file.fileId;
+                      const isRenaming = renamingGeneratedFileId === file.fileId;
+
+                      return (
+                        <li
+                          className="uploaded-file-item"
+                          key={`${file.fileId}-${file.fileName}`}
                         >
-                          {isDeleting ? "삭제 중" : "확인"}
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                          <div className="uploaded-file-main">
+                            <FileText size={18} aria-hidden="true" />
+                            <div>
+                              {isEditing ? (
+                                <input
+                                  className="generated-file-name-input"
+                                  value={generatedFileNameDraft}
+                                  disabled={isRenaming}
+                                  onChange={(event) =>
+                                    onGeneratedFileNameDraftChange(
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              ) : (
+                                <strong>{file.fileName}</strong>
+                              )}
+                              <span>{file.artifactType || "생성 산출물"}</span>
+                            </div>
+                          </div>
+                          <dl className="uploaded-file-meta">
+                            <div>
+                              <dt>유형</dt>
+                              <dd>{file.fileType}</dd>
+                            </div>
+                            <div>
+                              <dt>생성 시간</dt>
+                              <dd>{formatFileUploadedAt(file.createdAt)}</dd>
+                            </div>
+                            <div>
+                              <dt>버전</dt>
+                              <dd>{file.version ? `v${file.version}` : "정보 없음"}</dd>
+                            </div>
+                            <div>
+                              <dt>산출물</dt>
+                              <dd>{file.artifactType || "확인 불가"}</dd>
+                            </div>
+                          </dl>
+                          <div className="uploaded-file-actions">
+                            <button
+                              className="mini-action-button"
+                              type="button"
+                              disabled={isRenaming || isDownloading}
+                              onClick={() => onDownloadGenerated(file)}
+                            >
+                              {isDownloading ? (
+                                <>
+                                  <LoaderCircle size={14} aria-hidden="true" />
+                                  다운로드 중
+                                </>
+                              ) : (
+                                <>
+                                  <Download size={14} aria-hidden="true" />
+                                  다운로드
+                                </>
+                              )}
+                            </button>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="mini-action-button primary"
+                                  type="button"
+                                  disabled={isRenaming}
+                                  onClick={() => onSaveGeneratedRename(file)}
+                                >
+                                  <Save size={14} aria-hidden="true" />
+                                  저장
+                                </button>
+                                <button
+                                  className="mini-action-button"
+                                  type="button"
+                                  disabled={isRenaming}
+                                  onClick={onCancelGeneratedRename}
+                                >
+                                  <X size={14} aria-hidden="true" />
+                                  취소
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="mini-action-button"
+                                type="button"
+                                disabled={isDownloading}
+                                onClick={() => onStartGeneratedRename(file)}
+                              >
+                                <Pencil size={14} aria-hidden="true" />
+                                수정
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="file-manager-section-empty">생성한 파일이 없습니다.</p>
+                )}
+              </section>
+            </div>
           ) : (
-            <p className="file-manager-empty">업로드된 파일이 없습니다.</p>
+            <p className="file-manager-empty">표시할 파일이 없습니다.</p>
           )}
         </div>
       </section>
@@ -3512,7 +3829,6 @@ function ChatMessage({
   isResponding,
   isUploadingDocument,
   onAgentUploadFiles,
-  onStartDateSubmit,
   onDownloadFile,
   onDocumentChoice,
   onSuggestedActionClick,
@@ -3544,10 +3860,6 @@ function ChatMessage({
     isAssistant && !actionsResolved
       ? message.metadata?.documentChoiceRequest
       : null;
-  const startDateRequest =
-    isAssistant && !actionsResolved
-      ? message.metadata?.startDateRequest
-      : null;
   const generationProgressResult = isAssistant
     ? message.metadata?.generationProgress
     : null;
@@ -3555,11 +3867,32 @@ function ChatMessage({
     ? message.metadata?.result?.items ?? []
     : [];
   const corrections = isAssistant ? message.metadata?.corrections ?? [] : [];
+  const uploadOutputFormats =
+    uploadRequest?.outputFormats ??
+    uploadRequest?.documentConfig?.outputFormats ??
+    [];
+  const uploadDefaultOutputFormat =
+    uploadRequest?.outputFormat ||
+    uploadOutputFormats[0]?.value ||
+    "xlsx";
+  const [selectedUploadOutputFormat, setSelectedUploadOutputFormat] = useState(
+    uploadDefaultOutputFormat,
+  );
+
+  useEffect(() => {
+    setSelectedUploadOutputFormat(uploadDefaultOutputFormat);
+  }, [message.id, uploadDefaultOutputFormat]);
 
   const handleFileChange = (event) => {
     onAgentUploadFiles({
       message,
       files: event.target.files,
+      uploadRequest: uploadRequest
+        ? {
+            ...uploadRequest,
+            outputFormat: selectedUploadOutputFormat,
+          }
+        : null,
     });
     event.target.value = "";
   };
@@ -3580,6 +3913,12 @@ function ChatMessage({
         <MessageCorrections corrections={corrections} />
         {uploadRequest && (
           <div className="message-action-panel">
+            <GenerationOutputFormatField
+              formats={uploadOutputFormats}
+              value={selectedUploadOutputFormat}
+              onChange={setSelectedUploadOutputFormat}
+              isDisabled={isResponding || isUploadingDocument}
+            />
             <button
               className="message-upload-button"
               type="button"
@@ -3625,14 +3964,6 @@ function ChatMessage({
             }
           />
         )}
-        {startDateRequest && (
-          <StartDateRequestForm
-            message={message}
-            label={startDateRequest.label}
-            isDisabled={isResponding}
-            onSubmit={onStartDateSubmit}
-          />
-        )}
         {generationProgressResult && (
           <GenerationProgressResult
             progressState={generationProgressResult}
@@ -3652,7 +3983,12 @@ function ChatMessage({
                 className="suggested-action-button secondary"
                 type="button"
                 disabled={isResponding || isUploadingDocument}
-                onClick={() => onCommandActionClick(message, action)}
+                onClick={() =>
+                  onCommandActionClick(message, {
+                    ...action,
+                    outputFormat: selectedUploadOutputFormat,
+                  })
+                }
               >
                 {action.label || action.message || action.command}
               </button>
@@ -3686,45 +4022,6 @@ function ChatMessage({
   );
 }
 
-function StartDateRequestForm({ message, label, isDisabled, onSubmit }) {
-  const [startDate, setStartDate] = useState("");
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    onSubmit({ message, startDate });
-  };
-
-  return (
-    <form className="message-start-date-form" onSubmit={handleSubmit}>
-      <label htmlFor={`${message.id}-start-date`}>
-        {label || "프로젝트 시작일"}
-      </label>
-      <div>
-        <input
-          id={`${message.id}-start-date`}
-          name="start_date"
-          type="date"
-          value={startDate}
-          disabled={isDisabled}
-          required
-          onChange={(event) =>
-            setStartDate(sanitizeProjectStartDateInput(event.target.value))
-          }
-          max="9999-12-31"
-          pattern="\d{4}-\d{2}-\d{2}"
-        />
-        <button
-          className="message-upload-button"
-          type="submit"
-          disabled={isDisabled || !startDate}
-        >
-          저장 후 WBS 생성
-        </button>
-      </div>
-    </form>
-  );
-}
-
 function MessageCorrections({ corrections }) {
   const items = Array.isArray(corrections)
     ? corrections.filter((item) => item?.source && item?.target)
@@ -3746,16 +4043,60 @@ function DocumentChoicePanel(props) {
   return <DefaultDocumentChoicePanel {...props} />;
 }
 
+function GenerationOutputFormatField({
+  formats = [],
+  value,
+  onChange,
+  isDisabled,
+}) {
+  const availableFormats =
+    Array.isArray(formats) && formats.length
+      ? formats
+      : [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }];
+  const selectedValue = value || availableFormats[0]?.value || "xlsx";
+
+  return (
+    <label className="document-output-format">
+      <span>파일 형식</span>
+      <select
+        value={selectedValue}
+        disabled={isDisabled || availableFormats.length <= 1}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {availableFormats.map((format) => (
+          <option key={format.value} value={format.value}>
+            {format.label || getOutputFormatLabel(availableFormats, format.value)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function DefaultDocumentChoicePanel({
   request,
   isDisabled,
   onChoice,
 }) {
   const documents = Array.isArray(request?.documents) ? request.documents : [];
+  const optionalDocuments = Array.isArray(request?.optionalDocuments)
+    ? request.optionalDocuments
+    : [];
+  const documentConfig = request?.documentConfig ?? {};
+  const relation = documentConfig.relation ?? getRelation(documentConfig.requestType);
+  const outputFormats =
+    request?.outputFormats ?? documentConfig.outputFormats ?? getOutputFormats(relation);
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
     useState(defaultDocumentId);
+  const [selectedOptionalDocumentIds, setSelectedOptionalDocumentIds] =
+    useState([]);
+  const [selectedOutputFormat, setSelectedOutputFormat] = useState(
+    request?.outputFormat ||
+      documentConfig.defaultOutputFormat ||
+      getDefaultOutputFormat(relation),
+  );
   const defaultDocument =
     documents.find((document) => document.documentId === defaultDocumentId) ??
     documents[0];
@@ -3768,7 +4109,31 @@ function DefaultDocumentChoicePanel({
     setSelectedDocumentId(defaultDocumentId);
   }, [defaultDocumentId]);
 
+  useEffect(() => {
+    setSelectedOptionalDocumentIds([]);
+  }, [defaultDocumentId, optionalDocuments.length]);
+
+  useEffect(() => {
+    setSelectedOutputFormat(
+      request?.outputFormat ||
+        documentConfig.defaultOutputFormat ||
+        getDefaultOutputFormat(relation),
+    );
+  }, [request?.outputFormat, documentConfig.defaultOutputFormat, relation]);
+
   if (!documents.length) return null;
+
+  const selectedOptionalDocuments = optionalDocuments.filter((document) =>
+    selectedOptionalDocumentIds.includes(document.documentId),
+  );
+  const relationQuestion = getRelationQuestion(relation, selectedOptionalDocuments);
+  const toggleOptionalDocument = (documentId) => {
+    setSelectedOptionalDocumentIds((currentIds) =>
+      currentIds.includes(documentId)
+        ? currentIds.filter((id) => id !== documentId)
+        : [...currentIds, documentId],
+    );
+  };
 
   const handlePanelAction = (event, callback) => {
     event.preventDefault();
@@ -3780,15 +4145,15 @@ function DefaultDocumentChoicePanel({
   return (
     <div className="message-document-choice-panel">
       <strong className="document-choice-question">
-        {DOCUMENT_GENERATION_COPY.existingChoice}
+        {relationQuestion}
       </strong>
       <div className="document-choice-summary">
         <strong>{selectedDocument?.fileName || "업로드된 문서"}</strong>
-        <span>{selectedDocument?.displayLabel || "기존 문서"}</span>
+        <span>{relation?.primarySource?.label || selectedDocument?.displayLabel || "기준 문서"}</span>
       </div>
       {documents.length > 1 && (
         <div className="document-choice-picker">
-          <label htmlFor={documentSelectId}>기존 문서 선택</label>
+          <label htmlFor={documentSelectId}>기준 문서</label>
           <select
             id={documentSelectId}
             value={selectedDocumentId}
@@ -3804,6 +4169,34 @@ function DefaultDocumentChoicePanel({
           </select>
         </div>
       )}
+      {optionalDocuments.length > 0 && (
+        <section className="document-choice-section">
+          <span className="document-choice-section-title">선택 문서</span>
+          {optionalDocuments.map((document) => (
+            <label
+              className="document-choice-check"
+              key={`${document.documentId}-${document.fileName}`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedOptionalDocumentIds.includes(document.documentId)}
+                disabled={isDisabled}
+                onChange={() => toggleOptionalDocument(document.documentId)}
+              />
+              <span>
+                {(relation?.optionalSources?.[0]?.label || document.displayLabel) +
+                  ` ${document.fileName || document.documentId} 함께 반영`}
+              </span>
+            </label>
+          ))}
+        </section>
+      )}
+      <GenerationOutputFormatField
+        formats={outputFormats}
+        value={selectedOutputFormat}
+        onChange={setSelectedOutputFormat}
+        isDisabled={isDisabled}
+      />
       <div className="document-choice-actions">
         <button
           className="message-upload-button"
@@ -3814,6 +4207,8 @@ function DefaultDocumentChoicePanel({
               onChoice({
                 choice: "use_existing",
                 documentId: selectedDocument?.documentId,
+                optionalDocumentIds: selectedOptionalDocumentIds,
+                outputFormat: selectedOutputFormat,
               }),
             )
           }
@@ -3828,6 +4223,7 @@ function DefaultDocumentChoicePanel({
             handlePanelAction(event, () =>
               onChoice({
                 choice: "create_new",
+                outputFormat: selectedOutputFormat,
               }),
             )
           }

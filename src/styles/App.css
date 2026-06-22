@@ -891,8 +891,7 @@ p {
 .message-action-panel,
 .suggested-action-list,
 .document-choice-actions,
-.download-file-list,
-.message-start-date-form > div {
+.download-file-list {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -902,38 +901,6 @@ p {
   gap: 8px;
   width: 100%;
   max-width: 100%;
-}
-
-.message-start-date-form {
-  display: grid;
-  gap: 8px;
-  width: min(760px, 100%);
-  padding: 12px;
-  border: 1px solid #d7e3f4;
-  border-radius: 8px;
-  background: #fbfdff;
-}
-
-.message-start-date-form label {
-  color: #173a67;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.message-start-date-form input {
-  min-width: 180px;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid #cfd7e6;
-  border-radius: 8px;
-  color: #101828;
-  background: #ffffff;
-  outline: none;
-}
-
-.message-start-date-form input:focus {
-  border-color: #1f6ed4;
-  box-shadow: 0 0 0 3px rgba(31, 110, 212, 0.1);
 }
 
 .message-file-input {
@@ -1085,6 +1052,35 @@ p {
   color: #344054;
   font-size: 12px;
   font-weight: 800;
+}
+
+.document-output-format {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-action-panel .document-output-format {
+  flex: 1 1 180px;
+}
+
+.document-output-format select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #101828;
+  background: #ffffff;
+}
+
+.document-output-format select:disabled {
+  color: #667085;
+  background: #f9fafb;
 }
 
 .document-choice-selected,
@@ -1739,6 +1735,33 @@ p {
   padding-right: 2px;
 }
 
+.file-manager-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.file-manager-section {
+  display: grid;
+  gap: 10px;
+}
+
+.file-manager-section h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 15px;
+}
+
+.file-manager-section-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed #cfd7e6;
+  border-radius: 8px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 800;
+  background: #f9fafb;
+}
+
 .file-manager-empty,
 .file-manager-loading {
   display: flex;
@@ -1797,6 +1820,19 @@ p {
 .uploaded-file-main strong {
   color: #101828;
   overflow-wrap: anywhere;
+}
+
+.generated-file-name-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #9eb5d6;
+  border-radius: 8px;
+  color: #101828;
+  font-size: 13px;
+  font-weight: 800;
+  background: #ffffff;
 }
 
 .uploaded-file-main span {

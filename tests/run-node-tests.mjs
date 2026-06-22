@@ -267,11 +267,12 @@ test("frontend document constants match backend DocumentType values", () => {
       "CONSTRUCTION_REQUIREMENT_DEFINITION",
       "MEETING_NOTES",
       "REQUIREMENT_SPEC",
+      "SCREEN_DESIGN",
       "UNKNOWN",
       "WBS",
     ].sort(),
   );
-  assert.equal(DOCUMENT_TYPES.SCREEN_DESIGN, undefined);
+  assert.equal(DOCUMENT_TYPES.SCREEN_DESIGN, "SCREEN_DESIGN");
   assert.equal(DOCUMENT_TYPES.UNITTEST_SPEC, undefined);
 });
 
