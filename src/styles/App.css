@@ -914,6 +914,21 @@ p {
   max-width: 100%;
 }
 
+.document-description-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: min(520px, 100%);
+  padding: 10px 12px;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  color: #344054;
+  background: #fbfdff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .message-file-input {
   display: none;
 }
@@ -1078,15 +1093,10 @@ p {
   accent-color: #1f6ed4;
 }
 
-.document-choice-picker,
-.document-choice-upload-panel {
+.document-choice-picker {
   display: grid;
   gap: 8px;
   padding-top: 2px;
-}
-
-.document-choice-upload-panel {
-  justify-items: start;
 }
 
 .document-choice-picker select {
@@ -1159,23 +1169,10 @@ p {
   background: #f9fafb;
 }
 
-.document-choice-file-placeholder {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  color: #667085;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.document-choice-description-option {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 700;
+.document-choice-inline-upload {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
 }
 
 .document-output-format {
@@ -1207,22 +1204,15 @@ p {
   background: #f9fafb;
 }
 
-.document-choice-selected,
-.document-choice-upload-copy {
+.document-choice-selected {
   color: #667085;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.document-choice-selected strong,
-.document-choice-upload-copy strong {
+.document-choice-selected strong {
   color: #173a67;
   overflow-wrap: anywhere;
-}
-
-.document-choice-upload-copy {
-  display: grid;
-  gap: 2px;
 }
 
 .schedule-todo-result {
@@ -1861,7 +1851,53 @@ p {
 
 .file-manager-sections {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+}
+
+.file-manager-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.file-manager-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #344054;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.file-manager-tab span {
+  display: inline-flex;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #38536f;
+  background: #eef2f7;
+  font-size: 12px;
+}
+
+.file-manager-tab.is-active {
+  border-color: #1f6ed4;
+  color: #174b85;
+  background: #eff6ff;
+}
+
+.file-manager-tab.is-active span {
+  color: #ffffff;
+  background: #1f6ed4;
 }
 
 .file-manager-section {

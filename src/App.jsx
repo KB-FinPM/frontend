@@ -93,6 +93,10 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   SCREEN_DESIGN_CREATE: "SCREEN_DESIGN_CREATE",
   UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
+const FILE_MANAGER_TABS = Object.freeze({
+  UPLOADED: "uploaded",
+  GENERATED: "generated",
+});
 const DOCUMENT_GENERATION_COPY = Object.freeze({
   existingChoice: "기준 문서를 선택해주세요.",
   uploadOrCreate: "생성 기준 문서를 업로드해주세요.",
@@ -312,6 +316,46 @@ const getGenerationRequestType = (value = "") => {
   return "";
 };
 
+const DOCUMENT_DESCRIPTION_CTA_ACTIONS = Object.freeze({
+  REQUIREMENT_SPEC: {
+    label: "요구사항명세서 생성",
+    message: "요구사항명세서 생성해줘",
+  },
+  CONSTRUCTION_REQUIREMENT_DEFINITION: {
+    label: "요구사항명세서 생성",
+    message: "요구사항명세서 생성해줘",
+  },
+  WBS: {
+    label: "WBS 생성",
+    message: "WBS 생성해줘",
+  },
+  SCREEN_DESIGN: {
+    label: "화면설계서 생성",
+    message: "화면설계서 생성해줘",
+  },
+  UNITTEST_SPEC: {
+    label: "단위테스트케이스 생성",
+    message: "단위테스트케이스 생성해줘",
+  },
+});
+
+const getDocumentDescriptionCtaAction = (message) => {
+  if (message?.role !== "assistant") return null;
+  const metadata = message.metadata ?? {};
+  if (metadata.state !== CHAT_STATES.IDLE) return null;
+  if (
+    metadata.documentChoiceRequest ||
+    metadata.uploadRequest ||
+    metadata.generationProgress
+  ) {
+    return null;
+  }
+
+  const topic = String(metadata.result?.topic || "").toUpperCase();
+  const action = DOCUMENT_DESCRIPTION_CTA_ACTIONS[topic];
+  return action ? { ...action, type: "document-description-cta" } : null;
+};
+
 const getDocumentDisplayLabel = (documentType) => {
   if (documentType === DOCUMENT_TYPES.WBS) return "업로드한 WBS";
   if (documentType === DOCUMENT_TYPES.SCREEN_DESIGN) {
@@ -402,9 +446,6 @@ const getGenerationAssistantMessage = ({
   ].join("\n");
 };
 
-const getDocumentExplanationCommand = (label = "문서") =>
-  `${label || "문서"} 설명해줘`;
-
 const getOutputFormatLabel = (formats, value) =>
   formats.find((format) => format.value === value)?.label ||
   OUTPUT_FORMAT_LABELS[value] ||
@@ -464,7 +505,7 @@ const getFileExtension = (fileName = "") => {
 
 const formatFileSize = (value) => {
   const size = Number(value);
-  if (!Number.isFinite(size) || size <= 0) return "크기 정보 없음";
+  if (!Number.isFinite(size) || size <= 0) return "파일크기 정보 없음";
   const units = ["B", "KB", "MB", "GB"];
   let nextSize = size;
   let unitIndex = 0;
@@ -568,7 +609,15 @@ const normalizeGeneratedFile = (file) => {
     fileName,
     fileType: getFileExtension(fileName) || artifactType || "생성 파일",
     artifactType,
-    version: file.version ?? null,
+    fileSize:
+      file.file_size ??
+      file.fileSize ??
+      file.size ??
+      file.byte_size ??
+      file.byteSize ??
+      file.content_length ??
+      file.contentLength ??
+      null,
     createdAt: file.created_at ?? file.createdAt ?? "",
     updatedAt: file.updated_at ?? file.updatedAt ?? "",
     generatedDocumentId:
@@ -1153,6 +1202,9 @@ function App() {
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
   const [fileBuckets, setFileBuckets] = useState({ uploaded: [], generated: [] });
+  const [activeFileManagerTab, setActiveFileManagerTab] = useState(
+    FILE_MANAGER_TABS.UPLOADED,
+  );
   const [isLoadingUploadedFiles, setIsLoadingUploadedFiles] = useState(false);
   const [fileManagerError, setFileManagerError] = useState("");
   const [fileActionError, setFileActionError] = useState("");
@@ -1761,7 +1813,10 @@ function App() {
 
   const openFileManager = () => {
     setIsFileManagerOpen(true);
+    setActiveFileManagerTab(FILE_MANAGER_TABS.UPLOADED);
     setPendingDeleteFile(null);
+    setEditingGeneratedFileId("");
+    setGeneratedFileNameDraft("");
     if (!project) {
       setFileBuckets({ uploaded: [], generated: [] });
       setFileManagerError("프로젝트를 먼저 선택해주세요.");
@@ -1774,6 +1829,8 @@ function App() {
     setIsFileManagerOpen(false);
     setFileActionError("");
     setPendingDeleteFile(null);
+    setEditingGeneratedFileId("");
+    setGeneratedFileNameDraft("");
   };
 
   const handleDownloadUploadedFile = async (file) => {
@@ -2216,12 +2273,6 @@ function App() {
   const handleCommandRecommendationClick = (commandText) => {
     setComposerValue(commandText);
     sendMessage(commandText);
-  };
-
-  const handleDocumentExplanation = ({ commandText }) => {
-    const trimmedCommand = String(commandText || "").trim();
-    if (!trimmedCommand || isResponding || isUploadingDocument) return;
-    sendMessage(trimmedCommand);
   };
 
   const handleAgentUploadFiles = async ({
@@ -2994,7 +3045,6 @@ function App() {
                   onAgentUploadFiles={handleAgentUploadFiles}
                   onDownloadFile={handleDownloadFile}
                   onDocumentChoice={handleDocumentChoice}
-                  onDocumentExplanation={handleDocumentExplanation}
                   onSuggestedActionClick={handleSuggestedActionClick}
                   onCommandActionClick={handleCommandActionClick}
                 />
@@ -3088,6 +3138,7 @@ function App() {
         <FileManagerModal
           project={project}
           fileBuckets={fileBuckets}
+          activeTab={activeFileManagerTab}
           isLoading={isLoadingUploadedFiles}
           error={fileManagerError}
           actionError={fileActionError}
@@ -3098,6 +3149,7 @@ function App() {
           renamingGeneratedFileId={renamingGeneratedFileId}
           generatedFileNameDraft={generatedFileNameDraft}
           onGeneratedFileNameDraftChange={setGeneratedFileNameDraft}
+          onTabChange={setActiveFileManagerTab}
           onClose={closeFileManager}
           onDownloadUploaded={handleDownloadUploadedFile}
           onDownloadGenerated={handleDownloadGeneratedFile}
@@ -3612,6 +3664,7 @@ function ProjectSettingsModal({
 function FileManagerModal({
   project,
   fileBuckets,
+  activeTab,
   isLoading,
   error,
   actionError,
@@ -3622,6 +3675,7 @@ function FileManagerModal({
   renamingGeneratedFileId,
   generatedFileNameDraft,
   onGeneratedFileNameDraftChange,
+  onTabChange,
   onClose,
   onDownloadUploaded,
   onDownloadGenerated,
@@ -3639,7 +3693,10 @@ function FileManagerModal({
   const generatedFiles = Array.isArray(fileBuckets?.generated)
     ? fileBuckets.generated
     : [];
-  const hasFiles = uploadedFiles.length > 0 || generatedFiles.length > 0;
+  const currentTab =
+    activeTab === FILE_MANAGER_TABS.GENERATED
+      ? FILE_MANAGER_TABS.GENERATED
+      : FILE_MANAGER_TABS.UPLOADED;
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3676,10 +3733,44 @@ function FileManagerModal({
             </div>
           ) : error ? (
             <p className="form-error">{error}</p>
-          ) : hasFiles ? (
+          ) : (
             <div className="file-manager-sections">
-              <section className="file-manager-section">
-                <h3>업로드한 파일</h3>
+              <div className="file-manager-tabs" role="tablist" aria-label="파일 유형">
+                <button
+                  id="uploaded-files-tab"
+                  className={`file-manager-tab ${
+                    currentTab === FILE_MANAGER_TABS.UPLOADED ? "is-active" : ""
+                  }`}
+                  type="button"
+                  role="tab"
+                  aria-selected={currentTab === FILE_MANAGER_TABS.UPLOADED}
+                  aria-controls="uploaded-files-panel"
+                  onClick={() => onTabChange(FILE_MANAGER_TABS.UPLOADED)}
+                >
+                  업로드한 파일 <span>{uploadedFiles.length}</span>
+                </button>
+                <button
+                  id="generated-files-tab"
+                  className={`file-manager-tab ${
+                    currentTab === FILE_MANAGER_TABS.GENERATED ? "is-active" : ""
+                  }`}
+                  type="button"
+                  role="tab"
+                  aria-selected={currentTab === FILE_MANAGER_TABS.GENERATED}
+                  aria-controls="generated-files-panel"
+                  onClick={() => onTabChange(FILE_MANAGER_TABS.GENERATED)}
+                >
+                  생성한 파일 <span>{generatedFiles.length}</span>
+                </button>
+              </div>
+              {currentTab === FILE_MANAGER_TABS.UPLOADED ? (
+                <section
+                  id="uploaded-files-panel"
+                  className="file-manager-section"
+                  role="tabpanel"
+                  aria-labelledby="uploaded-files-tab"
+                >
+                  <h3>업로드한 파일</h3>
                 {uploadedFiles.length ? (
                   <ul className="uploaded-file-list">
                     {uploadedFiles.map((file) => {
@@ -3710,7 +3801,7 @@ function FileManagerModal({
                               <dd>{formatFileUploadedAt(file.uploadedAt)}</dd>
                             </div>
                             <div>
-                              <dt>크기</dt>
+                              <dt>파일크기</dt>
                               <dd>{formatFileSize(file.fileSize)}</dd>
                             </div>
                             <div>
@@ -3774,10 +3865,15 @@ function FileManagerModal({
                 ) : (
                   <p className="file-manager-section-empty">업로드한 파일이 없습니다.</p>
                 )}
-              </section>
-
-              <section className="file-manager-section">
-                <h3>생성한 파일</h3>
+                </section>
+              ) : (
+                <section
+                  id="generated-files-panel"
+                  className="file-manager-section"
+                  role="tabpanel"
+                  aria-labelledby="generated-files-tab"
+                >
+                  <h3>생성한 파일</h3>
                 {generatedFiles.length ? (
                   <ul className="uploaded-file-list">
                     {generatedFiles.map((file) => {
@@ -3820,8 +3916,8 @@ function FileManagerModal({
                               <dd>{formatFileUploadedAt(file.createdAt)}</dd>
                             </div>
                             <div>
-                              <dt>버전</dt>
-                              <dd>{file.version ? `v${file.version}` : "정보 없음"}</dd>
+                              <dt>파일크기</dt>
+                              <dd>{formatFileSize(file.fileSize)}</dd>
                             </div>
                             <div>
                               <dt>산출물</dt>
@@ -3887,10 +3983,9 @@ function FileManagerModal({
                 ) : (
                   <p className="file-manager-section-empty">생성한 파일이 없습니다.</p>
                 )}
-              </section>
+                </section>
+              )}
             </div>
-          ) : (
-            <p className="file-manager-empty">표시할 파일이 없습니다.</p>
           )}
         </div>
       </section>
@@ -3942,7 +4037,6 @@ function ChatMessage({
   onAgentUploadFiles,
   onDownloadFile,
   onDocumentChoice,
-  onDocumentExplanation,
   onSuggestedActionClick,
   onCommandActionClick,
 }) {
@@ -3971,6 +4065,7 @@ function ChatMessage({
   const commandActions = Array.isArray(rawCommandActions)
     ? rawCommandActions.filter((action) => !action?.directCreate)
     : [];
+  const descriptionCtaAction = getDocumentDescriptionCtaAction(message);
   const documentChoiceRequest =
     isAssistant && !actionsResolved
       ? message.metadata?.documentChoiceRequest
@@ -4070,12 +4165,6 @@ function ChatMessage({
             isDisabled={isResponding || isUploadingDocument}
             isUploading={isUploadingDocument}
             onChoice={(choice) => onDocumentChoice({ message, ...choice })}
-            onExplain={(explainRequest) =>
-              onDocumentExplanation?.({
-                message,
-                ...explainRequest,
-              })
-            }
             onUploadFiles={(files, uploadRequest) =>
               onAgentUploadFiles({
                 message,
@@ -4096,6 +4185,19 @@ function ChatMessage({
           downloadFiles={downloadFiles}
           onDownloadFile={onDownloadFile}
         />
+        {descriptionCtaAction && (
+          <div className="document-description-cta">
+            <span>이 문서를 생성해볼까요?</span>
+            <button
+              className="suggested-action-button primary"
+              type="button"
+              disabled={isResponding || isUploadingDocument}
+              onClick={() => onCommandActionClick(message, descriptionCtaAction)}
+            >
+              {descriptionCtaAction.label}
+            </button>
+          </div>
+        )}
         {commandActions.length > 0 && (
           <div className="suggested-action-list">
             {commandActions.map((action, index) => (
@@ -4199,7 +4301,6 @@ function DefaultDocumentChoicePanel({
   isDisabled,
   isUploading = false,
   onChoice,
-  onExplain,
   onUploadFiles,
 }) {
   const panelId = useId().replace(/:/g, "");
@@ -4332,10 +4433,31 @@ function DefaultDocumentChoicePanel({
       <section className="document-choice-section document-choice-slot">
         <strong className="document-choice-section-title">기준 문서</strong>
         <div className="document-choice-file-row">
-          <label className="document-choice-file-label" htmlFor={documentSelectId}>
+          <label
+            className="document-choice-file-label"
+            htmlFor={shouldShowPrimaryUpload ? undefined : documentSelectId}
+          >
             {primaryLabel}
           </label>
-          {usePrimaryDocument && documents.length > 0 ? (
+          {shouldShowPrimaryUpload ? (
+            <button
+              className="message-upload-button secondary document-choice-inline-upload"
+              type="button"
+              disabled={isDisabled || isUploading}
+              onClick={(event) =>
+                handlePanelAction(event, () => primaryFileInputRef.current?.click())
+              }
+            >
+              {isUploading ? (
+                <>
+                  <LoaderCircle size={16} aria-hidden="true" />
+                  업로드 중
+                </>
+              ) : (
+                `${primaryLabel} 업로드`
+              )}
+            </button>
+          ) : (
             <select
               id={documentSelectId}
               className="document-choice-source-select"
@@ -4350,10 +4472,6 @@ function DefaultDocumentChoicePanel({
                 </option>
               ))}
             </select>
-          ) : (
-            <span className="document-choice-file-placeholder">
-              {documents.length > 0 ? "새 문서 업로드" : "기존 문서 없음"}
-            </span>
           )}
         </div>
         {documents.length > 0 && (
@@ -4394,28 +4512,6 @@ function DefaultDocumentChoicePanel({
             </label>
           </fieldset>
         )}
-        {shouldShowPrimaryUpload && (
-          <div className="document-choice-upload-panel">
-            <button
-              className="message-upload-button secondary"
-              type="button"
-              disabled={isDisabled || isUploading}
-              onClick={() => primaryFileInputRef.current?.click()}
-            >
-              {isUploading ? (
-                <>
-                  <LoaderCircle size={16} aria-hidden="true" />
-                  업로드 중
-                </>
-              ) : (
-                `${primaryLabel} 업로드`
-              )}
-            </button>
-            <p className="document-choice-upload-copy">
-              {primaryLabel}를 선택하거나 업로드해 주세요.
-            </p>
-          </div>
-        )}
         <input
           ref={primaryFileInputRef}
           className="message-file-input"
@@ -4434,11 +4530,31 @@ function DefaultDocumentChoicePanel({
           <div className="document-choice-file-row">
             <label
               className="document-choice-file-label"
-              htmlFor={optionalDocumentSelectId}
+              htmlFor={shouldShowOptionalUpload ? undefined : optionalDocumentSelectId}
             >
               {optionalLabel}
             </label>
-            {includeOptionalDocument && optionalDocuments.length > 0 ? (
+            {shouldShowOptionalUpload ? (
+              <button
+                className="message-upload-button secondary document-choice-inline-upload"
+                type="button"
+                disabled={isDisabled || isUploading}
+                onClick={(event) =>
+                  handlePanelAction(event, () =>
+                    optionalFileInputRef.current?.click(),
+                  )
+                }
+              >
+                {isUploading ? (
+                  <>
+                    <LoaderCircle size={16} aria-hidden="true" />
+                    업로드 중
+                  </>
+                ) : (
+                  `${optionalLabel} 업로드`
+                )}
+              </button>
+            ) : (
               <select
                 id={optionalDocumentSelectId}
                 className="document-choice-source-select"
@@ -4455,10 +4571,6 @@ function DefaultDocumentChoicePanel({
                   </option>
                 ))}
               </select>
-            ) : (
-              <span className="document-choice-file-placeholder">
-                {optionalDocuments.length > 0 ? "새 문서 업로드" : "기존 문서 없음"}
-              </span>
             )}
           </div>
           {optionalDocuments.length > 0 && (
@@ -4511,28 +4623,6 @@ function DefaultDocumentChoicePanel({
               </label>
             </fieldset>
           )}
-          {shouldShowOptionalUpload && (
-            <div className="document-choice-upload-panel">
-              <button
-                className="message-upload-button secondary"
-                type="button"
-                disabled={isDisabled || isUploading}
-                onClick={() => optionalFileInputRef.current?.click()}
-              >
-                {isUploading ? (
-                  <>
-                    <LoaderCircle size={16} aria-hidden="true" />
-                    업로드 중
-                  </>
-                ) : (
-                  `${optionalLabel} 업로드`
-                )}
-              </button>
-              <p className="document-choice-upload-copy">
-                선택사항입니다. 파일 없이도 생성할 수 있습니다.
-              </p>
-            </div>
-          )}
           <input
             ref={optionalFileInputRef}
             className="message-file-input"
@@ -4552,23 +4642,6 @@ function DefaultDocumentChoicePanel({
         onChange={setSelectedOutputFormat}
         isDisabled={isDisabled}
       />
-      <div className="document-choice-description-option">
-        <span>문서 설명도 확인할 수 있어요.</span>
-        <button
-          className="message-upload-button secondary"
-          type="button"
-          disabled={isDisabled || isUploading}
-          onClick={(event) =>
-            handlePanelAction(event, () =>
-              onExplain?.({
-                commandText: getDocumentExplanationCommand(targetLabel),
-              }),
-            )
-          }
-        >
-          설명 보기
-        </button>
-      </div>
       <div className="document-choice-actions">
         <button
           className="message-upload-button"
