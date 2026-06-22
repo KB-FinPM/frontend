@@ -41,7 +41,7 @@ export const DOCUMENT_TYPE_OPTIONS = Object.freeze([
   },
   {
     value: DOCUMENT_TYPES.REQUIREMENT_SPEC,
-    label: "요구사항 명세서",
+    label: "요구사항명세서",
   },
   {
     value: DOCUMENT_TYPES.SCREEN_DESIGN,
@@ -49,7 +49,7 @@ export const DOCUMENT_TYPE_OPTIONS = Object.freeze([
   },
   {
     value: DOCUMENT_TYPES.MEETING_NOTES,
-    label: "회의록",
+    label: "기술협상회의록",
   },
   {
     value: DOCUMENT_TYPES.WBS,

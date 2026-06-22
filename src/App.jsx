@@ -44,12 +44,14 @@ import {
   normalizeGenerationProgressPayload,
 } from "./services/generationProgressService.js";
 import {
+  deleteArtifactFile,
   deleteProjectFile,
   downloadArtifactFile,
   downloadProjectFile,
   getChatActionStatus,
   listProjectFiles,
   updateArtifactFileName,
+  updateProjectFileName,
   uploadDocument,
 } from "./api/finpmApi.js";
 import {
@@ -94,6 +96,10 @@ const GENERATION_REQUEST_TYPES = Object.freeze({
   UNIT_TEST_CREATE: "UNIT_TEST_CREATE",
 });
 const FILE_MANAGER_TABS = Object.freeze({
+  UPLOADED: "uploaded",
+  GENERATED: "generated",
+});
+const FILE_KINDS = Object.freeze({
   UPLOADED: "uploaded",
   GENERATED: "generated",
 });
@@ -356,28 +362,29 @@ const getDocumentDescriptionCtaAction = (message) => {
   return action ? { ...action, type: "document-description-cta" } : null;
 };
 
-const getDocumentDisplayLabel = (documentType) => {
-  if (documentType === DOCUMENT_TYPES.WBS) return "업로드한 WBS";
-  if (documentType === DOCUMENT_TYPES.SCREEN_DESIGN) {
-    return "업로드한 화면설계서";
-  }
-  if (documentType === DOCUMENT_TYPES.MEETING_NOTES) return "업로드한 회의록";
-  if (documentType === DOCUMENT_TYPES.REQUIREMENT_SPEC) {
-    return "업로드한 요구사항 명세서";
-  }
-  if (documentType === DEFAULT_DOCUMENT_TYPE) {
-    return "업로드한 구축요건 정의서";
-  }
-  return "업로드한 문서";
-};
-
 const DOCUMENT_TYPE_LABELS = Object.freeze({
   [DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION]: "구축요건정의서",
+  CONSTRUCTION_UNITTEST_DEFINITION: "단위테스트정의서",
   [DOCUMENT_TYPES.MEETING_NOTES]: "기술협상회의록",
   [DOCUMENT_TYPES.REQUIREMENT_SPEC]: "요구사항명세서",
   [DOCUMENT_TYPES.SCREEN_DESIGN]: "화면설계서",
   [DOCUMENT_TYPES.WBS]: "WBS",
+  [DOCUMENT_TYPES.UNKNOWN]: "기타",
 });
+
+const ARTIFACT_TYPE_LABELS = Object.freeze({
+  REQUIREMENT_SPEC: "요구사항명세서",
+  SCREEN_DESIGN: "화면설계서",
+  WBS: "WBS",
+  UNITTEST_SPEC: "단위테스트케이스",
+  ACTION_ITEMS: "액션아이템",
+});
+
+const getDocumentDisplayLabel = (documentType) =>
+  DOCUMENT_TYPE_LABELS[documentType] || DOCUMENT_TYPE_LABELS[DOCUMENT_TYPES.UNKNOWN];
+
+const getArtifactDisplayLabel = (artifactType) =>
+  ARTIFACT_TYPE_LABELS[artifactType] || "기타";
 
 const ARTIFACT_SOURCE_DOCUMENT_TYPES = Object.freeze({
   REQUIREMENT_SPEC: DOCUMENT_TYPES.REQUIREMENT_SPEC,
@@ -531,6 +538,9 @@ const formatFileUploadedAt = (value) => {
   });
 };
 
+const getFileActionKey = (file, fileKind) =>
+  `${fileKind || "file"}:${file?.fileId || ""}`;
+
 const normalizeUploadedFile = (file) => {
   const documentType =
     file.document_type ??
@@ -562,7 +572,15 @@ const normalizeUploadedFile = (file) => {
     fileId,
     fileName,
     fileType,
-    fileSize: file.file_size ?? file.fileSize ?? file.size ?? null,
+    fileSize:
+      file.file_size ??
+      file.fileSize ??
+      file.size ??
+      file.file_size_bytes ??
+      file.size_bytes ??
+      file.byte_size ??
+      file.content_length ??
+      null,
     uploadedAt:
       file.uploaded_at ??
       file.uploadedAt ??
@@ -604,6 +622,8 @@ const normalizeGeneratedFile = (file) => {
     file.artifact_name ??
     "생성 파일";
   const artifactType = file.artifact_type ?? file.artifactType ?? "";
+  const artifactLabel =
+    file.display_label ?? file.displayLabel ?? getArtifactDisplayLabel(artifactType);
   return {
     fileId: file.artifact_id ?? file.artifactId ?? file.file_id ?? file.id ?? "",
     fileName,
@@ -613,11 +633,14 @@ const normalizeGeneratedFile = (file) => {
       file.file_size ??
       file.fileSize ??
       file.size ??
+      file.file_size_bytes ??
+      file.size_bytes ??
       file.byte_size ??
       file.byteSize ??
       file.content_length ??
       file.contentLength ??
       null,
+    documentLabel: artifactLabel,
     createdAt: file.created_at ?? file.createdAt ?? "",
     updatedAt: file.updated_at ?? file.updatedAt ?? "",
     generatedDocumentId:
@@ -698,7 +721,7 @@ const normalizeGeneratedSourceDocument = (file) => {
     documentType,
     createdAt: normalizedFile.createdAt,
     updatedAt: normalizedFile.updatedAt,
-    displayLabel: `생성한 ${DOCUMENT_TYPE_LABELS[documentType] || "문서"}`,
+    displayLabel: DOCUMENT_TYPE_LABELS[documentType] || "기타",
   };
 };
 
@@ -712,7 +735,8 @@ const normalizeProjectDocumentCandidates = (response) => {
     updatedAt: file.raw?.updated_at ?? file.raw?.updatedAt ?? "",
     displayLabel:
       file.documentLabel ||
-      `업로드한 ${DOCUMENT_TYPE_LABELS[file.documentType] || "문서"}`,
+      DOCUMENT_TYPE_LABELS[file.documentType] ||
+      DOCUMENT_TYPE_LABELS[DOCUMENT_TYPES.UNKNOWN],
   }));
   const generatedDocuments = buckets.generated
     .map((file) => normalizeGeneratedSourceDocument(file.raw ?? file))
@@ -1211,9 +1235,9 @@ function App() {
   const [pendingDeleteFile, setPendingDeleteFile] = useState(null);
   const [deletingFileId, setDeletingFileId] = useState("");
   const [downloadingFileId, setDownloadingFileId] = useState("");
-  const [editingGeneratedFileId, setEditingGeneratedFileId] = useState("");
-  const [renamingGeneratedFileId, setRenamingGeneratedFileId] = useState("");
-  const [generatedFileNameDraft, setGeneratedFileNameDraft] = useState("");
+  const [editingFileTarget, setEditingFileTarget] = useState(null);
+  const [renamingFileKey, setRenamingFileKey] = useState("");
+  const [fileNameDraft, setFileNameDraft] = useState("");
   const scrollRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingRejectRef = useRef(null);
@@ -1239,9 +1263,9 @@ function App() {
     setPendingDeleteFile(null);
     setDeletingFileId("");
     setDownloadingFileId("");
-    setEditingGeneratedFileId("");
-    setRenamingGeneratedFileId("");
-    setGeneratedFileNameDraft("");
+    setEditingFileTarget(null);
+    setRenamingFileKey("");
+    setFileNameDraft("");
   };
 
   const clearGenerationPolling = ({ rejectPending = false } = {}) => {
@@ -1815,8 +1839,8 @@ function App() {
     setIsFileManagerOpen(true);
     setActiveFileManagerTab(FILE_MANAGER_TABS.UPLOADED);
     setPendingDeleteFile(null);
-    setEditingGeneratedFileId("");
-    setGeneratedFileNameDraft("");
+    setEditingFileTarget(null);
+    setFileNameDraft("");
     if (!project) {
       setFileBuckets({ uploaded: [], generated: [] });
       setFileManagerError("프로젝트를 먼저 선택해주세요.");
@@ -1829,8 +1853,8 @@ function App() {
     setIsFileManagerOpen(false);
     setFileActionError("");
     setPendingDeleteFile(null);
-    setEditingGeneratedFileId("");
-    setGeneratedFileNameDraft("");
+    setEditingFileTarget(null);
+    setFileNameDraft("");
   };
 
   const handleDownloadUploadedFile = async (file) => {
@@ -1843,7 +1867,7 @@ function App() {
       return;
     }
 
-    setDownloadingFileId(file.fileId);
+    setDownloadingFileId(getFileActionKey(file, FILE_KINDS.UPLOADED));
     setFileActionError("");
 
     try {
@@ -1860,7 +1884,12 @@ function App() {
   };
 
   const handleRequestDeleteUploadedFile = (file) => {
-    setPendingDeleteFile(file);
+    setPendingDeleteFile({ ...file, fileKind: FILE_KINDS.UPLOADED });
+    setFileActionError("");
+  };
+
+  const handleRequestDeleteGeneratedFile = (file) => {
+    setPendingDeleteFile({ ...file, fileKind: FILE_KINDS.GENERATED });
     setFileActionError("");
   };
 
@@ -1869,7 +1898,7 @@ function App() {
     setFileActionError("");
   };
 
-  const handleConfirmDeleteUploadedFile = async () => {
+  const handleConfirmDeleteFile = async () => {
     if (!project?.projectId) {
       setFileActionError("프로젝트를 먼저 선택해주세요.");
       return;
@@ -1879,17 +1908,25 @@ function App() {
       return;
     }
 
-    setDeletingFileId(pendingDeleteFile.fileId);
+    const fileKind = pendingDeleteFile.fileKind || FILE_KINDS.UPLOADED;
+    setDeletingFileId(getFileActionKey(pendingDeleteFile, fileKind));
     setFileActionError("");
 
     try {
-      await deleteProjectFile({
-        projectId: project.projectId,
-        fileId: pendingDeleteFile.fileId,
-      });
+      if (fileKind === FILE_KINDS.GENERATED) {
+        await deleteArtifactFile({
+          projectId: project.projectId,
+          artifactId: pendingDeleteFile.fileId,
+        });
+      } else {
+        await deleteProjectFile({
+          projectId: project.projectId,
+          fileId: pendingDeleteFile.fileId,
+        });
+      }
       setFileBuckets((currentBuckets) => ({
         ...currentBuckets,
-        uploaded: currentBuckets.uploaded.filter(
+        [fileKind]: currentBuckets[fileKind].filter(
           (file) => file.fileId !== pendingDeleteFile.fileId,
         ),
       }));
@@ -1911,7 +1948,7 @@ function App() {
       return;
     }
 
-    setDownloadingFileId(file.fileId);
+    setDownloadingFileId(getFileActionKey(file, FILE_KINDS.GENERATED));
     setFileActionError("");
 
     try {
@@ -1927,56 +1964,66 @@ function App() {
     }
   };
 
-  const handleStartGeneratedFileRename = (file) => {
-    setEditingGeneratedFileId(file.fileId);
-    setGeneratedFileNameDraft(file.fileName || "");
+  const handleStartFileRename = (file, fileKind) => {
+    setEditingFileTarget({ fileId: file.fileId, fileKind });
+    setFileNameDraft(file.fileName || "");
     setFileActionError("");
   };
 
-  const handleCancelGeneratedFileRename = () => {
-    setEditingGeneratedFileId("");
-    setGeneratedFileNameDraft("");
+  const handleCancelFileRename = () => {
+    setEditingFileTarget(null);
+    setFileNameDraft("");
     setFileActionError("");
   };
 
-  const handleSaveGeneratedFileRename = async (file) => {
+  const handleSaveFileRename = async (file, fileKind) => {
     if (!project?.projectId || !file?.fileId) {
-      setFileActionError("수정할 생성 파일 정보를 확인하지 못했습니다.");
+      setFileActionError("수정할 파일 정보를 확인하지 못했습니다.");
       return;
     }
 
-    const nextFileName = generatedFileNameDraft.trim();
+    const nextFileName = fileNameDraft.trim();
     if (!nextFileName) {
       setFileActionError("파일명을 입력해주세요.");
       return;
     }
 
-    setRenamingGeneratedFileId(file.fileId);
+    setRenamingFileKey(getFileActionKey(file, fileKind));
     setFileActionError("");
 
     try {
-      const updatedArtifact = await updateArtifactFileName({
-        projectId: project.projectId,
-        artifactId: file.fileId,
-        fileName: nextFileName,
-      });
-      const updatedFile = normalizeGeneratedFile(updatedArtifact);
+      const updatedFile =
+        fileKind === FILE_KINDS.GENERATED
+          ? normalizeGeneratedFile(
+              await updateArtifactFileName({
+                projectId: project.projectId,
+                artifactId: file.fileId,
+                fileName: nextFileName,
+              }),
+            )
+          : normalizeUploadedFile(
+              await updateProjectFileName({
+                projectId: project.projectId,
+                fileId: file.fileId,
+                fileName: nextFileName,
+              }),
+            );
       setFileBuckets((currentBuckets) => ({
         ...currentBuckets,
-        generated: currentBuckets.generated.map((generatedFile) =>
-          generatedFile.fileId === file.fileId ? updatedFile : generatedFile,
+        [fileKind]: currentBuckets[fileKind].map((currentFile) =>
+          currentFile.fileId === file.fileId ? updatedFile : currentFile,
         ),
       }));
-      setEditingGeneratedFileId("");
-      setGeneratedFileNameDraft("");
+      setEditingFileTarget(null);
+      setFileNameDraft("");
     } catch (error) {
       setFileActionError(
         error instanceof Error
           ? error.message
-          : "생성 파일명을 수정하지 못했습니다.",
+          : "파일명을 수정하지 못했습니다.",
       );
     } finally {
-      setRenamingGeneratedFileId("");
+      setRenamingFileKey("");
     }
   };
 
@@ -3145,20 +3192,21 @@ function App() {
           pendingDeleteFile={pendingDeleteFile}
           deletingFileId={deletingFileId}
           downloadingFileId={downloadingFileId}
-          editingGeneratedFileId={editingGeneratedFileId}
-          renamingGeneratedFileId={renamingGeneratedFileId}
-          generatedFileNameDraft={generatedFileNameDraft}
-          onGeneratedFileNameDraftChange={setGeneratedFileNameDraft}
+          editingFileTarget={editingFileTarget}
+          renamingFileKey={renamingFileKey}
+          fileNameDraft={fileNameDraft}
+          onFileNameDraftChange={setFileNameDraft}
           onTabChange={setActiveFileManagerTab}
           onClose={closeFileManager}
           onDownloadUploaded={handleDownloadUploadedFile}
           onDownloadGenerated={handleDownloadGeneratedFile}
           onRequestDelete={handleRequestDeleteUploadedFile}
+          onRequestGeneratedDelete={handleRequestDeleteGeneratedFile}
           onCancelDelete={handleCancelDeleteUploadedFile}
-          onConfirmDelete={handleConfirmDeleteUploadedFile}
-          onStartGeneratedRename={handleStartGeneratedFileRename}
-          onCancelGeneratedRename={handleCancelGeneratedFileRename}
-          onSaveGeneratedRename={handleSaveGeneratedFileRename}
+          onConfirmDelete={handleConfirmDeleteFile}
+          onStartRename={handleStartFileRename}
+          onCancelRename={handleCancelFileRename}
+          onSaveRename={handleSaveFileRename}
         />
       )}
     </main>
@@ -3671,20 +3719,21 @@ function FileManagerModal({
   pendingDeleteFile,
   deletingFileId,
   downloadingFileId,
-  editingGeneratedFileId,
-  renamingGeneratedFileId,
-  generatedFileNameDraft,
-  onGeneratedFileNameDraftChange,
+  editingFileTarget,
+  renamingFileKey,
+  fileNameDraft,
+  onFileNameDraftChange,
   onTabChange,
   onClose,
   onDownloadUploaded,
   onDownloadGenerated,
   onRequestDelete,
+  onRequestGeneratedDelete,
   onCancelDelete,
   onConfirmDelete,
-  onStartGeneratedRename,
-  onCancelGeneratedRename,
-  onSaveGeneratedRename,
+  onStartRename,
+  onCancelRename,
+  onSaveRename,
 }) {
   const hasProject = Boolean(project?.projectId);
   const uploadedFiles = Array.isArray(fileBuckets?.uploaded)
@@ -3697,6 +3746,177 @@ function FileManagerModal({
     activeTab === FILE_MANAGER_TABS.GENERATED
       ? FILE_MANAGER_TABS.GENERATED
       : FILE_MANAGER_TABS.UPLOADED;
+  const renderFiles = (files, fileKind) => {
+    const isGenerated = fileKind === FILE_KINDS.GENERATED;
+    const emptyText = isGenerated
+      ? "생성한 파일이 없습니다."
+      : "업로드한 파일이 없습니다.";
+    if (!files.length) {
+      return <p className="file-manager-section-empty">{emptyText}</p>;
+    }
+
+    return (
+      <ul className="uploaded-file-list">
+        {files.map((file) => {
+          const fileKey = getFileActionKey(file, fileKind);
+          const isPendingDelete =
+            pendingDeleteFile?.fileKind === fileKind &&
+            pendingDeleteFile?.fileId === file.fileId;
+          const isDeleting = deletingFileId === fileKey;
+          const isDownloading = downloadingFileId === fileKey;
+          const isEditing =
+            editingFileTarget?.fileKind === fileKind &&
+            editingFileTarget?.fileId === file.fileId;
+          const isRenaming = renamingFileKey === fileKey;
+          const documentLabel = isGenerated
+            ? file.documentLabel || getArtifactDisplayLabel(file.artifactType)
+            : file.documentLabel || getDocumentDisplayLabel(file.documentType);
+          const timeLabel = isGenerated ? "생성 시간" : "업로드 시간";
+          const timeValue = isGenerated ? file.createdAt : file.uploadedAt;
+          const handleDownload = isGenerated ? onDownloadGenerated : onDownloadUploaded;
+          const handleDelete = isGenerated
+            ? onRequestGeneratedDelete
+            : onRequestDelete;
+
+          return (
+            <li className="uploaded-file-item" key={`${fileKind}-${file.fileId}`}>
+              <div className="uploaded-file-main">
+                <FileText size={18} aria-hidden="true" />
+                <div>
+                  <div className="file-name-row">
+                    {isEditing ? (
+                      <>
+                        <input
+                          className="generated-file-name-input"
+                          value={fileNameDraft}
+                          disabled={isRenaming}
+                          onChange={(event) =>
+                            onFileNameDraftChange(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              onSaveRename(file, fileKind);
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              onCancelRename();
+                            }
+                          }}
+                          aria-label="파일명"
+                        />
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          disabled={isRenaming}
+                          onClick={() => onSaveRename(file, fileKind)}
+                          aria-label="파일명 저장"
+                        >
+                          <Save size={14} aria-hidden="true" />
+                        </button>
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          disabled={isRenaming}
+                          onClick={onCancelRename}
+                          aria-label="파일명 수정 취소"
+                        >
+                          <X size={14} aria-hidden="true" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <strong>{file.fileName}</strong>
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          disabled={isDeleting || isDownloading}
+                          onClick={() => onStartRename(file, fileKind)}
+                          aria-label={`${file.fileName} 파일명 수정`}
+                          title="파일명 수정"
+                        >
+                          <Pencil size={14} aria-hidden="true" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <span>{documentLabel}</span>
+                </div>
+              </div>
+              <dl className="uploaded-file-meta">
+                <div>
+                  <dt>문서구분</dt>
+                  <dd>{documentLabel}</dd>
+                </div>
+                <div>
+                  <dt>파일크기</dt>
+                  <dd>{formatFileSize(file.fileSize)}</dd>
+                </div>
+                <div>
+                  <dt>파일유형</dt>
+                  <dd>{file.fileType}</dd>
+                </div>
+                <div>
+                  <dt>{timeLabel}</dt>
+                  <dd>{formatFileUploadedAt(timeValue)}</dd>
+                </div>
+              </dl>
+              <div className="uploaded-file-actions">
+                <button
+                  className="mini-action-button"
+                  type="button"
+                  disabled={isDeleting || isDownloading || isRenaming}
+                  onClick={() => handleDownload(file)}
+                >
+                  {isDownloading ? (
+                    <>
+                      <LoaderCircle size={14} aria-hidden="true" />
+                      다운로드 중
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} aria-hidden="true" />
+                      다운로드
+                    </>
+                  )}
+                </button>
+                <button
+                  className="mini-action-button danger"
+                  type="button"
+                  disabled={isDeleting || isDownloading || isRenaming}
+                  onClick={() => handleDelete(file)}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  삭제
+                </button>
+              </div>
+              {isPendingDelete && (
+                <div className="file-delete-confirm">
+                  <span>{file.fileName} 파일을 삭제할까요?</span>
+                  <button
+                    className="mini-action-button"
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={onCancelDelete}
+                  >
+                    취소
+                  </button>
+                  <button
+                    className="mini-action-button danger"
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={onConfirmDelete}
+                  >
+                    {isDeleting ? "삭제 중" : "확인"}
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3771,100 +3991,7 @@ function FileManagerModal({
                   aria-labelledby="uploaded-files-tab"
                 >
                   <h3>업로드한 파일</h3>
-                {uploadedFiles.length ? (
-                  <ul className="uploaded-file-list">
-                    {uploadedFiles.map((file) => {
-                      const isPendingDelete =
-                        pendingDeleteFile?.fileId === file.fileId;
-                      const isDeleting = deletingFileId === file.fileId;
-                      const isDownloading = downloadingFileId === file.fileId;
-
-                      return (
-                        <li
-                          className="uploaded-file-item"
-                          key={`${file.fileId}-${file.fileName}`}
-                        >
-                          <div className="uploaded-file-main">
-                            <FileText size={18} aria-hidden="true" />
-                            <div>
-                              <strong>{file.fileName}</strong>
-                              <span>{file.documentLabel}</span>
-                            </div>
-                          </div>
-                          <dl className="uploaded-file-meta">
-                            <div>
-                              <dt>유형</dt>
-                              <dd>{file.fileType}</dd>
-                            </div>
-                            <div>
-                              <dt>업로드 시간</dt>
-                              <dd>{formatFileUploadedAt(file.uploadedAt)}</dd>
-                            </div>
-                            <div>
-                              <dt>파일크기</dt>
-                              <dd>{formatFileSize(file.fileSize)}</dd>
-                            </div>
-                            <div>
-                              <dt>문서 구분</dt>
-                              <dd>{file.documentLabel}</dd>
-                            </div>
-                          </dl>
-                          <div className="uploaded-file-actions">
-                            <button
-                              className="mini-action-button"
-                              type="button"
-                              disabled={isDeleting || isDownloading}
-                              onClick={() => onDownloadUploaded(file)}
-                            >
-                              {isDownloading ? (
-                                <>
-                                  <LoaderCircle size={14} aria-hidden="true" />
-                                  다운로드 중
-                                </>
-                              ) : (
-                                <>
-                                  <Download size={14} aria-hidden="true" />
-                                  다운로드
-                                </>
-                              )}
-                            </button>
-                            <button
-                              className="mini-action-button danger"
-                              type="button"
-                              disabled={isDeleting || isDownloading}
-                              onClick={() => onRequestDelete(file)}
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                              삭제
-                            </button>
-                          </div>
-                          {isPendingDelete && (
-                            <div className="file-delete-confirm">
-                              <button
-                                className="mini-action-button"
-                                type="button"
-                                disabled={isDeleting}
-                                onClick={onCancelDelete}
-                              >
-                                취소
-                              </button>
-                              <button
-                                className="mini-action-button danger"
-                                type="button"
-                                disabled={isDeleting}
-                                onClick={onConfirmDelete}
-                              >
-                                {isDeleting ? "삭제 중" : "확인"}
-                              </button>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="file-manager-section-empty">업로드한 파일이 없습니다.</p>
-                )}
+                  {renderFiles(uploadedFiles, FILE_KINDS.UPLOADED)}
                 </section>
               ) : (
                 <section
@@ -3874,115 +4001,7 @@ function FileManagerModal({
                   aria-labelledby="generated-files-tab"
                 >
                   <h3>생성한 파일</h3>
-                {generatedFiles.length ? (
-                  <ul className="uploaded-file-list">
-                    {generatedFiles.map((file) => {
-                      const isDownloading = downloadingFileId === file.fileId;
-                      const isEditing = editingGeneratedFileId === file.fileId;
-                      const isRenaming = renamingGeneratedFileId === file.fileId;
-
-                      return (
-                        <li
-                          className="uploaded-file-item"
-                          key={`${file.fileId}-${file.fileName}`}
-                        >
-                          <div className="uploaded-file-main">
-                            <FileText size={18} aria-hidden="true" />
-                            <div>
-                              {isEditing ? (
-                                <input
-                                  className="generated-file-name-input"
-                                  value={generatedFileNameDraft}
-                                  disabled={isRenaming}
-                                  onChange={(event) =>
-                                    onGeneratedFileNameDraftChange(
-                                      event.target.value,
-                                    )
-                                  }
-                                />
-                              ) : (
-                                <strong>{file.fileName}</strong>
-                              )}
-                              <span>{file.artifactType || "생성 산출물"}</span>
-                            </div>
-                          </div>
-                          <dl className="uploaded-file-meta">
-                            <div>
-                              <dt>유형</dt>
-                              <dd>{file.fileType}</dd>
-                            </div>
-                            <div>
-                              <dt>생성 시간</dt>
-                              <dd>{formatFileUploadedAt(file.createdAt)}</dd>
-                            </div>
-                            <div>
-                              <dt>파일크기</dt>
-                              <dd>{formatFileSize(file.fileSize)}</dd>
-                            </div>
-                            <div>
-                              <dt>산출물</dt>
-                              <dd>{file.artifactType || "확인 불가"}</dd>
-                            </div>
-                          </dl>
-                          <div className="uploaded-file-actions">
-                            <button
-                              className="mini-action-button"
-                              type="button"
-                              disabled={isRenaming || isDownloading}
-                              onClick={() => onDownloadGenerated(file)}
-                            >
-                              {isDownloading ? (
-                                <>
-                                  <LoaderCircle size={14} aria-hidden="true" />
-                                  다운로드 중
-                                </>
-                              ) : (
-                                <>
-                                  <Download size={14} aria-hidden="true" />
-                                  다운로드
-                                </>
-                              )}
-                            </button>
-                            {isEditing ? (
-                              <>
-                                <button
-                                  className="mini-action-button primary"
-                                  type="button"
-                                  disabled={isRenaming}
-                                  onClick={() => onSaveGeneratedRename(file)}
-                                >
-                                  <Save size={14} aria-hidden="true" />
-                                  저장
-                                </button>
-                                <button
-                                  className="mini-action-button"
-                                  type="button"
-                                  disabled={isRenaming}
-                                  onClick={onCancelGeneratedRename}
-                                >
-                                  <X size={14} aria-hidden="true" />
-                                  취소
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                className="mini-action-button"
-                                type="button"
-                                disabled={isDownloading}
-                                onClick={() => onStartGeneratedRename(file)}
-                              >
-                                <Pencil size={14} aria-hidden="true" />
-                                수정
-                              </button>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="file-manager-section-empty">생성한 파일이 없습니다.</p>
-                )}
+                  {renderFiles(generatedFiles, FILE_KINDS.GENERATED)}
                 </section>
               )}
             </div>
@@ -4335,6 +4354,7 @@ function DefaultDocumentChoicePanel({
       documentConfig.defaultOutputFormat ||
       getDefaultOutputFormat(relation),
   );
+  const [draggingUploadSlot, setDraggingUploadSlot] = useState("");
   const primaryFileInputRef = useRef(null);
   const optionalFileInputRef = useRef(null);
   const defaultDocument =
@@ -4414,6 +4434,31 @@ function DefaultDocumentChoicePanel({
     event.target.value = "";
   };
 
+  const handleUploadDragOver = (event, slot) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isDisabled || isUploading) return;
+    event.dataTransfer.dropEffect = "copy";
+    setDraggingUploadSlot(slot);
+  };
+
+  const handleUploadDragLeave = (event, slot) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setDraggingUploadSlot((currentSlot) =>
+      currentSlot === slot ? "" : currentSlot,
+    );
+  };
+
+  const handleUploadDrop = (event, source, slot) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingUploadSlot("");
+    if (isDisabled || isUploading) return;
+    onUploadFiles?.(event.dataTransfer.files, buildUploadRequest(source, slot));
+  };
+
   const handlePanelAction = (event, callback) => {
     event.preventDefault();
     event.stopPropagation();
@@ -4431,7 +4476,6 @@ function DefaultDocumentChoicePanel({
     <div className="message-document-choice-panel">
       <strong className="document-choice-title">{targetLabel} 생성</strong>
       <section className="document-choice-section document-choice-slot">
-        <strong className="document-choice-section-title">기준 문서</strong>
         <div className="document-choice-file-row">
           <label
             className="document-choice-file-label"
@@ -4441,12 +4485,17 @@ function DefaultDocumentChoicePanel({
           </label>
           {shouldShowPrimaryUpload ? (
             <button
-              className="message-upload-button secondary document-choice-inline-upload"
+              className={`document-source-control document-upload-control ${
+                draggingUploadSlot === "primary" ? "is-drag-over" : ""
+              }`}
               type="button"
               disabled={isDisabled || isUploading}
               onClick={(event) =>
                 handlePanelAction(event, () => primaryFileInputRef.current?.click())
               }
+              onDragOver={(event) => handleUploadDragOver(event, "primary")}
+              onDragLeave={(event) => handleUploadDragLeave(event, "primary")}
+              onDrop={(event) => handleUploadDrop(event, primarySource, "primary")}
             >
               {isUploading ? (
                 <>
@@ -4460,7 +4509,7 @@ function DefaultDocumentChoicePanel({
           ) : (
             <select
               id={documentSelectId}
-              className="document-choice-source-select"
+              className="document-choice-source-select document-source-control"
               value={selectedDocument?.documentId || ""}
               disabled={isDisabled}
               onClick={(event) => event.stopPropagation()}
@@ -4524,9 +4573,6 @@ function DefaultDocumentChoicePanel({
       </section>
       {optionalSource && (
         <section className="document-choice-section document-choice-slot">
-          <strong className="document-choice-section-title">
-            추가 자료 · 선택
-          </strong>
           <div className="document-choice-file-row">
             <label
               className="document-choice-file-label"
@@ -4536,7 +4582,9 @@ function DefaultDocumentChoicePanel({
             </label>
             {shouldShowOptionalUpload ? (
               <button
-                className="message-upload-button secondary document-choice-inline-upload"
+                className={`document-source-control document-upload-control ${
+                  draggingUploadSlot === "optional" ? "is-drag-over" : ""
+                }`}
                 type="button"
                 disabled={isDisabled || isUploading}
                 onClick={(event) =>
@@ -4544,6 +4592,9 @@ function DefaultDocumentChoicePanel({
                     optionalFileInputRef.current?.click(),
                   )
                 }
+                onDragOver={(event) => handleUploadDragOver(event, "optional")}
+                onDragLeave={(event) => handleUploadDragLeave(event, "optional")}
+                onDrop={(event) => handleUploadDrop(event, optionalSource, "optional")}
               >
                 {isUploading ? (
                   <>
@@ -4557,7 +4608,7 @@ function DefaultDocumentChoicePanel({
             ) : (
               <select
                 id={optionalDocumentSelectId}
-                className="document-choice-source-select"
+                className="document-choice-source-select document-source-control"
                 value={selectedOptionalDocumentId}
                 disabled={isDisabled}
                 onClick={(event) => event.stopPropagation()}

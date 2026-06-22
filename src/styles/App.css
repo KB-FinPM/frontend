@@ -1038,12 +1038,6 @@ p {
   padding-top: 2px;
 }
 
-.document-choice-section-title {
-  color: #173a67;
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .document-choice-question {
   color: #344054;
   font-size: 13px;
@@ -1140,9 +1134,9 @@ p {
 
 .document-choice-file-row {
   display: grid;
-  grid-template-columns: minmax(96px, max-content) minmax(180px, 320px);
-  align-items: center;
-  gap: 8px 12px;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1152,27 +1146,53 @@ p {
   font-weight: 800;
 }
 
-.document-choice-source-select {
+.document-source-control {
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 10px;
+  min-height: 38px;
+  padding: 0 12px;
   border: 1px solid #cfd7e6;
   border-radius: 8px;
   color: #101828;
   background: #ffffff;
+  font: inherit;
   font-size: 13px;
+  font-weight: 800;
 }
 
+.document-choice-source-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.document-source-control:disabled,
 .document-choice-source-select:disabled {
   color: #667085;
   background: #f9fafb;
 }
 
-.document-choice-inline-upload {
-  width: 100%;
-  min-width: 0;
+.document-upload-control {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.document-upload-control:hover:not(:disabled),
+.document-upload-control.is-drag-over {
+  border-color: #1f6ed4;
+  color: #174b85;
+  background: #eff6ff;
+}
+
+.document-upload-control:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.document-upload-control:disabled svg {
+  animation: spin 900ms linear infinite;
 }
 
 .document-output-format {
@@ -1965,21 +1985,53 @@ p {
   gap: 10px;
 }
 
-.uploaded-file-main svg {
+.uploaded-file-main > svg {
   flex: 0 0 auto;
   margin-top: 2px;
   color: #1f6ed4;
 }
 
-.uploaded-file-main div {
+.uploaded-file-main > div {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
+.file-name-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .uploaded-file-main strong {
   color: #101828;
   overflow-wrap: anywhere;
+}
+
+.inline-icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #344054;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.inline-icon-button:hover:not(:disabled) {
+  border-color: #9eb5d6;
+  color: #1f6ed4;
+  background: #f4f7fb;
+}
+
+.inline-icon-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .generated-file-name-input {
@@ -2003,7 +2055,9 @@ p {
 
 .uploaded-file-meta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns:
+    minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 0.9fr)
+    minmax(0, 1.5fr);
   gap: 10px;
   margin: 0;
 }
@@ -2046,6 +2100,13 @@ p {
   border-radius: 8px;
   color: #7a271a;
   background: #fff6f5;
+}
+
+.file-delete-confirm span {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 @keyframes spin {

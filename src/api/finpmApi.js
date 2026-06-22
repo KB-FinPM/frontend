@@ -130,6 +130,23 @@ export const updateArtifactFileName = ({ projectId, artifactId, fileName }) =>
     },
   );
 
+export const updateProjectFileName = ({ projectId, fileId, fileName }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/files/${encodePathSegment(fileId)}`,
+    {
+      method: "PATCH",
+      body: { file_name: fileName },
+    },
+  );
+
+export const deleteArtifactFile = ({ projectId, artifactId }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/artifacts/${encodePathSegment(
+      artifactId,
+    )}`,
+    { method: "DELETE" },
+  );
+
 export const downloadArtifactFile = async ({
   projectId,
   artifactId,
