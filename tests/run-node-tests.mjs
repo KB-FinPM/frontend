@@ -9,7 +9,6 @@ import {
   parseResponseBody,
 } from "../src/api/client.js";
 import {
-  completeScheduleTodo,
   downloadArtifactFile,
   getProject,
 } from "../src/api/finpmApi.js";
@@ -435,44 +434,6 @@ test("downloadArtifactFile reports recoverable API errors", async () => {
       error.status === 404 &&
       error.message === "artifact not found",
   );
-});
-
-test("completeScheduleTodo posts todo id completion route", async () => {
-  let requestedUrl = "";
-  let requestedMethod = "";
-  globalThis.fetch = async (url, options = {}) => {
-    requestedUrl = url;
-    requestedMethod = options.method ?? "GET";
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name) =>
-          String(name).toLowerCase() === "content-type"
-            ? "application/json"
-            : "",
-      },
-      json: async () => ({
-        success: true,
-        result: {
-          matched_todo: { todo_id: "TODO 001", next_status: "DONE" },
-        },
-      }),
-      text: async () => "",
-    };
-  };
-
-  const result = await completeScheduleTodo({
-    projectId: "PRJ 001",
-    todoId: "TODO 001",
-  });
-
-  assert.equal(
-    requestedUrl,
-    "http://localhost:8000/api/schedule/todos/TODO%20001/complete?project_id=PRJ%20001",
-  );
-  assert.equal(requestedMethod, "POST");
-  assert.equal(result.result.matched_todo.next_status, "DONE");
 });
 
 test("command recommendation usage ignores empty commands", async () => {

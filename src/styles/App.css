@@ -1275,43 +1275,6 @@ p {
   border-bottom: 0;
 }
 
-.todo-complete-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 74px;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid #b8c7dc;
-  border-radius: 8px;
-  color: #173a67;
-  background: #ffffff;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.todo-complete-button:disabled {
-  cursor: not-allowed;
-  color: #667085;
-  background: #f2f4f7;
-}
-
-.todo-complete-state {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  color: #027a48;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.todo-complete-state.muted {
-  color: #667085;
-}
-
 .suggested-action-button {
   display: inline-flex;
   align-items: center;

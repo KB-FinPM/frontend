@@ -72,14 +72,6 @@ export const getChatActionStatus = ({ projectId, actionId }) =>
     )}`,
   );
 
-export const completeScheduleTodo = ({ projectId, todoId }) =>
-  requestJson(
-    `/schedule/todos/${encodePathSegment(todoId)}/complete?project_id=${encodePathSegment(
-      projectId,
-    )}`,
-    { method: "POST" },
-  );
-
 export const uploadDocument = ({ projectId, documentType, file }) => {
   const formData = new FormData();
   formData.append("project_id", projectId);
