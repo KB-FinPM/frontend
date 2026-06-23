@@ -4196,10 +4196,15 @@ function ProjectSidebar({
   return (
     <aside className="project-sidebar" aria-label="프로젝트 정보">
       <div className="sidebar-brand">
-        <div className="assistant-avatar">
-          <Bot size={18} aria-hidden="true" />
+        <div className="app-brand" aria-label="KB FinPM Agent">
+          <div className="app-brand-mark" aria-hidden="true">
+            KB
+          </div>
+          <div className="app-brand-copy">
+            <strong>FinPM Agent</strong>
+            <span>KB Hackathon</span>
+          </div>
         </div>
-        <strong>PM Agent</strong>
         <button
           className="sidebar-close-button"
           type="button"
