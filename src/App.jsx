@@ -884,10 +884,6 @@ const normalizeProjectDocumentCandidates = (response) => {
   );
 };
 
-const getTodoStatusLabel = (status) =>
-  TODO_STATUS_FILTERS.find((option) => option.value === status)?.label ||
-  TODO_STATUS_FILTERS[1].label;
-
 const getTodoSourceLabel = (sourceType) =>
   TODO_SOURCE_FILTERS.find((option) => option.value === sourceType)?.label ||
   "기타";
@@ -4650,7 +4646,6 @@ function TodoManagerModal({
         <div className="todo-item-main">
           <div className="todo-title-block">
             <strong>{todo.title || "제목 없음"}</strong>
-            <span>{getTodoStatusLabel(todo.status)}</span>
           </div>
           <dl className="todo-meta">
             <div>
@@ -4789,7 +4784,7 @@ function TodoManagerModal({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop modal-backdrop-start" role="presentation">
       <section
         className="todo-manager-modal"
         role="dialog"
@@ -5243,7 +5238,7 @@ function FileManagerModal({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop modal-backdrop-start" role="presentation">
       <section
         className="file-manager-modal"
         role="dialog"

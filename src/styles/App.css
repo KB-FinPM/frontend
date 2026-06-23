@@ -1781,8 +1781,16 @@ p {
   z-index: 20;
   display: grid;
   place-items: center;
+  box-sizing: border-box;
   padding: 20px;
   background: rgba(15, 23, 42, 0.38);
+}
+
+.modal-backdrop-start {
+  align-items: start;
+  justify-items: center;
+  padding: 48px 20px 20px;
+  overflow: auto;
 }
 
 .settings-modal,
@@ -1809,6 +1817,14 @@ p {
   width: min(980px, 100%);
   height: min(820px, calc(100vh - 40px));
   overflow: hidden;
+}
+
+.modal-backdrop-start .file-manager-modal {
+  height: min(760px, calc(100vh - 68px));
+}
+
+.modal-backdrop-start .todo-manager-modal {
+  height: min(820px, calc(100vh - 68px));
 }
 
 .settings-modal-header {
@@ -2072,7 +2088,6 @@ p {
 }
 
 .todo-preview-body p,
-.todo-title-block span,
 .todo-description,
 .todo-duplicate-match p {
   margin: 0;
@@ -2605,6 +2620,10 @@ p {
   .settings-actions .secondary-button,
   .settings-actions .primary-button {
     width: 100%;
+  }
+
+  .modal-backdrop-start {
+    padding: 12px;
   }
 
   .file-manager-modal,
