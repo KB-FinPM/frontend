@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ArrowUp,
   Bot,
+  BriefcaseBusiness,
   Check,
   Download,
   FileText,
@@ -3836,7 +3837,7 @@ function App() {
             <Menu size={20} aria-hidden="true" />
           </button>
           <div className="assistant-avatar">
-            <Bot size={20} aria-hidden="true" />
+            <BriefcaseBusiness size={20} aria-hidden="true" />
           </div>
           <div className="chat-title">
             <strong>
@@ -4045,15 +4046,17 @@ function ProjectEntry({
     <main className="entry-shell">
       <section className="entry-panel" aria-label="프로젝트 입장">
         <div className="entry-brand">
-          <div className="assistant-avatar">
-            <Bot size={22} aria-hidden="true" />
-          </div>
-          <span>PM Agent</span>
+          <img
+            className="entry-brand-logo"
+            src="/assets/brand/KB_SymbolMark.png"
+            alt="KB"
+          />
+          <span>FinPM Agent</span>
         </div>
 
         <div className="entry-copy">
           <p className="eyebrow">Project Workspace</p>
-          <h1>PM Agent</h1>
+          <h1>FinPM Agent</h1>
         </div>
 
         <form className="entry-form" onSubmit={onSubmit}>
@@ -4197,9 +4200,11 @@ function ProjectSidebar({
     <aside className="project-sidebar" aria-label="프로젝트 정보">
       <div className="sidebar-brand">
         <div className="app-brand" aria-label="KB FinPM Agent">
-          <div className="app-brand-mark" aria-hidden="true">
-            KB
-          </div>
+          <img
+            className="app-brand-logo"
+            src="/assets/brand/KB_SymbolMark.png"
+            alt="KB"
+          />
           <div className="app-brand-copy">
             <strong>FinPM Agent</strong>
             <span>KB Hackathon</span>
