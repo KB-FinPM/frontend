@@ -44,6 +44,7 @@ import {
   normalizeGenerationProgressPayload,
 } from "./services/generationProgressService.js";
 import {
+  completeScheduleTodo,
   deleteArtifactFile,
   deleteProjectFile,
   downloadArtifactFile,
@@ -1063,6 +1064,25 @@ const truncateTodoText = (value = "", maxLength = 90) => {
   return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
 };
 
+const getTodoId = (todo = {}) => todo.todo_id ?? todo.todoId ?? "";
+
+const isCompletedTodoStatus = (status = "") => {
+  const normalized = String(status ?? "").trim().toUpperCase();
+  return normalized === "DONE" || normalized === "COMPLETED" || status === "완료";
+};
+
+const isTodoCompleted = (todo = {}) =>
+  isCompletedTodoStatus(todo.status_code) || isCompletedTodoStatus(todo.status);
+
+const withCompletedTodoState = (todo = {}, completedTodo = {}) => ({
+  ...todo,
+  ...completedTodo,
+  todo_id: getTodoId(completedTodo) || getTodoId(todo),
+  status: "완료",
+  status_code: "DONE",
+  actions: [],
+});
+
 const buildGenerationProgress = (progress, status = "RUNNING") => {
   const safeProgress = Math.max(0, Math.min(100, Math.round(progress)));
   const activeIndex = GENERATION_PROGRESS_STEPS.findIndex(
@@ -1348,6 +1368,7 @@ function App() {
   const [documentError, setDocumentError] = useState("");
   const [documentStatusMessage, setDocumentStatusMessage] = useState("");
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+  const [completingTodoIds, setCompletingTodoIds] = useState(() => new Set());
   const [generationProgress, setGenerationProgress] = useState(null);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
@@ -2947,6 +2968,104 @@ function App() {
     }
   };
 
+  const setTodoCompleting = (todoId, isCompleting) => {
+    setCompletingTodoIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      if (isCompleting) {
+        nextIds.add(todoId);
+      } else {
+        nextIds.delete(todoId);
+      }
+      return nextIds;
+    });
+  };
+
+  const handleCompleteTodo = async ({ message, todo }) => {
+    if (!project || isResponding) return;
+
+    const todoId = getTodoId(todo);
+    if (!todoId) {
+      setDocumentError("완료 처리할 TODO ID를 확인하지 못했습니다.");
+      return;
+    }
+
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    if (!targetConversationId) {
+      setDocumentError("완료 상태를 반영할 대화 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setTodoCompleting(todoId, true);
+    setDocumentError("");
+    setDocumentStatusMessage("");
+
+    try {
+      const response = await completeScheduleTodo({
+        projectId: project.projectId,
+        todoId,
+      });
+      const result = response?.result ?? {};
+      const completedTodo =
+        (Array.isArray(result.todos)
+          ? result.todos.find((item) => getTodoId(item) === todoId)
+          : null) ||
+        result.matched_todo ||
+        todo;
+      const completedTitle =
+        sanitizeTodoText(completedTodo.title || todo.title || "선택한 TODO");
+      const markItems = (items) =>
+        Array.isArray(items)
+          ? items.map((item) =>
+              getTodoId(item) === todoId
+                ? withCompletedTodoState(item, completedTodo)
+                : item,
+            )
+          : items;
+
+      const updateResult = await updateConversationMessage(
+        project.projectId,
+        targetConversationId,
+        message.id,
+        (currentMessage) => {
+          const currentMetadata = currentMessage.metadata ?? {};
+          const currentResult = currentMetadata.result ?? {};
+          const nextItems = markItems(currentResult.items);
+          const nextTodos = markItems(currentResult.todos);
+          const currentScheduleTable = currentResult.schedule_table ?? {};
+          const nextScheduleItems = markItems(currentScheduleTable.items);
+
+          return {
+            ...currentMessage,
+            metadata: {
+              ...currentMetadata,
+              result: {
+                ...currentResult,
+                items: nextItems,
+                todos: nextTodos,
+                schedule_table: {
+                  ...currentScheduleTable,
+                  items: nextScheduleItems,
+                },
+              },
+            },
+          };
+        },
+      );
+
+      setProject(updateResult.project);
+      setDocumentStatusMessage(`완료 처리했습니다: ${completedTitle}`);
+    } catch (error) {
+      reportUiError("handleCompleteTodo", error, {
+        projectId: project?.projectId,
+        todoId,
+      });
+      setDocumentError("TODO 완료 처리에 실패했습니다. 다시 시도해주세요.");
+    } finally {
+      setTodoCompleting(todoId, false);
+    }
+  };
+
   const handleCommandActionClick = async (message, action) => {
     if (!project || isResponding) return;
 
@@ -3239,6 +3358,8 @@ function App() {
                   onDocumentChoice={handleDocumentChoice}
                   onSuggestedActionClick={handleSuggestedActionClick}
                   onCommandActionClick={handleCommandActionClick}
+                  onCompleteTodo={handleCompleteTodo}
+                  completingTodoIds={completingTodoIds}
                 />
               ))
             ) : (
@@ -4199,6 +4320,8 @@ function ChatMessage({
   onDocumentChoice,
   onSuggestedActionClick,
   onCommandActionClick,
+  onCompleteTodo,
+  completingTodoIds = new Set(),
 }) {
   const isAssistant = message.role === "assistant";
   const fileInputRef = useRef(null);
@@ -4346,7 +4469,12 @@ function ChatMessage({
             downloadFiles={downloadFiles}
           />
         )}
-        <ScheduleTodoResult items={scheduleTodoItems} />
+        <ScheduleTodoResult
+          items={scheduleTodoItems}
+          isDisabled={isResponding || isUploadingDocument}
+          completingTodoIds={completingTodoIds}
+          onCompleteTodo={(todo) => onCompleteTodo?.({ message, todo })}
+        />
         <MessageResult
           downloadFiles={downloadFiles}
           onDownloadFile={onDownloadFile}
@@ -4900,7 +5028,12 @@ function MessageResult({ downloadFiles, onDownloadFile }) {
   );
 }
 
-function ScheduleTodoResult({ items }) {
+function ScheduleTodoResult({
+  items,
+  isDisabled = false,
+  completingTodoIds = new Set(),
+  onCompleteTodo,
+}) {
   const todos = Array.isArray(items) ? items : [];
   if (!todos.length) return null;
 
@@ -4912,16 +5045,21 @@ function ScheduleTodoResult({ items }) {
             <th>할 일</th>
             <th>담당자</th>
             <th>기한</th>
-            <th>관련 산출물</th>
+            <th>출처</th>
             <th>상태</th>
+            <th>완료</th>
           </tr>
         </thead>
         <tbody>
           {todos.map((todo, index) => {
+            const todoId = getTodoId(todo);
             const title = sanitizeTodoText(todo.title || "제목 없음");
             const evidence = sanitizeTodoText(todo.evidence || title);
+            const isCompleted = isTodoCompleted(todo);
+            const isCompleting = todoId ? completingTodoIds.has(todoId) : false;
+            const canComplete = Boolean(todoId) && !isCompleted;
             return (
-              <tr key={todo.todo_id ?? `${todo.title}-${index}`}>
+              <tr key={todoId || `${todo.title}-${index}`}>
                 <td title={evidence}>{truncateTodoText(title)}</td>
                 <td>{sanitizeTodoText(todo.assignee) || "담당자 미정"}</td>
                 <td>{sanitizeTodoText(todo.due_date) || "기한 미정"}</td>
@@ -4930,6 +5068,32 @@ function ScheduleTodoResult({ items }) {
                     "회의록 기반 신규 TODO"}
                 </td>
                 <td>{sanitizeTodoText(todo.status) || "확인 필요"}</td>
+                <td>
+                  {isCompleted ? (
+                    <span className="todo-complete-state">완료됨</span>
+                  ) : canComplete ? (
+                    <button
+                      className="todo-complete-button"
+                      type="button"
+                      disabled={isDisabled || isCompleting}
+                      onClick={() => onCompleteTodo?.(todo)}
+                    >
+                      {isCompleting ? (
+                        <>
+                          <LoaderCircle size={14} aria-hidden="true" />
+                          처리 중
+                        </>
+                      ) : (
+                        <>
+                          <Check size={14} aria-hidden="true" />
+                          완료
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <span className="todo-complete-state muted">ID 없음</span>
+                  )}
+                </td>
               </tr>
             );
           })}
