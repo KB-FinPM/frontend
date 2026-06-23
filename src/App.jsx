@@ -454,9 +454,9 @@ const getDefaultOutputFormat = (relation) => getOutputFormats(relation)[0]?.valu
 const MEETING_TODO_DOCUMENT_CONFIG = Object.freeze({
   requestType: DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION,
   targetArtifactType: "ACTION_ITEMS",
-  targetLabel: "회의록 TODO",
-  panelTitle: "회의록 TODO 추출",
-  actionLabel: "TODO 추출하기",
+  targetLabel: "회의록 할일",
+  panelTitle: "회의록 할일 추출",
+  actionLabel: "할일 추출하기",
   primarySource: {
     documentType: DOCUMENT_TYPES.MEETING_NOTES,
     label: "기술협상회의록",
@@ -468,10 +468,10 @@ const MEETING_TODO_DOCUMENT_CONFIG = Object.freeze({
   defaultOutputFormat: "",
   hideOutputFormat: true,
   message:
-    "회의록에서 TODO를 추출하려면 회의록 내용을 붙여넣거나 파일을 업로드해 주세요.",
+    "회의록에서 할일을 추출하려면 회의록 내용을 붙여넣거나 파일을 업로드해 주세요.",
   existingMessage:
     "이미 업로드된 회의록이 있습니다. 기존 회의록을 사용하거나 새 회의록을 업로드해 주세요.",
-  startMessage: "회의록에서 TODO를 추출하고 있습니다.",
+  startMessage: "회의록에서 할일을 추출하고 있습니다.",
   label: "회의록 업로드",
   documentTypes: [DOCUMENT_TYPES.MEETING_NOTES],
   keywords: ["기술협상", "회의록", "미팅", "meeting"],
@@ -2440,7 +2440,7 @@ function App() {
       setTodoError(
         error instanceof Error
           ? error.message
-          : "TODO 목록을 불러오지 못했습니다.",
+          : "할일 목록을 불러오지 못했습니다.",
       );
     } finally {
       setIsLoadingTodos(false);
@@ -2510,7 +2510,7 @@ function App() {
       setTodoActionError(
         error instanceof Error
           ? error.message
-          : "TODO 상태를 저장하지 못했습니다.",
+          : "할일 상태를 저장하지 못했습니다.",
       );
     } finally {
       setSavingTodoId("");
@@ -2547,7 +2547,7 @@ function App() {
     if (!project?.projectId || !todo?.todoId) return;
     const nextTitle = todoEditDraft.title.trim();
     if (!nextTitle) {
-      setTodoActionError("TODO명을 입력해 주세요.");
+      setTodoActionError("할일명을 입력해 주세요.");
       return;
     }
 
@@ -2579,7 +2579,7 @@ function App() {
       setTodoActionError(
         error instanceof Error
           ? error.message
-          : "TODO 정보를 저장하지 못했습니다.",
+          : "할일 정보를 저장하지 못했습니다.",
       );
     } finally {
       setSavingTodoId("");
@@ -2588,7 +2588,7 @@ function App() {
 
   const handleDeleteTodo = async (todo) => {
     if (!project?.projectId || !todo?.todoId) return;
-    if (!window.confirm(`"${todo.title}" TODO를 삭제할까요?`)) return;
+    if (!window.confirm(`"${todo.title}" 할일을 삭제할까요?`)) return;
 
     setSavingTodoId(todo.todoId);
     setTodoActionError("");
@@ -2602,7 +2602,7 @@ function App() {
       );
     } catch (error) {
       setTodoActionError(
-        error instanceof Error ? error.message : "TODO를 삭제하지 못했습니다.",
+        error instanceof Error ? error.message : "할일을 삭제하지 못했습니다.",
       );
     } finally {
       setSavingTodoId("");
@@ -2674,7 +2674,7 @@ function App() {
 
   const handlePreviewTodoImport = async () => {
     if (!project?.projectId || !todoImportDocumentId) {
-      setTodoActionError("TODO를 불러올 문서를 선택해 주세요.");
+      setTodoActionError("할일을 불러올 문서를 선택해 주세요.");
       return;
     }
 
@@ -2705,7 +2705,7 @@ function App() {
       setTodoActionError(
         error instanceof Error
           ? error.message
-          : "문서에서 TODO를 미리보기하지 못했습니다.",
+          : "문서에서 할일을 미리보기하지 못했습니다.",
       );
     } finally {
       setIsPreviewingTodoImport(false);
@@ -2768,7 +2768,7 @@ function App() {
       await loadTodos();
     } catch (error) {
       setTodoActionError(
-        error instanceof Error ? error.message : "TODO를 저장하지 못했습니다.",
+        error instanceof Error ? error.message : "할일을 저장하지 못했습니다.",
       );
     } finally {
       setIsCommittingTodoImport(false);
@@ -4301,7 +4301,7 @@ function ProjectSidebar({
         onClick={onOpenTodoManager}
       >
         <Check size={16} aria-hidden="true" />
-        TODO 관리
+        할일 관리
       </button>
 
       <button
@@ -4599,7 +4599,7 @@ function TodoManagerModal({
           </p>
           {matchedExisting?.title && (
             <div className="todo-duplicate-match">
-              <span>기존 TODO</span>
+              <span>기존 할일</span>
               <strong>{matchedExisting.title}</strong>
               <p>
                 {matchedExisting.assignee || "담당자 미정"} ·{" "}
@@ -4650,8 +4650,8 @@ function TodoManagerModal({
               className="inline-icon-button"
               type="button"
               disabled={isSaving}
-              title="TODO 수정"
-              aria-label={`${todo.title} TODO 수정`}
+              title="할일 수정"
+              aria-label={`${todo.title} 할일 수정`}
               onClick={() => onStartEdit(todo)}
             >
               <Pencil size={14} aria-hidden="true" />
@@ -4660,8 +4660,8 @@ function TodoManagerModal({
               className="inline-icon-button"
               type="button"
               disabled={isSaving}
-              title="TODO 삭제"
-              aria-label={`${todo.title} TODO 삭제`}
+              title="할일 삭제"
+              aria-label={`${todo.title} 할일 삭제`}
               onClick={() => onDelete(todo)}
             >
               <Trash2 size={14} aria-hidden="true" />
@@ -4674,7 +4674,7 @@ function TodoManagerModal({
         {isEditing && (
           <div className="todo-edit-panel">
             <label>
-              TODO명
+              할일명
               <input
                 value={editDraft.title}
                 disabled={isSaving}
@@ -4765,14 +4765,14 @@ function TodoManagerModal({
       >
         <header className="settings-modal-header">
           <div>
-            <span>TODO</span>
-            <h2 id="todo-manager-title">TODO 관리</h2>
+            <span>할일</span>
+            <h2 id="todo-manager-title">할일 관리</h2>
           </div>
           <button
             className="icon-button"
             type="button"
             onClick={onClose}
-            aria-label="TODO 관리 닫기"
+            aria-label="할일 관리 닫기"
           >
             <X size={18} aria-hidden="true" />
           </button>
@@ -4792,7 +4792,7 @@ function TodoManagerModal({
                   onClick={onToggleImport}
                 >
                   <FileText size={16} aria-hidden="true" />
-                  문서에서 TODO 불러오기
+                  문서에서 할일 불러오기
                 </button>
                 <div className="todo-filter-grid">
                   <label>
@@ -4867,7 +4867,7 @@ function TodoManagerModal({
                           미리보기 중
                         </>
                       ) : (
-                        "TODO 미리보기"
+                        "할일 미리보기"
                       )}
                     </button>
                   </div>
@@ -4939,7 +4939,7 @@ function TodoManagerModal({
                         </ul>
                       ) : (
                         <p className="file-manager-section-empty">
-                          문서에서 불러올 TODO가 없습니다.
+                          문서에서 불러올 할일이 없습니다.
                         </p>
                       )}
                       <div className="todo-preview-actions">
@@ -4953,7 +4953,7 @@ function TodoManagerModal({
                           }
                           onClick={onCommitImport}
                         >
-                          {isCommittingImport ? "저장 중" : "선택한 TODO 저장"}
+                          {isCommittingImport ? "저장 중" : "선택한 할일 저장"}
                         </button>
                       </div>
                     </div>
@@ -4963,13 +4963,13 @@ function TodoManagerModal({
 
               <section className="todo-list-section">
                 <div className="todo-list-header">
-                  <h3>TODO 목록</h3>
+                  <h3>할일 목록</h3>
                   <span>{todoItems.length}개</span>
                 </div>
                 {isLoading ? (
                   <div className="file-manager-loading" role="status">
                     <LoaderCircle size={18} aria-hidden="true" />
-                    TODO 목록을 불러오는 중입니다.
+                    할일 목록을 불러오는 중입니다.
                   </div>
                 ) : error ? (
                   <p className="form-error">{error}</p>
@@ -4977,7 +4977,7 @@ function TodoManagerModal({
                   <ul className="todo-list">{todoItems.map(renderTodoItem)}</ul>
                 ) : (
                   <p className="file-manager-section-empty">
-                    등록된 TODO가 없습니다.
+                    등록된 할일이 없습니다.
                   </p>
                 )}
               </section>
@@ -6042,11 +6042,11 @@ function ScheduleTodoResult({ items }) {
   if (!todos.length) return null;
 
   return (
-    <div className="schedule-todo-result" aria-label="TODO 목록">
+    <div className="schedule-todo-result" aria-label="할일 목록">
       <table>
         <thead>
           <tr>
-            <th>할 일</th>
+            <th>할일</th>
             <th>담당자</th>
             <th>기한</th>
             <th>상태</th>
