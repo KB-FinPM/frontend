@@ -18,10 +18,26 @@
   --kb-shadow-lg: 0 24px 60px rgba(47, 42, 36, 0.22);
   --kb-radius-sm: 8px;
   --kb-radius-md: 10px;
-  --kb-control-height: 40px;
-  font-family:
+  --kb-control-height: 42px;
+  --kb-control-height-lg: 52px;
+  --kb-sidebar-width: 320px;
+  --kb-header-height: 72px;
+  --kb-composer-max-width: 880px;
+  --kb-space-1: 4px;
+  --kb-space-2: 8px;
+  --kb-space-3: 12px;
+  --kb-space-4: 16px;
+  --kb-space-5: 20px;
+  --kb-space-6: 24px;
+  --kb-space-7: 28px;
+  --kb-font-title:
+    "KB금융 제목체", "KB금융 본문체", "Noto Sans KR", "Pretendard",
+    system-ui, sans-serif;
+  --kb-font-body:
     "KB금융 본문체", "Noto Sans KR", "Pretendard", system-ui, -apple-system,
     BlinkMacSystemFont, sans-serif;
+  font-family:
+    var(--kb-font-body);
   color: var(--kb-text);
   background: var(--kb-bg);
   font-synthesis: none;
@@ -3254,4 +3270,380 @@ p {
 .step-content p,
 .step-content > span {
   color: var(--kb-text-muted);
+}
+
+/* KB layout polish v23 */
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: var(--kb-font-body);
+}
+
+.chat-app-shell {
+  grid-template-columns: var(--kb-sidebar-width) minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--kb-bg);
+}
+
+.project-sidebar {
+  grid-auto-rows: max-content;
+  gap: var(--kb-space-4);
+  width: var(--kb-sidebar-width);
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  padding: var(--kb-space-6) var(--kb-space-5);
+  scrollbar-gutter: stable;
+}
+
+.sidebar-brand {
+  min-height: 58px;
+  padding: 0 0 var(--kb-space-4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.app-brand {
+  gap: var(--kb-space-3);
+  min-width: 0;
+}
+
+.app-brand-mark {
+  width: 54px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: var(--kb-radius-sm);
+  box-shadow: none;
+  font-family: var(--kb-font-title);
+  font-size: 16px;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.app-brand-copy {
+  gap: var(--kb-space-1);
+  padding-top: 1px;
+}
+
+.app-brand-copy strong {
+  font-family: var(--kb-font-title);
+  font-size: 16px;
+  line-height: 1.18;
+}
+
+.app-brand-copy span {
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+}
+
+.project-info {
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+}
+
+.project-info-title {
+  min-height: 32px;
+  gap: var(--kb-space-2);
+}
+
+.project-info > strong {
+  font-family: var(--kb-font-title);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.project-info dl {
+  gap: var(--kb-space-2);
+}
+
+.project-info dt {
+  line-height: 1.35;
+}
+
+.project-info dd {
+  line-height: 1.42;
+}
+
+.project-info p {
+  line-height: 1.55;
+}
+
+.conversation-panel {
+  gap: var(--kb-space-3);
+}
+
+.conversation-panel-header {
+  min-height: 28px;
+}
+
+.conversation-list {
+  gap: var(--kb-space-2);
+}
+
+.conversation-select {
+  padding: 10px var(--kb-space-3);
+}
+
+.project-sidebar .secondary-button,
+.new-chat-button {
+  min-height: var(--kb-control-height);
+  padding-inline: var(--kb-space-4);
+  line-height: 1.2;
+}
+
+.project-sidebar .secondary-button {
+  justify-content: flex-start;
+}
+
+.chat-panel {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--kb-bg);
+}
+
+.chat-header {
+  min-height: var(--kb-header-height);
+  padding: var(--kb-space-4) var(--kb-space-7);
+  gap: var(--kb-space-3);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.chat-header .assistant-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--kb-radius-sm);
+  color: var(--kb-dark-gray);
+  background: var(--kb-yellow-positive);
+}
+
+.chat-title {
+  display: grid;
+  gap: 3px;
+}
+
+.chat-title strong {
+  font-family: var(--kb-font-title);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.chat-title span {
+  margin-top: 0;
+  line-height: 1.35;
+}
+
+.chat-thread {
+  min-height: 0;
+  gap: var(--kb-space-5);
+  padding: var(--kb-space-6) var(--kb-space-7);
+  scroll-padding: var(--kb-space-6);
+}
+
+.chat-thread:has(.empty-chat-state) {
+  align-content: start;
+}
+
+.empty-chat-state {
+  width: min(560px, 100%);
+  margin: clamp(32px, 9vh, 72px) auto 0;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-6);
+}
+
+.empty-chat-icon {
+  width: 42px;
+  height: 42px;
+}
+
+.empty-chat-state h2 {
+  font-family: var(--kb-font-title);
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.empty-chat-state p {
+  max-width: 420px;
+  line-height: 1.55;
+}
+
+.message-stack,
+.chat-message.assistant .message-stack,
+.chat-message:not(.user) .message-stack,
+.chat-message.user .message-stack {
+  max-width: min(760px, 100%);
+}
+
+.message-body {
+  padding: var(--kb-space-3) var(--kb-space-4);
+}
+
+.composer-area {
+  position: relative;
+  bottom: auto;
+  gap: var(--kb-space-2);
+  width: 100%;
+  margin: 0;
+  padding: var(--kb-space-3) var(--kb-space-7) var(--kb-space-6);
+  border-top: 1px solid var(--kb-border);
+  background:
+    linear-gradient(180deg, rgba(247, 244, 237, 0.9), var(--kb-bg)),
+    var(--kb-bg);
+  box-shadow: 0 -10px 24px rgba(47, 42, 36, 0.06);
+}
+
+.composer-area > .attachment-status,
+.composer-area > .command-recommendations,
+.composer-area > .chat-composer {
+  width: min(var(--kb-composer-max-width), 100%);
+  margin-inline: auto;
+}
+
+.attachment-status {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+}
+
+.composer-area > .attachment-status {
+  justify-self: center;
+  margin-right: auto;
+}
+
+.command-recommendations {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--kb-space-2) var(--kb-space-3);
+  min-height: 36px;
+}
+
+.command-recommendations > span {
+  padding-top: 9px;
+  line-height: 1.2;
+}
+
+.command-chip-list {
+  gap: var(--kb-space-2);
+}
+
+.command-chip {
+  min-height: 34px;
+  padding: 0 var(--kb-space-3);
+  line-height: 1.2;
+}
+
+.chat-composer {
+  grid-template-columns: minmax(0, 1fr) var(--kb-control-height-lg);
+  gap: var(--kb-space-2);
+  align-items: end;
+}
+
+.chat-composer textarea {
+  min-height: var(--kb-control-height-lg);
+  max-height: 132px;
+  padding: 14px var(--kb-space-4);
+  line-height: 1.5;
+  box-shadow: var(--kb-shadow-sm);
+}
+
+.send-button {
+  width: var(--kb-control-height-lg);
+  height: var(--kb-control-height-lg);
+  align-self: stretch;
+  color: var(--kb-dark-gray);
+  box-shadow: var(--kb-shadow-sm);
+}
+
+.primary-button,
+.secondary-button,
+.message-upload-button,
+.download-file-link,
+.suggested-action-button {
+  min-height: var(--kb-control-height);
+  line-height: 1.2;
+}
+
+.file-manager-modal,
+.todo-manager-modal,
+.settings-modal {
+  border-radius: var(--kb-radius-md);
+}
+
+.modal-backdrop-start {
+  align-items: start;
+  padding: 48px var(--kb-space-6) var(--kb-space-6);
+}
+
+@media (max-width: 860px) {
+  .chat-app-shell {
+    display: block;
+    height: 100vh;
+    height: 100dvh;
+    --sidebar-drawer-left: max(
+      calc(var(--kb-sidebar-width) * -1),
+      calc(44px - 100vw)
+    );
+  }
+
+  .project-sidebar {
+    width: min(var(--kb-sidebar-width), calc(100vw - 44px));
+  }
+
+  .chat-panel {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-header {
+    min-height: 68px;
+    padding: var(--kb-space-3) var(--kb-space-4);
+  }
+
+  .chat-thread {
+    padding: var(--kb-space-5) var(--kb-space-4);
+  }
+
+  .empty-chat-state {
+    margin-top: var(--kb-space-6);
+    padding: var(--kb-space-5);
+  }
+
+  .composer-area {
+    width: 100%;
+    padding: var(--kb-space-3) var(--kb-space-4) var(--kb-space-4);
+  }
+
+  .command-recommendations {
+    grid-template-columns: 1fr;
+  }
+
+  .command-recommendations > span {
+    padding-top: 0;
+  }
+
+  .command-chip {
+    min-height: 32px;
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+
+  .command-chip:nth-child(n + 4) {
+    display: none;
+  }
 }
