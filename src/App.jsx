@@ -1573,6 +1573,9 @@ function App() {
   const [todoError, setTodoError] = useState("");
   const [todoActionError, setTodoActionError] = useState("");
   const [savingTodoId, setSavingTodoId] = useState("");
+  const [selectedTodoIds, setSelectedTodoIds] = useState([]);
+  const [bulkTodoStatus, setBulkTodoStatus] = useState("IN_PROGRESS");
+  const [isBulkTodoActionRunning, setIsBulkTodoActionRunning] = useState(false);
   const [editingTodoId, setEditingTodoId] = useState("");
   const [todoEditDraft, setTodoEditDraft] = useState({
     title: "",
@@ -2425,6 +2428,7 @@ function App() {
   const loadTodos = async ({ status = todoStatusFilter } = {}) => {
     if (!project?.projectId) {
       setTodoItems([]);
+      setSelectedTodoIds([]);
       setTodoError("프로젝트를 먼저 선택해 주세요.");
       return;
     }
@@ -2435,9 +2439,17 @@ function App() {
       const response = await listProjectTodos(project.projectId, {
         status,
       });
-      setTodoItems(normalizeTodoListResponse(response));
+      const nextItems = normalizeTodoListResponse(response);
+      const nextTodoIdSet = new Set(
+        nextItems.map((item) => item.todoId).filter(Boolean),
+      );
+      setTodoItems(nextItems);
+      setSelectedTodoIds((currentIds) =>
+        currentIds.filter((todoId) => nextTodoIdSet.has(todoId)),
+      );
     } catch (error) {
       setTodoItems([]);
+      setSelectedTodoIds([]);
       setTodoError(
         error instanceof Error
           ? error.message
@@ -2456,6 +2468,9 @@ function App() {
     setIsTodoImportOpen(false);
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
+    setSelectedTodoIds([]);
+    setBulkTodoStatus("IN_PROGRESS");
+    setIsBulkTodoActionRunning(false);
     if (!project?.projectId) {
       setTodoItems([]);
       setTodoError("프로젝트를 먼저 선택해 주세요.");
@@ -2471,6 +2486,9 @@ function App() {
     setTodoError("");
     setEditingTodoId("");
     setSavingTodoId("");
+    setSelectedTodoIds([]);
+    setBulkTodoStatus("IN_PROGRESS");
+    setIsBulkTodoActionRunning(false);
     setIsTodoImportOpen(false);
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
@@ -2478,7 +2496,48 @@ function App() {
 
   const handleTodoStatusFilterChange = (value) => {
     setTodoStatusFilter(value);
+    setSelectedTodoIds([]);
     loadTodos({ status: value });
+  };
+
+  const getSelectedVisibleTodoIds = () => {
+    const visibleTodoIdSet = new Set(
+      todoItems.map((item) => item.todoId).filter(Boolean),
+    );
+    return selectedTodoIds.filter((todoId) => visibleTodoIdSet.has(todoId));
+  };
+
+  const handleToggleTodoSelection = (todoId) => {
+    if (!todoId || isBulkTodoActionRunning) return;
+
+    setSelectedTodoIds((currentIds) =>
+      currentIds.includes(todoId)
+        ? currentIds.filter((currentTodoId) => currentTodoId !== todoId)
+        : [...currentIds, todoId],
+    );
+  };
+
+  const handleSelectAllTodos = () => {
+    if (isBulkTodoActionRunning) return;
+
+    const visibleTodoIds = todoItems.map((item) => item.todoId).filter(Boolean);
+    if (!visibleTodoIds.length) return;
+
+    setSelectedTodoIds((currentIds) => {
+      const visibleTodoIdSet = new Set(visibleTodoIds);
+      const isAllVisibleSelected = visibleTodoIds.every((todoId) =>
+        currentIds.includes(todoId),
+      );
+      if (isAllVisibleSelected) {
+        return currentIds.filter((todoId) => !visibleTodoIdSet.has(todoId));
+      }
+      return Array.from(new Set([...currentIds, ...visibleTodoIds]));
+    });
+  };
+
+  const handleClearTodoSelection = () => {
+    if (isBulkTodoActionRunning) return;
+    setSelectedTodoIds([]);
   };
 
   const handleTodoStatusChange = async (todo, status) => {
@@ -2506,6 +2565,7 @@ function App() {
           item.todoId === todo.todoId ? updatedTodo : item,
         ),
       );
+      await loadTodos();
     } catch (error) {
       setTodoItems(previousTodos);
       setTodoActionError(
@@ -2576,7 +2636,9 @@ function App() {
         ),
       );
       setEditingTodoId("");
+      await loadTodos();
     } catch (error) {
+      await loadTodos();
       setTodoActionError(
         error instanceof Error
           ? error.message
@@ -2601,12 +2663,102 @@ function App() {
       setTodoItems((currentItems) =>
         currentItems.filter((item) => item.todoId !== todo.todoId),
       );
+      setSelectedTodoIds((currentIds) =>
+        currentIds.filter((todoId) => todoId !== todo.todoId),
+      );
+      await loadTodos();
     } catch (error) {
+      await loadTodos();
+      if (error instanceof Error && error.message === "TODO not found") {
+        error.message = "할일을 삭제하지 못했습니다. 목록을 다시 확인해주세요.";
+      }
       setTodoActionError(
         error instanceof Error ? error.message : "할일을 삭제하지 못했습니다.",
       );
     } finally {
       setSavingTodoId("");
+    }
+  };
+
+  const handleBulkDeleteTodos = async () => {
+    if (!project?.projectId || isBulkTodoActionRunning) return;
+
+    const targetTodoIds = getSelectedVisibleTodoIds();
+    if (!targetTodoIds.length) return;
+    if (!window.confirm(`선택한 ${targetTodoIds.length}개의 할일을 삭제할까요?`)) {
+      return;
+    }
+
+    setIsBulkTodoActionRunning(true);
+    setTodoActionError("");
+    try {
+      const results = await Promise.allSettled(
+        targetTodoIds.map((todoId) =>
+          deleteProjectTodo({
+            projectId: project.projectId,
+            todoId,
+          }),
+        ),
+      );
+      const failedTodoIds = targetTodoIds.filter(
+        (_, index) => results[index].status === "rejected",
+      );
+
+      await loadTodos();
+      setSelectedTodoIds(failedTodoIds);
+
+      if (failedTodoIds.length) {
+        const successCount = targetTodoIds.length - failedTodoIds.length;
+        setTodoActionError(
+          successCount
+            ? `선택한 할일 중 ${successCount}개는 삭제했고 ${failedTodoIds.length}개는 실패했습니다.`
+            : "선택한 할일을 삭제하지 못했습니다.",
+        );
+      }
+    } finally {
+      setIsBulkTodoActionRunning(false);
+    }
+  };
+
+  const handleBulkTodoStatusApply = async () => {
+    if (!project?.projectId || isBulkTodoActionRunning) return;
+
+    const targetTodoIds = getSelectedVisibleTodoIds();
+    if (!targetTodoIds.length || !bulkTodoStatus) return;
+
+    const statusLabel =
+      TODO_STATUS_OPTIONS.find((option) => option.value === bulkTodoStatus)
+        ?.label || "선택한 상태";
+
+    setIsBulkTodoActionRunning(true);
+    setTodoActionError("");
+    try {
+      const results = await Promise.allSettled(
+        targetTodoIds.map((todoId) =>
+          updateProjectTodo({
+            projectId: project.projectId,
+            todoId,
+            payload: { status: bulkTodoStatus },
+          }),
+        ),
+      );
+      const failedTodoIds = targetTodoIds.filter(
+        (_, index) => results[index].status === "rejected",
+      );
+
+      await loadTodos();
+      setSelectedTodoIds(failedTodoIds);
+
+      if (failedTodoIds.length) {
+        const successCount = targetTodoIds.length - failedTodoIds.length;
+        setTodoActionError(
+          successCount
+            ? `선택한 할일 중 ${successCount}개는 ${statusLabel}로 변경했고 ${failedTodoIds.length}개는 실패했습니다.`
+            : "선택한 할일의 진행상태를 변경하지 못했습니다.",
+        );
+      }
+    } finally {
+      setIsBulkTodoActionRunning(false);
     }
   };
 
@@ -3987,6 +4139,9 @@ function App() {
           error={todoError}
           actionError={todoActionError}
           savingTodoId={savingTodoId}
+          selectedTodoIds={selectedTodoIds}
+          bulkStatus={bulkTodoStatus}
+          isBulkActionRunning={isBulkTodoActionRunning}
           editingTodoId={editingTodoId}
           editDraft={todoEditDraft}
           isImportOpen={isTodoImportOpen}
@@ -4003,6 +4158,12 @@ function App() {
           onClose={closeTodoManager}
           onStatusFilterChange={handleTodoStatusFilterChange}
           onStatusChange={handleTodoStatusChange}
+          onToggleTodoSelection={handleToggleTodoSelection}
+          onSelectAllTodos={handleSelectAllTodos}
+          onClearTodoSelection={handleClearTodoSelection}
+          onBulkStatusChange={setBulkTodoStatus}
+          onApplyBulkStatus={handleBulkTodoStatusApply}
+          onBulkDelete={handleBulkDeleteTodos}
           onStartEdit={handleStartTodoEdit}
           onCancelEdit={handleCancelTodoEdit}
           onEditDraftChange={handleTodoEditDraftChange}
@@ -4546,6 +4707,9 @@ function TodoManagerModal({
   error,
   actionError,
   savingTodoId,
+  selectedTodoIds = [],
+  bulkStatus = "IN_PROGRESS",
+  isBulkActionRunning = false,
   editingTodoId,
   editDraft,
   isImportOpen,
@@ -4562,6 +4726,12 @@ function TodoManagerModal({
   onClose,
   onStatusFilterChange,
   onStatusChange,
+  onToggleTodoSelection,
+  onSelectAllTodos,
+  onClearTodoSelection,
+  onBulkStatusChange,
+  onApplyBulkStatus,
+  onBulkDelete,
   onStartEdit,
   onCancelEdit,
   onEditDraftChange,
@@ -4583,6 +4753,30 @@ function TodoManagerModal({
   const previewDuplicateItems = importPreview?.duplicateItems ?? [];
   const previewCount = previewNewItems.length + previewDuplicateItems.length;
   const selectedCount = selectedImportIds.length;
+  const selectedTodoIdSet = useMemo(
+    () => new Set(selectedTodoIds),
+    [selectedTodoIds],
+  );
+  const visibleTodoIds = useMemo(
+    () => todoItems.map((todo) => todo.todoId).filter(Boolean),
+    [todoItems],
+  );
+  const selectedVisibleTodoIds = useMemo(
+    () => visibleTodoIds.filter((todoId) => selectedTodoIdSet.has(todoId)),
+    [selectedTodoIdSet, visibleTodoIds],
+  );
+  const selectedVisibleCount = selectedVisibleTodoIds.length;
+  const isAllVisibleSelected =
+    visibleTodoIds.length > 0 && selectedVisibleCount === visibleTodoIds.length;
+  const isPartiallySelected =
+    selectedVisibleCount > 0 && selectedVisibleCount < visibleTodoIds.length;
+  const selectAllRef = useRef(null);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = isPartiallySelected;
+    }
+  }, [isPartiallySelected]);
 
   const renderPreviewItem = ({
     item,
@@ -4627,9 +4821,23 @@ function TodoManagerModal({
   const renderTodoItem = (todo) => {
     const isEditing = editingTodoId === todo.todoId;
     const isSaving = savingTodoId === todo.todoId;
+    const isSelected = selectedTodoIdSet.has(todo.todoId);
+    const isBusy = isSaving || isBulkActionRunning;
     return (
-      <li className="todo-item" key={todo.todoId || todo.title}>
+      <li
+        className={`todo-item${isSelected ? " is-selected" : ""}`}
+        key={todo.todoId || todo.title}
+      >
         <div className="todo-item-main">
+          <label className="todo-select-control">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              disabled={isBusy || !todo.todoId}
+              aria-label={`${todo.title || "제목 없음"} 선택`}
+              onChange={() => onToggleTodoSelection(todo.todoId)}
+            />
+          </label>
           <div className="todo-title-block">
             <strong>{todo.title || "제목 없음"}</strong>
           </div>
@@ -4646,7 +4854,7 @@ function TodoManagerModal({
           <div className="todo-row-actions">
             <select
               value={todo.status || "NOT_STARTED"}
-              disabled={isSaving}
+              disabled={isBusy}
               aria-label={`${todo.title} 진행상태`}
               onChange={(event) => onStatusChange(todo, event.target.value)}
             >
@@ -4659,7 +4867,7 @@ function TodoManagerModal({
             <button
               className="inline-icon-button"
               type="button"
-              disabled={isSaving}
+              disabled={isBusy}
               title="할일 수정"
               aria-label={`${todo.title} 할일 수정`}
               onClick={() => onStartEdit(todo)}
@@ -4669,7 +4877,7 @@ function TodoManagerModal({
             <button
               className="inline-icon-button"
               type="button"
-              disabled={isSaving}
+              disabled={isBusy}
               title="할일 삭제"
               aria-label={`${todo.title} 할일 삭제`}
               onClick={() => onDelete(todo)}
@@ -4687,7 +4895,7 @@ function TodoManagerModal({
               할일명
               <input
                 value={editDraft.title}
-                disabled={isSaving}
+                disabled={isBusy}
                 onChange={(event) =>
                   onEditDraftChange("title", event.target.value)
                 }
@@ -4697,7 +4905,7 @@ function TodoManagerModal({
               담당자
               <input
                 value={editDraft.assignee}
-                disabled={isSaving}
+                disabled={isBusy}
                 onChange={(event) =>
                   onEditDraftChange("assignee", event.target.value)
                 }
@@ -4708,7 +4916,7 @@ function TodoManagerModal({
               <input
                 type="date"
                 value={editDraft.dueDate}
-                disabled={isSaving}
+                disabled={isBusy}
                 onChange={(event) =>
                   onEditDraftChange("dueDate", event.target.value)
                 }
@@ -4718,7 +4926,7 @@ function TodoManagerModal({
               진행상태
               <select
                 value={editDraft.status}
-                disabled={isSaving}
+                disabled={isBusy}
                 onChange={(event) =>
                   onEditDraftChange("status", event.target.value)
                 }
@@ -4735,7 +4943,7 @@ function TodoManagerModal({
               <textarea
                 rows={3}
                 value={editDraft.description}
-                disabled={isSaving}
+                disabled={isBusy}
                 onChange={(event) =>
                   onEditDraftChange("description", event.target.value)
                 }
@@ -4745,7 +4953,7 @@ function TodoManagerModal({
               <button
                 className="mini-action-button"
                 type="button"
-                disabled={isSaving}
+                disabled={isBusy}
                 onClick={onCancelEdit}
               >
                 취소
@@ -4753,7 +4961,7 @@ function TodoManagerModal({
               <button
                 className="mini-action-button primary"
                 type="button"
-                disabled={isSaving || !editDraft.title.trim()}
+                disabled={isBusy || !editDraft.title.trim()}
                 onClick={() => onSaveEdit(todo)}
               >
                 {isSaving ? "저장 중" : "저장"}
@@ -4973,9 +5181,77 @@ function TodoManagerModal({
 
               <section className="todo-list-section">
                 <div className="todo-list-header">
-                  <h3>할일 목록</h3>
-                  <span>{todoItems.length}개</span>
+                  <div className="todo-list-heading">
+                    <h3>할일 목록</h3>
+                    <span>
+                      {todoItems.length}개 · 선택 {selectedVisibleCount}개
+                    </span>
+                  </div>
+                  <label className="todo-select-all">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={isAllVisibleSelected}
+                      disabled={
+                        !visibleTodoIds.length ||
+                        isBulkActionRunning ||
+                        isLoading
+                      }
+                      aria-label="전체 할일 선택"
+                      onChange={onSelectAllTodos}
+                    />
+                    전체선택
+                  </label>
                 </div>
+                {selectedVisibleCount > 0 && (
+                  <div
+                    className="todo-bulk-actions"
+                    role="region"
+                    aria-label="선택한 할일 일괄 작업"
+                  >
+                    <strong>선택 {selectedVisibleCount}개</strong>
+                    <label className="todo-bulk-status">
+                      진행상태
+                      <select
+                        value={bulkStatus}
+                        disabled={isBulkActionRunning}
+                        onChange={(event) =>
+                          onBulkStatusChange(event.target.value)
+                        }
+                      >
+                        {TODO_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="mini-action-button primary"
+                      type="button"
+                      disabled={isBulkActionRunning}
+                      onClick={onApplyBulkStatus}
+                    >
+                      {isBulkActionRunning ? "변경 중" : "상태 변경"}
+                    </button>
+                    <button
+                      className="mini-action-button danger"
+                      type="button"
+                      disabled={isBulkActionRunning}
+                      onClick={onBulkDelete}
+                    >
+                      삭제
+                    </button>
+                    <button
+                      className="mini-action-button"
+                      type="button"
+                      disabled={isBulkActionRunning}
+                      onClick={onClearTodoSelection}
+                    >
+                      선택 해제
+                    </button>
+                  </div>
+                )}
                 {isLoading ? (
                   <div className="file-manager-loading" role="status">
                     <LoaderCircle size={18} aria-hidden="true" />
