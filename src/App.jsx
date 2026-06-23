@@ -118,11 +118,6 @@ const TODO_STATUS_FILTERS = Object.freeze([
   { value: "DONE", label: "완료" },
 ]);
 const TODO_STATUS_OPTIONS = TODO_STATUS_FILTERS.filter((option) => option.value);
-const TODO_SOURCE_FILTERS = Object.freeze([
-  { value: "", label: "전체" },
-  { value: "MEETING_NOTES", label: "회의록" },
-  { value: "WBS", label: "WBS" },
-]);
 const TODO_IMPORT_DOCUMENT_TYPES = Object.freeze([
   { value: "MEETING_NOTES", label: "회의록" },
   { value: "WBS", label: "WBS" },
@@ -884,10 +879,6 @@ const normalizeProjectDocumentCandidates = (response) => {
   );
 };
 
-const getTodoSourceLabel = (sourceType) =>
-  TODO_SOURCE_FILTERS.find((option) => option.value === sourceType)?.label ||
-  "기타";
-
 const padDatePart = (value) => String(value).padStart(2, "0");
 
 const getTodayIsoDate = () => {
@@ -1577,7 +1568,6 @@ function App() {
   const [isTodoManagerOpen, setIsTodoManagerOpen] = useState(false);
   const [todoItems, setTodoItems] = useState([]);
   const [todoStatusFilter, setTodoStatusFilter] = useState("");
-  const [todoSourceFilter, setTodoSourceFilter] = useState("");
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
   const [todoError, setTodoError] = useState("");
   const [todoActionError, setTodoActionError] = useState("");
@@ -2431,10 +2421,7 @@ function App() {
     }
   };
 
-  const loadTodos = async ({
-    status = todoStatusFilter,
-    sourceType = todoSourceFilter,
-  } = {}) => {
+  const loadTodos = async ({ status = todoStatusFilter } = {}) => {
     if (!project?.projectId) {
       setTodoItems([]);
       setTodoError("프로젝트를 먼저 선택해 주세요.");
@@ -2446,7 +2433,6 @@ function App() {
     try {
       const response = await listProjectTodos(project.projectId, {
         status,
-        sourceType,
       });
       setTodoItems(normalizeTodoListResponse(response));
     } catch (error) {
@@ -2491,12 +2477,7 @@ function App() {
 
   const handleTodoStatusFilterChange = (value) => {
     setTodoStatusFilter(value);
-    loadTodos({ status: value, sourceType: todoSourceFilter });
-  };
-
-  const handleTodoSourceFilterChange = (value) => {
-    setTodoSourceFilter(value);
-    loadTodos({ status: todoStatusFilter, sourceType: value });
+    loadTodos({ status: value });
   };
 
   const handleTodoStatusChange = async (todo, status) => {
@@ -4001,7 +3982,6 @@ function App() {
           project={project}
           todoItems={todoItems}
           statusFilter={todoStatusFilter}
-          sourceFilter={todoSourceFilter}
           isLoading={isLoadingTodos}
           error={todoError}
           actionError={todoActionError}
@@ -4021,7 +4001,6 @@ function App() {
           isCommittingImport={isCommittingTodoImport}
           onClose={closeTodoManager}
           onStatusFilterChange={handleTodoStatusFilterChange}
-          onSourceFilterChange={handleTodoSourceFilterChange}
           onStatusChange={handleTodoStatusChange}
           onStartEdit={handleStartTodoEdit}
           onCancelEdit={handleCancelTodoEdit}
@@ -4553,7 +4532,6 @@ function TodoManagerModal({
   project,
   todoItems,
   statusFilter,
-  sourceFilter,
   isLoading,
   error,
   actionError,
@@ -4573,7 +4551,6 @@ function TodoManagerModal({
   isCommittingImport,
   onClose,
   onStatusFilterChange,
-  onSourceFilterChange,
   onStatusChange,
   onStartEdit,
   onCancelEdit,
@@ -4618,8 +4595,7 @@ function TodoManagerModal({
           <strong>{item.title || "제목 없음"}</strong>
           <p>
             {item.assignee || "담당자 미정"} ·{" "}
-            {item.dueDate || item.dueDateText || "기한 미정"} ·{" "}
-            {getTodoSourceLabel(item.sourceType)}
+            {item.dueDate || item.dueDateText || "기한 미정"}
           </p>
           {matchedExisting?.title && (
             <div className="todo-duplicate-match">
@@ -4655,10 +4631,6 @@ function TodoManagerModal({
             <div>
               <dt>기한</dt>
               <dd>{todo.dueDate || todo.dueDateText || "미정"}</dd>
-            </div>
-            <div>
-              <dt>출처</dt>
-              <dd>{getTodoSourceLabel(todo.sourceType)}</dd>
             </div>
           </dl>
           <div className="todo-row-actions">
@@ -4832,21 +4804,6 @@ function TodoManagerModal({
                       }
                     >
                       {TODO_STATUS_FILTERS.map((option) => (
-                        <option key={option.value || "ALL"} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    출처
-                    <select
-                      value={sourceFilter}
-                      onChange={(event) =>
-                        onSourceFilterChange(event.target.value)
-                      }
-                    >
-                      {TODO_SOURCE_FILTERS.map((option) => (
                         <option key={option.value || "ALL"} value={option.value}>
                           {option.label}
                         </option>
@@ -6085,14 +6042,13 @@ function ScheduleTodoResult({ items }) {
   if (!todos.length) return null;
 
   return (
-    <div className="schedule-todo-result" aria-label="회의록 기반 TODO">
+    <div className="schedule-todo-result" aria-label="TODO 목록">
       <table>
         <thead>
           <tr>
             <th>할 일</th>
             <th>담당자</th>
             <th>기한</th>
-            <th>출처</th>
             <th>상태</th>
           </tr>
         </thead>
@@ -6105,10 +6061,6 @@ function ScheduleTodoResult({ items }) {
                 <td title={evidence}>{truncateTodoText(title)}</td>
                 <td>{sanitizeTodoText(todo.assignee) || "담당자 미정"}</td>
                 <td>{sanitizeTodoText(todo.due_date) || "기한 미정"}</td>
-                <td>
-                  {sanitizeTodoText(todo.related_document) ||
-                    "회의록 기반 신규 TODO"}
-                </td>
                 <td>{sanitizeTodoText(todo.status) || "확인 필요"}</td>
               </tr>
             );
