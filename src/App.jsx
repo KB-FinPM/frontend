@@ -90,6 +90,23 @@ const DOCUMENT_UPLOAD_ACCEPTED_TYPES = [
   "application/json",
   ".log",
 ];
+const TODO_IMPORT_ACCEPTED_TYPES = [
+  ".docx",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls",
+  "application/vnd.ms-excel",
+  ".pdf",
+  "application/pdf",
+  ".txt",
+  "text/plain",
+  ".md",
+  ".csv",
+  ".json",
+  "application/json",
+  ".log",
+];
 const PROJECT_START_DATE_ERROR =
   "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
 const PROJECT_CREATE_RESPONSE_ERROR_MESSAGE =
@@ -1588,8 +1605,10 @@ function App() {
   const [todoImportDocumentType, setTodoImportDocumentType] = useState(
     DOCUMENT_TYPES.MEETING_NOTES,
   );
+  const [todoImportUseExisting, setTodoImportUseExisting] = useState(true);
   const [todoImportDocumentId, setTodoImportDocumentId] = useState("");
   const [todoImportFile, setTodoImportFile] = useState(null);
+  const [todoImportStatusMessage, setTodoImportStatusMessage] = useState("");
   const [isUploadingTodoImportDocument, setIsUploadingTodoImportDocument] =
     useState(false);
   const [isPreviewingTodoImport, setIsPreviewingTodoImport] = useState(false);
@@ -1622,6 +1641,21 @@ function App() {
       ),
     [todoImportDocuments, todoImportDocumentType],
   );
+
+  useEffect(() => {
+    if (!isTodoImportOpen || !todoImportUseExisting) return;
+    const hasSelectedDocument = filteredTodoImportDocuments.some(
+      (document) => document.documentId === todoImportDocumentId,
+    );
+    if (!hasSelectedDocument) {
+      setTodoImportDocumentId(filteredTodoImportDocuments[0]?.documentId || "");
+    }
+  }, [
+    filteredTodoImportDocuments,
+    isTodoImportOpen,
+    todoImportDocumentId,
+    todoImportUseExisting,
+  ]);
 
   const resetFileManagerState = () => {
     setIsFileManagerOpen(false);
@@ -1656,8 +1690,10 @@ function App() {
     });
     setIsTodoImportOpen(false);
     setTodoImportDocumentType(DOCUMENT_TYPES.MEETING_NOTES);
+    setTodoImportUseExisting(true);
     setTodoImportDocumentId("");
     setTodoImportFile(null);
+    setTodoImportStatusMessage("");
     setIsUploadingTodoImportDocument(false);
     setIsPreviewingTodoImport(false);
     setIsCommittingTodoImport(false);
@@ -2765,9 +2801,14 @@ function App() {
   const handleOpenTodoImport = () => {
     setIsTodoImportOpen((currentValue) => !currentValue);
     setTodoActionError("");
+    setTodoImportStatusMessage("");
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
-    if (!todoImportDocumentId && filteredTodoImportDocuments[0]?.documentId) {
+    if (
+      todoImportUseExisting &&
+      !todoImportDocumentId &&
+      filteredTodoImportDocuments[0]?.documentId
+    ) {
       setTodoImportDocumentId(filteredTodoImportDocuments[0].documentId);
     }
     if (project?.projectId) {
@@ -2784,7 +2825,29 @@ function App() {
       (document) => document.documentType === nextType,
     );
     setTodoImportDocumentType(nextType);
-    setTodoImportDocumentId(nextDocument?.documentId || "");
+    setTodoImportDocumentId(todoImportUseExisting ? nextDocument?.documentId || "" : "");
+    setTodoImportFile(null);
+    setTodoImportStatusMessage("");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    setTodoActionError("");
+  };
+
+  const handleTodoImportUseExistingChange = (useExisting) => {
+    setTodoImportUseExisting(useExisting);
+    setTodoImportDocumentId(
+      useExisting ? filteredTodoImportDocuments[0]?.documentId || "" : "",
+    );
+    setTodoImportFile(null);
+    setTodoImportStatusMessage("");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    setTodoActionError("");
+  };
+
+  const handleTodoImportDocumentChange = (documentId) => {
+    setTodoImportDocumentId(documentId);
+    setTodoImportStatusMessage("");
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
     setTodoActionError("");
@@ -2792,57 +2855,22 @@ function App() {
 
   const handleTodoImportFileChange = (file) => {
     setTodoImportFile(file);
+    setTodoImportDocumentId("");
+    setTodoImportStatusMessage(file ? `${file.name} 선택됨` : "");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
     setTodoActionError("");
   };
 
-  const handleUploadTodoImportDocument = async () => {
-    if (!project?.projectId || !todoImportFile) return;
-
-    setIsUploadingTodoImportDocument(true);
-    setTodoActionError("");
-    try {
-      const response = await uploadDocument({
-        projectId: project.projectId,
-        documentType: todoImportDocumentType,
-        file: todoImportFile,
-      });
-      const uploadedDocument = response?.document ?? {};
-      const uploadedDocumentId =
-        uploadedDocument.document_id ?? uploadedDocument.documentId ?? "";
-      await loadUploadedFiles(project);
-      if (uploadedDocumentId) {
-        setTodoImportDocumentId(uploadedDocumentId);
-      }
-      setTodoImportFile(null);
-      setTodoImportPreview(null);
-      setSelectedTodoImportIds([]);
-    } catch (error) {
-      setTodoActionError(
-        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
-      );
-    } finally {
-      setIsUploadingTodoImportDocument(false);
-    }
-  };
-
-  const handlePreviewTodoImport = async () => {
-    if (!project?.projectId || !todoImportDocumentId) {
-      setTodoActionError("할일을 불러올 문서를 선택해 주세요.");
-      return;
-    }
-
-    const selectedDocument = todoImportDocuments.find(
-      (document) => document.documentId === todoImportDocumentId,
-    );
-    const documentType = selectedDocument?.documentType || todoImportDocumentType;
-
+  const previewTodoImport = async ({ documentId, documentType }) => {
     setIsPreviewingTodoImport(true);
     setTodoActionError("");
+    setTodoImportStatusMessage("문서에서 할일 후보를 불러오는 중입니다.");
     try {
       const preview = normalizeTodoImportPreview(
         await previewProjectTodoImport({
           projectId: project.projectId,
-          documentId: todoImportDocumentId,
+          documentId,
           documentType,
         }),
       );
@@ -2852,6 +2880,14 @@ function App() {
           .map((item) => item.clientImportId || item.todoId)
           .filter(Boolean),
       );
+      const candidateCount =
+        preview.newItems.length + preview.duplicateItems.length;
+      setTodoImportStatusMessage(
+        candidateCount
+          ? `할일 후보 ${candidateCount}개를 불러왔습니다. 저장할 항목을 확인해 주세요.`
+          : "문서에서 불러올 할일 후보가 없습니다.",
+      );
+      return preview;
     } catch (error) {
       setTodoImportPreview(null);
       setSelectedTodoImportIds([]);
@@ -2860,9 +2896,74 @@ function App() {
           ? error.message
           : "문서에서 할일을 미리보기하지 못했습니다.",
       );
+      setTodoImportStatusMessage("");
+      return null;
     } finally {
       setIsPreviewingTodoImport(false);
     }
+  };
+
+  const handleUploadTodoImportDocument = async () => {
+    if (!project?.projectId || !todoImportFile) {
+      setTodoActionError("할일을 불러올 문서를 업로드해 주세요.");
+      return;
+    }
+
+    setIsUploadingTodoImportDocument(true);
+    setTodoActionError("");
+    setTodoImportStatusMessage("문서를 업로드하는 중입니다.");
+    try {
+      const response = await uploadDocument({
+        projectId: project.projectId,
+        documentType: todoImportDocumentType,
+        file: todoImportFile,
+      });
+      const uploadedDocument = response?.document ?? {};
+      const uploadedDocumentId =
+        uploadedDocument.document_id ?? uploadedDocument.documentId ?? "";
+      if (!uploadedDocumentId) {
+        throw new Error("업로드된 문서 ID를 확인하지 못했습니다.");
+      }
+      await loadUploadedFiles(project);
+      setTodoImportDocumentId(uploadedDocumentId);
+      setTodoImportFile(null);
+      setTodoImportStatusMessage("업로드한 문서에서 할일 후보를 불러오는 중입니다.");
+      await previewTodoImport({
+        documentId: uploadedDocumentId,
+        documentType: todoImportDocumentType,
+      });
+    } catch (error) {
+      setTodoImportPreview(null);
+      setSelectedTodoImportIds([]);
+      setTodoImportStatusMessage("");
+      setTodoActionError(
+        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
+      );
+    } finally {
+      setIsUploadingTodoImportDocument(false);
+    }
+  };
+
+  const handlePreviewTodoImport = async () => {
+    if (!project?.projectId) return;
+    if (!todoImportUseExisting) {
+      await handleUploadTodoImportDocument();
+      return;
+    }
+    if (!todoImportDocumentId) {
+      setTodoActionError("할일을 불러올 기존 문서를 선택해 주세요.");
+      return;
+    }
+
+    const selectedDocument = todoImportDocuments.find(
+      (document) => document.documentId === todoImportDocumentId,
+    );
+    const documentType = selectedDocument?.documentType || todoImportDocumentType;
+
+    await previewTodoImport({
+      documentId: todoImportDocumentId,
+      documentType,
+    });
   };
 
   const handleToggleTodoImportItem = (itemId) => {
@@ -2918,6 +3019,7 @@ function App() {
       setTodoImportPreview(null);
       setSelectedTodoImportIds([]);
       setIsTodoImportOpen(false);
+      setTodoImportStatusMessage("");
       await loadTodos();
     } catch (error) {
       setTodoActionError(
@@ -4147,8 +4249,10 @@ function App() {
           isImportOpen={isTodoImportOpen}
           importDocuments={filteredTodoImportDocuments}
           importDocumentType={todoImportDocumentType}
+          importUseExisting={todoImportUseExisting}
           importDocumentId={todoImportDocumentId}
           importFile={todoImportFile}
+          importStatusMessage={todoImportStatusMessage}
           importPreview={todoImportPreview}
           selectedImportIds={selectedTodoImportIds}
           isLoadingDocuments={isLoadingUploadedFiles}
@@ -4171,7 +4275,8 @@ function App() {
           onDelete={handleDeleteTodo}
           onToggleImport={handleOpenTodoImport}
           onImportDocumentTypeChange={handleTodoImportDocumentTypeChange}
-          onImportDocumentChange={setTodoImportDocumentId}
+          onImportUseExistingChange={handleTodoImportUseExistingChange}
+          onImportDocumentChange={handleTodoImportDocumentChange}
           onImportFileChange={handleTodoImportFileChange}
           onUploadImportDocument={handleUploadTodoImportDocument}
           onPreviewImport={handlePreviewTodoImport}
@@ -4715,8 +4820,10 @@ function TodoManagerModal({
   isImportOpen,
   importDocuments,
   importDocumentType,
+  importUseExisting,
   importDocumentId,
   importFile,
+  importStatusMessage,
   importPreview,
   selectedImportIds,
   isLoadingDocuments,
@@ -4739,6 +4846,7 @@ function TodoManagerModal({
   onDelete,
   onToggleImport,
   onImportDocumentTypeChange,
+  onImportUseExistingChange,
   onImportDocumentChange,
   onImportFileChange,
   onUploadImportDocument,
@@ -4748,6 +4856,7 @@ function TodoManagerModal({
   onCommitImport,
 }) {
   const uploadInputId = useId();
+  const [isImportDragOver, setIsImportDragOver] = useState(false);
   const hasProject = Boolean(project?.projectId);
   const previewNewItems = importPreview?.newItems ?? [];
   const previewDuplicateItems = importPreview?.duplicateItems ?? [];
@@ -4771,12 +4880,43 @@ function TodoManagerModal({
   const isPartiallySelected =
     selectedVisibleCount > 0 && selectedVisibleCount < visibleTodoIds.length;
   const selectAllRef = useRef(null);
+  const importDocumentLabel =
+    TODO_IMPORT_DOCUMENT_TYPES.find(
+      (option) => option.value === importDocumentType,
+    )?.label || "문서";
+  const isImportBusy =
+    isUploadingImportDocument || isPreviewingImport || isCommittingImport;
+  const canRunImport = importUseExisting
+    ? Boolean(importDocumentId)
+    : Boolean(importFile);
 
   useEffect(() => {
     if (selectAllRef.current) {
       selectAllRef.current.indeterminate = isPartiallySelected;
     }
   }, [isPartiallySelected]);
+
+  const handleImportDragOver = (event) => {
+    event.preventDefault();
+    if (!isImportBusy) {
+      setIsImportDragOver(true);
+    }
+  };
+
+  const handleImportDragLeave = (event) => {
+    event.preventDefault();
+    setIsImportDragOver(false);
+  };
+
+  const handleImportDrop = (event) => {
+    event.preventDefault();
+    setIsImportDragOver(false);
+    if (isImportBusy) return;
+    const droppedFile = event.dataTransfer?.files?.[0] ?? null;
+    if (droppedFile) {
+      onImportFileChange(droppedFile);
+    }
+  };
 
   const renderPreviewItem = ({
     item,
@@ -5035,9 +5175,10 @@ function TodoManagerModal({
                 <section className="todo-import-panel">
                   <div className="todo-import-controls">
                     <label>
-                      문서 유형
+                      문서 종류
                       <select
                         value={importDocumentType}
+                        disabled={isImportBusy}
                         onChange={(event) =>
                           onImportDocumentTypeChange(event.target.value)
                         }
@@ -5049,68 +5190,112 @@ function TodoManagerModal({
                         ))}
                       </select>
                     </label>
-                    <label>
-                      기존 문서
-                      <select
-                        value={importDocumentId}
-                        disabled={isLoadingDocuments || !importDocuments.length}
-                        onChange={(event) =>
-                          onImportDocumentChange(event.target.value)
-                        }
-                      >
-                        <option value="">
-                          {isLoadingDocuments
-                            ? "문서 목록 로딩 중"
-                            : "문서 선택"}
-                        </option>
-                        {importDocuments.map((document) => (
-                          <option
-                            key={document.documentId}
-                            value={document.documentId}
-                          >
-                            {document.fileName}
+                    <fieldset className="todo-import-source-choice">
+                      <legend>기존 문서 사용</legend>
+                      <label>
+                        <input
+                          type="radio"
+                          name="todo-import-source"
+                          checked={importUseExisting}
+                          disabled={isImportBusy}
+                          onChange={() => onImportUseExistingChange(true)}
+                        />
+                        예
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="todo-import-source"
+                          checked={!importUseExisting}
+                          disabled={isImportBusy}
+                          onChange={() => onImportUseExistingChange(false)}
+                        />
+                        아니오
+                      </label>
+                    </fieldset>
+                  </div>
+                  <div className="todo-import-source-row">
+                    {importUseExisting ? (
+                      <label>
+                        {importDocumentLabel}
+                        <select
+                          value={importDocumentId}
+                          disabled={
+                            isImportBusy ||
+                            isLoadingDocuments ||
+                            !importDocuments.length
+                          }
+                          onChange={(event) =>
+                            onImportDocumentChange(event.target.value)
+                          }
+                        >
+                          <option value="">
+                            {isLoadingDocuments
+                              ? "문서 목록 로딩 중"
+                              : "문서 선택"}
                           </option>
-                        ))}
-                      </select>
-                    </label>
+                          {importDocuments.map((document) => (
+                            <option
+                              key={document.documentId}
+                              value={document.documentId}
+                            >
+                              {document.fileName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <label
+                        className={`todo-import-upload-control ${
+                          isImportDragOver ? "is-drag-over" : ""
+                        }`}
+                        htmlFor={uploadInputId}
+                        onDragOver={handleImportDragOver}
+                        onDragLeave={handleImportDragLeave}
+                        onDrop={handleImportDrop}
+                      >
+                        <span>{importDocumentLabel}</span>
+                        <strong>
+                          {importFile ? importFile.name : "파일 선택 또는 드롭"}
+                        </strong>
+                        <input
+                          key={importFile ? "selected" : "empty"}
+                          id={uploadInputId}
+                          type="file"
+                          accept={TODO_IMPORT_ACCEPTED_TYPES.join(",")}
+                          disabled={isImportBusy}
+                          onChange={(event) =>
+                            onImportFileChange(event.target.files?.[0] ?? null)
+                          }
+                        />
+                      </label>
+                    )}
                     <button
                       className="primary-button"
                       type="button"
-                      disabled={!importDocumentId || isPreviewingImport}
-                      onClick={onPreviewImport}
+                      disabled={!canRunImport || isImportBusy}
+                      onClick={importUseExisting ? onPreviewImport : onUploadImportDocument}
                     >
-                      {isPreviewingImport ? (
+                      {isUploadingImportDocument ? (
                         <>
                           <LoaderCircle size={16} aria-hidden="true" />
-                          미리보기 중
+                          업로드 중
+                        </>
+                      ) : isPreviewingImport ? (
+                        <>
+                          <LoaderCircle size={16} aria-hidden="true" />
+                          불러오는 중
                         </>
                       ) : (
-                        "할일 미리보기"
+                        "할일 불러오기"
                       )}
                     </button>
                   </div>
-                  <div className="todo-upload-row">
-                    <label htmlFor={uploadInputId}>
-                      새 문서 업로드
-                      <input
-                        key={importFile ? "selected" : "empty"}
-                        id={uploadInputId}
-                        type="file"
-                        accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
-                        onChange={(event) =>
-                          onImportFileChange(event.target.files?.[0] ?? null)
-                        }
-                      />
-                    </label>
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      disabled={!importFile || isUploadingImportDocument}
-                      onClick={onUploadImportDocument}
-                    >
-                      {isUploadingImportDocument ? "업로드 중" : "업로드"}
-                    </button>
-                  </div>
+                  {importStatusMessage && (
+                    <p className="todo-import-status" role="status">
+                      {importStatusMessage}
+                    </p>
+                  )}
 
                   {importPreview && (
                     <div className="todo-preview-panel">

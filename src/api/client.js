@@ -29,6 +29,9 @@ export const FRIENDLY_API_ERROR_MESSAGES = Object.freeze({
   DEFAULT: "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
 });
 
+const DOCUMENT_READ_FAILURE_MESSAGE =
+  "문서를 읽지 못했습니다. 파일이 손상되었거나 지원하지 않는 구조일 수 있습니다. DOCX, XLSX, PDF, TXT 파일로 다시 업로드해 주세요.";
+
 export const buildUrl = (path) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE_URL}${normalizedPath}`;
@@ -78,6 +81,14 @@ export const getFriendlyHttpErrorMessage = (
   }
   if (response?.status === 401 || response?.status === 403) {
     return FRIENDLY_API_ERROR_MESSAGES.AUTH;
+  }
+  if (
+    data?.error_code === "DOCUMENT_INPUT_NORMALIZATION_FAILED" &&
+    /NotImplementedError|Traceback|Exception|\(.+Error\)/.test(
+      JSON.stringify(data),
+    )
+  ) {
+    return DOCUMENT_READ_FAILURE_MESSAGE;
   }
 
   return getBackendMessage(data) || fallbackMessage;

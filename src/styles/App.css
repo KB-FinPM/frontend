@@ -1864,7 +1864,6 @@ p {
 }
 
 .modal-backdrop-start .todo-manager-modal {
-  height: min(820px, calc(100vh - 68px));
 }
 
 .settings-modal-header {
@@ -1944,6 +1943,7 @@ p {
   min-height: 0;
   overflow: hidden;
   padding-right: 2px;
+  height: min(720px, calc(100vh - 68px));
 }
 
 .todo-manager-toolbar {
@@ -1960,6 +1960,7 @@ p {
 
 .todo-filter-grid,
 .todo-import-controls,
+.todo-import-source-row,
 .todo-upload-row,
 .todo-edit-panel {
   display: grid;
@@ -1972,6 +1973,7 @@ p {
 
 .todo-filter-grid label,
 .todo-import-controls label,
+.todo-import-source-row label,
 .todo-upload-row label,
 .todo-edit-panel label {
   display: grid;
@@ -1983,6 +1985,8 @@ p {
 
 .todo-filter-grid select,
 .todo-import-controls select,
+.todo-import-source-row select,
+.todo-import-upload-control,
 .todo-upload-row input,
 .todo-edit-panel input,
 .todo-edit-panel select,
@@ -2000,6 +2004,7 @@ p {
 
 .todo-filter-grid select,
 .todo-import-controls select,
+.todo-import-source-row select,
 .todo-edit-panel input,
 .todo-edit-panel select,
 .todo-row-actions select {
@@ -2025,8 +2030,84 @@ p {
 }
 
 .todo-import-controls {
-  grid-template-columns: minmax(140px, 0.5fr) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(240px, 1fr);
   align-items: end;
+}
+
+.todo-import-source-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.todo-import-source-choice legend {
+  margin: 0 0 6px;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.todo-import-source-choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--kb-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.todo-import-source-choice input {
+  accent-color: var(--kb-yellow);
+}
+
+.todo-import-source-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.todo-import-upload-control {
+  position: relative;
+  min-height: 38px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.todo-import-upload-control:hover,
+.todo-import-upload-control.is-drag-over {
+  border-color: rgba(255, 188, 0, 0.82);
+  background: #fff9e6;
+  box-shadow: 0 0 0 3px rgba(255, 188, 0, 0.14);
+}
+
+.todo-import-upload-control span {
+  color: var(--kb-text-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.todo-import-upload-control strong {
+  overflow: hidden;
+  color: var(--kb-text);
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-import-upload-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .todo-upload-row {
@@ -2035,8 +2116,16 @@ p {
 }
 
 .todo-upload-row .secondary-button,
+.todo-import-source-row .primary-button,
 .todo-import-controls .primary-button {
   width: auto;
+}
+
+.todo-import-status {
+  margin: 0;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .todo-preview-panel {
@@ -2676,6 +2765,7 @@ p {
   .file-manager-toolbar,
   .todo-manager-toolbar,
   .todo-import-controls,
+  .todo-import-source-row,
   .todo-upload-row,
   .todo-item-main,
   .todo-edit-panel {
@@ -2684,6 +2774,7 @@ p {
 
   .file-manager-toolbar .secondary-button,
   .todo-manager-toolbar .secondary-button,
+  .todo-import-source-row .primary-button,
   .todo-upload-row .secondary-button,
   .todo-import-controls .primary-button,
   .todo-preview-actions .primary-button {
@@ -2819,6 +2910,8 @@ p {
 .document-output-format select,
 .todo-filter-grid select,
 .todo-import-controls select,
+.todo-import-source-row select,
+.todo-import-upload-control,
 .todo-upload-row input,
 .todo-edit-panel input,
 .todo-edit-panel select,
@@ -2843,6 +2936,8 @@ p {
 .document-output-format select:focus,
 .todo-filter-grid select:focus,
 .todo-import-controls select:focus,
+.todo-import-source-row select:focus,
+.todo-import-upload-control:focus-within,
 .todo-upload-row input:focus,
 .todo-edit-panel input:focus,
 .todo-edit-panel select:focus,
@@ -4129,6 +4224,8 @@ textarea {
 .todo-row-actions select,
 .todo-filter-grid select,
 .todo-import-controls select,
+.todo-import-source-row select,
+.todo-import-upload-control,
 .todo-edit-panel input,
 .todo-edit-panel select {
   height: var(--todo-control-height);
@@ -4147,6 +4244,7 @@ textarea {
 .todo-preview-header .mini-action-button,
 .todo-preview-actions .primary-button,
 .todo-upload-row .secondary-button,
+.todo-import-source-row .primary-button,
 .todo-import-controls .primary-button {
   height: var(--todo-control-height);
 }

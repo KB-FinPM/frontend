@@ -239,6 +239,20 @@ test("getFriendlyHttpErrorMessage preserves specific backend messages", () => {
   );
 });
 
+test("getFriendlyHttpErrorMessage hides document parser internals", () => {
+  const message = getFriendlyHttpErrorMessage(
+    {
+      error_code: "DOCUMENT_INPUT_NORMALIZATION_FAILED",
+      message: "문서를 읽는 중 오류가 발생했습니다. (NotImplementedError)",
+      detail: { errors: ["NotImplementedError"] },
+    },
+    { status: 422 },
+  );
+
+  assert(message.includes("문서를 읽지 못했습니다"));
+  assert(!message.includes("NotImplementedError"));
+});
+
 test("normalizeFetchError preserves ApiError instances", () => {
   const error = new ApiError("already normalized", { status: 422 });
   assert.equal(normalizeFetchError(error), error);
