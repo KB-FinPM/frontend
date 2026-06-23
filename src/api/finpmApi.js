@@ -102,6 +102,62 @@ export const listProjectFiles = async (projectId) => {
   }
 };
 
+export const listProjectTodos = (
+  projectId,
+  { status = "", sourceType = "", dateFrom = "", dateTo = "" } = {},
+) => {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (sourceType) params.set("source_type", sourceType);
+  if (dateFrom) params.set("from", dateFrom);
+  if (dateTo) params.set("to", dateTo);
+  const query = params.toString();
+  return requestJson(
+    `/projects/${encodePathSegment(projectId)}/todos${query ? `?${query}` : ""}`,
+  );
+};
+
+export const updateProjectTodo = ({ projectId, todoId, payload }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/todos/${encodePathSegment(todoId)}`,
+    {
+      method: "PATCH",
+      body: payload,
+    },
+  );
+
+export const deleteProjectTodo = ({ projectId, todoId }) =>
+  requestJson(
+    `/projects/${encodePathSegment(projectId)}/todos/${encodePathSegment(todoId)}`,
+    { method: "DELETE" },
+  );
+
+export const previewProjectTodoImport = ({
+  projectId,
+  documentId,
+  documentType,
+}) =>
+  requestJson(`/projects/${encodePathSegment(projectId)}/todos/import/preview`, {
+    method: "POST",
+    body: {
+      document_id: documentId,
+      document_type: documentType,
+    },
+  });
+
+export const commitProjectTodoImport = ({
+  projectId,
+  items,
+  duplicateDecisions = [],
+}) =>
+  requestJson(`/projects/${encodePathSegment(projectId)}/todos/import/commit`, {
+    method: "POST",
+    body: {
+      items,
+      duplicate_decisions: duplicateDecisions,
+    },
+  });
+
 export const getDocument = ({ projectId, documentId }) =>
   requestJson(
     `/projects/${encodePathSegment(projectId)}/documents/${encodePathSegment(

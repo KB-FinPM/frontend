@@ -44,14 +44,19 @@ import {
   normalizeGenerationProgressPayload,
 } from "./services/generationProgressService.js";
 import {
+  commitProjectTodoImport,
   deleteArtifactFile,
   deleteProjectFile,
+  deleteProjectTodo,
   downloadArtifactFile,
   downloadProjectFile,
   getChatActionStatus,
   listProjectFiles,
+  listProjectTodos,
+  previewProjectTodoImport,
   updateArtifactFileName,
   updateProjectFileName,
+  updateProjectTodo,
   uploadDocument,
 } from "./api/finpmApi.js";
 import {
@@ -106,6 +111,22 @@ const FILE_KINDS = Object.freeze({
   UPLOADED: "uploaded",
   GENERATED: "generated",
 });
+const TODO_STATUS_FILTERS = Object.freeze([
+  { value: "", label: "전체" },
+  { value: "NOT_STARTED", label: "진행전" },
+  { value: "IN_PROGRESS", label: "진행중" },
+  { value: "DONE", label: "완료" },
+]);
+const TODO_STATUS_OPTIONS = TODO_STATUS_FILTERS.filter((option) => option.value);
+const TODO_SOURCE_FILTERS = Object.freeze([
+  { value: "", label: "전체" },
+  { value: "MEETING_NOTES", label: "회의록" },
+  { value: "WBS", label: "WBS" },
+]);
+const TODO_IMPORT_DOCUMENT_TYPES = Object.freeze([
+  { value: "MEETING_NOTES", label: "회의록" },
+  { value: "WBS", label: "WBS" },
+]);
 const DOCUMENT_GENERATION_COPY = Object.freeze({
   existingChoice: "기준 문서를 선택해주세요.",
   uploadOrCreate: "생성 기준 문서를 업로드해주세요.",
@@ -863,6 +884,132 @@ const normalizeProjectDocumentCandidates = (response) => {
   );
 };
 
+const getTodoStatusLabel = (status) =>
+  TODO_STATUS_FILTERS.find((option) => option.value === status)?.label ||
+  TODO_STATUS_FILTERS[1].label;
+
+const getTodoSourceLabel = (sourceType) =>
+  TODO_SOURCE_FILTERS.find((option) => option.value === sourceType)?.label ||
+  "기타";
+
+const normalizeTodo = (item = {}) => {
+  const todoId =
+    item.todo_id ??
+    item.todoId ??
+    item.id ??
+    item.client_import_id ??
+    item.clientImportId ??
+    "";
+  const sourceType =
+    item.source_type ?? item.sourceType ?? item.document_type ?? item.documentType ?? "";
+  return {
+    todoId,
+    clientImportId:
+      item.client_import_id ?? item.clientImportId ?? (todoId ? `IMPORT-${todoId}` : ""),
+    title: item.title ?? "",
+    assignee: item.assignee ?? "",
+    dueDate: item.due_date ?? item.dueDate ?? "",
+    dueDateText: item.due_date_text ?? item.dueDateText ?? "",
+    status: item.status ?? "NOT_STARTED",
+    sourceType,
+    sourceDocumentId: item.source_document_id ?? item.sourceDocumentId ?? "",
+    sourceDocumentName:
+      item.source_document_name ?? item.sourceDocumentName ?? item.related_document ?? "",
+    description: item.description ?? "",
+    sourceSentence: item.source_sentence ?? item.sourceSentence ?? "",
+    createdAt: item.created_at ?? item.createdAt ?? "",
+    updatedAt: item.updated_at ?? item.updatedAt ?? "",
+    raw: item,
+  };
+};
+
+const normalizeTodoListResponse = (response) => {
+  const items =
+    (Array.isArray(response) && response) ||
+    response?.items ||
+    response?.todos ||
+    response?.result?.items ||
+    response?.result?.todos ||
+    [];
+  return (Array.isArray(items) ? items : [])
+    .map(normalizeTodo)
+    .filter((item) => item.todoId || item.title);
+};
+
+const normalizeTodoImportPreview = (response) => {
+  const newItems = Array.isArray(response?.new_items)
+    ? response.new_items
+    : response?.newItems ?? [];
+  const duplicateItems = Array.isArray(response?.duplicate_items)
+    ? response.duplicate_items
+    : response?.duplicateItems ?? [];
+  return {
+    newItems: (Array.isArray(newItems) ? newItems : []).map(normalizeTodo),
+    duplicateItems: (Array.isArray(duplicateItems) ? duplicateItems : []).map(
+      (item) => ({
+        candidate: normalizeTodo(item.candidate ?? {}),
+        matchedExisting: normalizeTodo(
+          item.matched_existing ?? item.matchedExisting ?? {},
+        ),
+        duplicateLevel:
+          item.duplicate_level ?? item.duplicateLevel ?? "DUPLICATE_POSSIBLE",
+      }),
+    ),
+  };
+};
+
+const toTodoImportPayload = (item) => {
+  const raw = item.raw ?? {};
+  return {
+    todo_id: item.todoId || item.clientImportId || raw.todo_id || "",
+    client_import_id: item.clientImportId || raw.client_import_id || item.todoId,
+    title: item.title,
+    assignee: item.assignee || null,
+    due_date: item.dueDate || null,
+    status: item.status || "NOT_STARTED",
+    source_type: item.sourceType,
+    source_document_id: item.sourceDocumentId || null,
+    source_document_name: item.sourceDocumentName || null,
+    description: item.description || null,
+    source_sentence: item.sourceSentence || null,
+  };
+};
+
+const getTodoImportDocuments = (fileBuckets = {}) => {
+  const uploadedDocuments = (fileBuckets.uploaded ?? []).map((file) => ({
+    documentId: file.fileId,
+    fileName: file.fileName,
+    documentType: file.documentType,
+    createdAt: file.uploadedAt,
+    updatedAt: file.raw?.updated_at ?? file.raw?.updatedAt ?? "",
+    displayLabel: file.documentLabel || getDocumentDisplayLabel(file.documentType),
+  }));
+  const generatedDocuments = (fileBuckets.generated ?? [])
+    .map((file) => {
+      if (!file.generatedDocumentId) return null;
+      const documentType =
+        ARTIFACT_SOURCE_DOCUMENT_TYPES[file.artifactType] ?? DOCUMENT_TYPES.UNKNOWN;
+      return {
+        documentId: file.generatedDocumentId,
+        fileName: file.fileName,
+        documentType,
+        createdAt: file.createdAt,
+        updatedAt: file.updatedAt,
+        displayLabel: getDocumentDisplayLabel(documentType),
+      };
+    })
+    .filter(Boolean);
+  return sortDocumentsByLatest(
+    uniqueDocumentsById([...uploadedDocuments, ...generatedDocuments]).filter(
+      (document) =>
+        document.documentId &&
+        [DOCUMENT_TYPES.MEETING_NOTES, DOCUMENT_TYPES.WBS].includes(
+          document.documentType,
+        ),
+    ),
+  );
+};
+
 const compactText = (value = "") =>
   String(value)
     .replace(/\s+/g, "")
@@ -1361,6 +1508,34 @@ function App() {
   const [editingFileTarget, setEditingFileTarget] = useState(null);
   const [renamingFileKey, setRenamingFileKey] = useState("");
   const [fileNameDraft, setFileNameDraft] = useState("");
+  const [isTodoManagerOpen, setIsTodoManagerOpen] = useState(false);
+  const [todoItems, setTodoItems] = useState([]);
+  const [todoStatusFilter, setTodoStatusFilter] = useState("");
+  const [todoSourceFilter, setTodoSourceFilter] = useState("");
+  const [isLoadingTodos, setIsLoadingTodos] = useState(false);
+  const [todoError, setTodoError] = useState("");
+  const [todoActionError, setTodoActionError] = useState("");
+  const [savingTodoId, setSavingTodoId] = useState("");
+  const [editingTodoId, setEditingTodoId] = useState("");
+  const [todoEditDraft, setTodoEditDraft] = useState({
+    title: "",
+    assignee: "",
+    dueDate: "",
+    description: "",
+    status: "NOT_STARTED",
+  });
+  const [isTodoImportOpen, setIsTodoImportOpen] = useState(false);
+  const [todoImportDocumentType, setTodoImportDocumentType] = useState(
+    DOCUMENT_TYPES.MEETING_NOTES,
+  );
+  const [todoImportDocumentId, setTodoImportDocumentId] = useState("");
+  const [todoImportFile, setTodoImportFile] = useState(null);
+  const [isUploadingTodoImportDocument, setIsUploadingTodoImportDocument] =
+    useState(false);
+  const [isPreviewingTodoImport, setIsPreviewingTodoImport] = useState(false);
+  const [isCommittingTodoImport, setIsCommittingTodoImport] = useState(false);
+  const [todoImportPreview, setTodoImportPreview] = useState(null);
+  const [selectedTodoImportIds, setSelectedTodoImportIds] = useState([]);
   const scrollRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const pollingRejectRef = useRef(null);
@@ -1376,6 +1551,17 @@ function App() {
     [activeConversationId, conversations],
   );
   const activeMessages = activeConversation?.messages ?? [];
+  const todoImportDocuments = useMemo(
+    () => getTodoImportDocuments(fileBuckets),
+    [fileBuckets],
+  );
+  const filteredTodoImportDocuments = useMemo(
+    () =>
+      todoImportDocuments.filter(
+        (document) => document.documentType === todoImportDocumentType,
+      ),
+    [todoImportDocuments, todoImportDocumentType],
+  );
 
   const resetFileManagerState = () => {
     setIsFileManagerOpen(false);
@@ -1389,6 +1575,34 @@ function App() {
     setEditingFileTarget(null);
     setRenamingFileKey("");
     setFileNameDraft("");
+  };
+
+  const resetTodoManagerState = () => {
+    setIsTodoManagerOpen(false);
+    setTodoItems([]);
+    setTodoStatusFilter("");
+    setTodoSourceFilter("");
+    setIsLoadingTodos(false);
+    setTodoError("");
+    setTodoActionError("");
+    setSavingTodoId("");
+    setEditingTodoId("");
+    setTodoEditDraft({
+      title: "",
+      assignee: "",
+      dueDate: "",
+      description: "",
+      status: "NOT_STARTED",
+    });
+    setIsTodoImportOpen(false);
+    setTodoImportDocumentType(DOCUMENT_TYPES.MEETING_NOTES);
+    setTodoImportDocumentId("");
+    setTodoImportFile(null);
+    setIsUploadingTodoImportDocument(false);
+    setIsPreviewingTodoImport(false);
+    setIsCommittingTodoImport(false);
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
   };
 
   const clearGenerationPolling = ({ rejectPending = false } = {}) => {
@@ -1685,6 +1899,7 @@ function App() {
       setDocumentError("");
       setDocumentStatusMessage("");
       resetFileManagerState();
+      resetTodoManagerState();
       clearGenerationPolling({ rejectPending: true });
       setGenerationProgress(null);
       setRecentProjectId(loadedProject.projectId);
@@ -2147,6 +2362,365 @@ function App() {
       );
     } finally {
       setRenamingFileKey("");
+    }
+  };
+
+  const loadTodos = async ({
+    status = todoStatusFilter,
+    sourceType = todoSourceFilter,
+  } = {}) => {
+    if (!project?.projectId) {
+      setTodoItems([]);
+      setTodoError("프로젝트를 먼저 선택해 주세요.");
+      return;
+    }
+
+    setIsLoadingTodos(true);
+    setTodoError("");
+    try {
+      const response = await listProjectTodos(project.projectId, {
+        status,
+        sourceType,
+      });
+      setTodoItems(normalizeTodoListResponse(response));
+    } catch (error) {
+      setTodoItems([]);
+      setTodoError(
+        error instanceof Error
+          ? error.message
+          : "TODO 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setIsLoadingTodos(false);
+    }
+  };
+
+  const openTodoManager = () => {
+    setIsTodoManagerOpen(true);
+    setIsSidebarDrawerOpen(false);
+    setTodoActionError("");
+    setTodoError("");
+    setIsTodoImportOpen(false);
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    if (!project?.projectId) {
+      setTodoItems([]);
+      setTodoError("프로젝트를 먼저 선택해 주세요.");
+      return;
+    }
+    loadTodos();
+    loadUploadedFiles(project);
+  };
+
+  const closeTodoManager = () => {
+    setIsTodoManagerOpen(false);
+    setTodoActionError("");
+    setTodoError("");
+    setEditingTodoId("");
+    setSavingTodoId("");
+    setIsTodoImportOpen(false);
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+  };
+
+  const handleTodoStatusFilterChange = (value) => {
+    setTodoStatusFilter(value);
+    loadTodos({ status: value, sourceType: todoSourceFilter });
+  };
+
+  const handleTodoSourceFilterChange = (value) => {
+    setTodoSourceFilter(value);
+    loadTodos({ status: todoStatusFilter, sourceType: value });
+  };
+
+  const handleTodoStatusChange = async (todo, status) => {
+    if (!project?.projectId || !todo?.todoId || todo.status === status) return;
+
+    const previousTodos = todoItems;
+    setSavingTodoId(todo.todoId);
+    setTodoActionError("");
+    setTodoItems((currentItems) =>
+      currentItems.map((item) =>
+        item.todoId === todo.todoId ? { ...item, status } : item,
+      ),
+    );
+
+    try {
+      const updatedTodo = normalizeTodo(
+        await updateProjectTodo({
+          projectId: project.projectId,
+          todoId: todo.todoId,
+          payload: { status },
+        }),
+      );
+      setTodoItems((currentItems) =>
+        currentItems.map((item) =>
+          item.todoId === todo.todoId ? updatedTodo : item,
+        ),
+      );
+    } catch (error) {
+      setTodoItems(previousTodos);
+      setTodoActionError(
+        error instanceof Error
+          ? error.message
+          : "TODO 상태를 저장하지 못했습니다.",
+      );
+    } finally {
+      setSavingTodoId("");
+    }
+  };
+
+  const handleStartTodoEdit = (todo) => {
+    setEditingTodoId(todo.todoId);
+    setTodoEditDraft({
+      title: todo.title || "",
+      assignee: todo.assignee || "",
+      dueDate: todo.dueDate || "",
+      description: todo.description || "",
+      status: todo.status || "NOT_STARTED",
+    });
+    setTodoActionError("");
+  };
+
+  const handleCancelTodoEdit = () => {
+    setEditingTodoId("");
+    setTodoActionError("");
+  };
+
+  const handleTodoEditDraftChange = (field, value) => {
+    setTodoEditDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }));
+  };
+
+  const handleSaveTodoEdit = async (todo) => {
+    if (!project?.projectId || !todo?.todoId) return;
+    const nextTitle = todoEditDraft.title.trim();
+    if (!nextTitle) {
+      setTodoActionError("TODO명을 입력해 주세요.");
+      return;
+    }
+
+    setSavingTodoId(todo.todoId);
+    setTodoActionError("");
+    try {
+      const updatedTodo = normalizeTodo(
+        await updateProjectTodo({
+          projectId: project.projectId,
+          todoId: todo.todoId,
+          payload: {
+            title: nextTitle,
+            assignee: todoEditDraft.assignee.trim() || null,
+            due_date: todoEditDraft.dueDate || null,
+            status: todoEditDraft.status || "NOT_STARTED",
+            description: todoEditDraft.description.trim() || null,
+          },
+        }),
+      );
+      setTodoItems((currentItems) =>
+        currentItems.map((item) =>
+          item.todoId === todo.todoId ? updatedTodo : item,
+        ),
+      );
+      setEditingTodoId("");
+    } catch (error) {
+      setTodoActionError(
+        error instanceof Error
+          ? error.message
+          : "TODO 정보를 저장하지 못했습니다.",
+      );
+    } finally {
+      setSavingTodoId("");
+    }
+  };
+
+  const handleDeleteTodo = async (todo) => {
+    if (!project?.projectId || !todo?.todoId) return;
+    if (!window.confirm(`"${todo.title}" TODO를 삭제할까요?`)) return;
+
+    setSavingTodoId(todo.todoId);
+    setTodoActionError("");
+    try {
+      await deleteProjectTodo({
+        projectId: project.projectId,
+        todoId: todo.todoId,
+      });
+      setTodoItems((currentItems) =>
+        currentItems.filter((item) => item.todoId !== todo.todoId),
+      );
+    } catch (error) {
+      setTodoActionError(
+        error instanceof Error ? error.message : "TODO를 삭제하지 못했습니다.",
+      );
+    } finally {
+      setSavingTodoId("");
+    }
+  };
+
+  const handleOpenTodoImport = () => {
+    setIsTodoImportOpen((currentValue) => !currentValue);
+    setTodoActionError("");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    if (!todoImportDocumentId && filteredTodoImportDocuments[0]?.documentId) {
+      setTodoImportDocumentId(filteredTodoImportDocuments[0].documentId);
+    }
+    if (project?.projectId) {
+      loadUploadedFiles(project);
+    }
+  };
+
+  const handleTodoImportDocumentTypeChange = (value) => {
+    const nextType =
+      TODO_IMPORT_DOCUMENT_TYPES.some((option) => option.value === value)
+        ? value
+        : DOCUMENT_TYPES.MEETING_NOTES;
+    const nextDocument = getTodoImportDocuments(fileBuckets).find(
+      (document) => document.documentType === nextType,
+    );
+    setTodoImportDocumentType(nextType);
+    setTodoImportDocumentId(nextDocument?.documentId || "");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    setTodoActionError("");
+  };
+
+  const handleTodoImportFileChange = (file) => {
+    setTodoImportFile(file);
+    setTodoActionError("");
+  };
+
+  const handleUploadTodoImportDocument = async () => {
+    if (!project?.projectId || !todoImportFile) return;
+
+    setIsUploadingTodoImportDocument(true);
+    setTodoActionError("");
+    try {
+      const response = await uploadDocument({
+        projectId: project.projectId,
+        documentType: todoImportDocumentType,
+        file: todoImportFile,
+      });
+      const uploadedDocument = response?.document ?? {};
+      const uploadedDocumentId =
+        uploadedDocument.document_id ?? uploadedDocument.documentId ?? "";
+      await loadUploadedFiles(project);
+      if (uploadedDocumentId) {
+        setTodoImportDocumentId(uploadedDocumentId);
+      }
+      setTodoImportFile(null);
+      setTodoImportPreview(null);
+      setSelectedTodoImportIds([]);
+    } catch (error) {
+      setTodoActionError(
+        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
+      );
+    } finally {
+      setIsUploadingTodoImportDocument(false);
+    }
+  };
+
+  const handlePreviewTodoImport = async () => {
+    if (!project?.projectId || !todoImportDocumentId) {
+      setTodoActionError("TODO를 불러올 문서를 선택해 주세요.");
+      return;
+    }
+
+    const selectedDocument = todoImportDocuments.find(
+      (document) => document.documentId === todoImportDocumentId,
+    );
+    const documentType = selectedDocument?.documentType || todoImportDocumentType;
+
+    setIsPreviewingTodoImport(true);
+    setTodoActionError("");
+    try {
+      const preview = normalizeTodoImportPreview(
+        await previewProjectTodoImport({
+          projectId: project.projectId,
+          documentId: todoImportDocumentId,
+          documentType,
+        }),
+      );
+      setTodoImportPreview(preview);
+      setSelectedTodoImportIds(
+        preview.newItems
+          .map((item) => item.clientImportId || item.todoId)
+          .filter(Boolean),
+      );
+    } catch (error) {
+      setTodoImportPreview(null);
+      setSelectedTodoImportIds([]);
+      setTodoActionError(
+        error instanceof Error
+          ? error.message
+          : "문서에서 TODO를 미리보기하지 못했습니다.",
+      );
+    } finally {
+      setIsPreviewingTodoImport(false);
+    }
+  };
+
+  const handleToggleTodoImportItem = (itemId) => {
+    setSelectedTodoImportIds((currentIds) =>
+      currentIds.includes(itemId)
+        ? currentIds.filter((currentId) => currentId !== itemId)
+        : [...currentIds, itemId],
+    );
+  };
+
+  const handleSelectTodoImportMode = (mode) => {
+    if (!todoImportPreview) return;
+    const newIds = todoImportPreview.newItems
+      .map((item) => item.clientImportId || item.todoId)
+      .filter(Boolean);
+    const duplicateIds = todoImportPreview.duplicateItems
+      .map((item) => item.candidate.clientImportId || item.candidate.todoId)
+      .filter(Boolean);
+    if (mode === "all") {
+      setSelectedTodoImportIds([...newIds, ...duplicateIds]);
+      return;
+    }
+    if (mode === "none") {
+      setSelectedTodoImportIds([]);
+      return;
+    }
+    setSelectedTodoImportIds(newIds);
+  };
+
+  const handleCommitTodoImport = async () => {
+    if (!project?.projectId || !todoImportPreview) return;
+
+    const allCandidates = [
+      ...todoImportPreview.newItems,
+      ...todoImportPreview.duplicateItems.map((item) => item.candidate),
+    ];
+    const items = allCandidates.map(toTodoImportPayload);
+    const duplicateDecisions = items.map((item) => ({
+      client_import_id: item.client_import_id,
+      decision: selectedTodoImportIds.includes(item.client_import_id)
+        ? "ADD"
+        : "SKIP",
+    }));
+
+    setIsCommittingTodoImport(true);
+    setTodoActionError("");
+    try {
+      await commitProjectTodoImport({
+        projectId: project.projectId,
+        items,
+        duplicateDecisions,
+      });
+      setTodoImportPreview(null);
+      setSelectedTodoImportIds([]);
+      setIsTodoImportOpen(false);
+      await loadTodos();
+    } catch (error) {
+      setTodoActionError(
+        error instanceof Error ? error.message : "TODO를 저장하지 못했습니다.",
+      );
+    } finally {
+      setIsCommittingTodoImport(false);
     }
   };
 
@@ -3182,6 +3756,7 @@ function App() {
         conversationActionError={conversationActionError}
         onChangeProject={handleChangeProject}
         onOpenFileManager={openFileManager}
+        onOpenTodoManager={openTodoManager}
         onOpenSettings={openSettings}
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
@@ -3351,6 +3926,49 @@ function App() {
           onSaveRename={handleSaveFileRename}
         />
       )}
+      {isTodoManagerOpen && (
+        <TodoManagerModal
+          project={project}
+          todoItems={todoItems}
+          statusFilter={todoStatusFilter}
+          sourceFilter={todoSourceFilter}
+          isLoading={isLoadingTodos}
+          error={todoError}
+          actionError={todoActionError}
+          savingTodoId={savingTodoId}
+          editingTodoId={editingTodoId}
+          editDraft={todoEditDraft}
+          isImportOpen={isTodoImportOpen}
+          importDocuments={filteredTodoImportDocuments}
+          importDocumentType={todoImportDocumentType}
+          importDocumentId={todoImportDocumentId}
+          importFile={todoImportFile}
+          importPreview={todoImportPreview}
+          selectedImportIds={selectedTodoImportIds}
+          isLoadingDocuments={isLoadingUploadedFiles}
+          isUploadingImportDocument={isUploadingTodoImportDocument}
+          isPreviewingImport={isPreviewingTodoImport}
+          isCommittingImport={isCommittingTodoImport}
+          onClose={closeTodoManager}
+          onStatusFilterChange={handleTodoStatusFilterChange}
+          onSourceFilterChange={handleTodoSourceFilterChange}
+          onStatusChange={handleTodoStatusChange}
+          onStartEdit={handleStartTodoEdit}
+          onCancelEdit={handleCancelTodoEdit}
+          onEditDraftChange={handleTodoEditDraftChange}
+          onSaveEdit={handleSaveTodoEdit}
+          onDelete={handleDeleteTodo}
+          onToggleImport={handleOpenTodoImport}
+          onImportDocumentTypeChange={handleTodoImportDocumentTypeChange}
+          onImportDocumentChange={setTodoImportDocumentId}
+          onImportFileChange={handleTodoImportFileChange}
+          onUploadImportDocument={handleUploadTodoImportDocument}
+          onPreviewImport={handlePreviewTodoImport}
+          onToggleImportItem={handleToggleTodoImportItem}
+          onSelectImportMode={handleSelectTodoImportMode}
+          onCommitImport={handleCommitTodoImport}
+        />
+      )}
     </main>
   );
 }
@@ -3513,6 +4131,7 @@ function ProjectSidebar({
   conversationActionError,
   onChangeProject,
   onOpenFileManager,
+  onOpenTodoManager,
   onOpenSettings,
   onNewChat,
   onSelectConversation,
@@ -3625,6 +4244,15 @@ function ProjectSidebar({
       >
         <FileText size={16} aria-hidden="true" />
         업로드 파일 목록
+      </button>
+
+      <button
+        className="secondary-button"
+        type="button"
+        onClick={onOpenTodoManager}
+      >
+        <Check size={16} aria-hidden="true" />
+        TODO 관리
       </button>
 
       <button
@@ -3846,6 +4474,492 @@ function ProjectSettingsModal({
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function TodoManagerModal({
+  project,
+  todoItems,
+  statusFilter,
+  sourceFilter,
+  isLoading,
+  error,
+  actionError,
+  savingTodoId,
+  editingTodoId,
+  editDraft,
+  isImportOpen,
+  importDocuments,
+  importDocumentType,
+  importDocumentId,
+  importFile,
+  importPreview,
+  selectedImportIds,
+  isLoadingDocuments,
+  isUploadingImportDocument,
+  isPreviewingImport,
+  isCommittingImport,
+  onClose,
+  onStatusFilterChange,
+  onSourceFilterChange,
+  onStatusChange,
+  onStartEdit,
+  onCancelEdit,
+  onEditDraftChange,
+  onSaveEdit,
+  onDelete,
+  onToggleImport,
+  onImportDocumentTypeChange,
+  onImportDocumentChange,
+  onImportFileChange,
+  onUploadImportDocument,
+  onPreviewImport,
+  onToggleImportItem,
+  onSelectImportMode,
+  onCommitImport,
+}) {
+  const uploadInputId = useId();
+  const hasProject = Boolean(project?.projectId);
+  const previewNewItems = importPreview?.newItems ?? [];
+  const previewDuplicateItems = importPreview?.duplicateItems ?? [];
+  const previewCount = previewNewItems.length + previewDuplicateItems.length;
+  const selectedCount = selectedImportIds.length;
+
+  const renderPreviewItem = ({
+    item,
+    duplicateLevel = "NEW",
+    matchedExisting = null,
+  }) => {
+    const itemId = item.clientImportId || item.todoId || item.title;
+    const isSelected = selectedImportIds.includes(itemId);
+    return (
+      <li className="todo-preview-item" key={`${duplicateLevel}-${itemId}`}>
+        <label>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleImportItem(itemId)}
+          />
+          <span>{duplicateLevel === "NEW" ? "신규" : duplicateLevel}</span>
+        </label>
+        <div className="todo-preview-body">
+          <strong>{item.title || "제목 없음"}</strong>
+          <p>
+            {item.assignee || "담당자 미정"} ·{" "}
+            {item.dueDate || item.dueDateText || "기한 미정"} ·{" "}
+            {getTodoSourceLabel(item.sourceType)}
+          </p>
+          {matchedExisting?.title && (
+            <div className="todo-duplicate-match">
+              <span>기존 TODO</span>
+              <strong>{matchedExisting.title}</strong>
+              <p>
+                {matchedExisting.assignee || "담당자 미정"} ·{" "}
+                {matchedExisting.dueDate ||
+                  matchedExisting.dueDateText ||
+                  "기한 미정"}
+              </p>
+            </div>
+          )}
+        </div>
+      </li>
+    );
+  };
+
+  const renderTodoItem = (todo) => {
+    const isEditing = editingTodoId === todo.todoId;
+    const isSaving = savingTodoId === todo.todoId;
+    return (
+      <li className="todo-item" key={todo.todoId || todo.title}>
+        <div className="todo-item-main">
+          <div className="todo-title-block">
+            <strong>{todo.title || "제목 없음"}</strong>
+            <span>
+              {todo.sourceDocumentName || getTodoSourceLabel(todo.sourceType)}
+            </span>
+          </div>
+          <dl className="todo-meta">
+            <div>
+              <dt>담당자</dt>
+              <dd>{todo.assignee || "미정"}</dd>
+            </div>
+            <div>
+              <dt>기한</dt>
+              <dd>{todo.dueDate || todo.dueDateText || "미정"}</dd>
+            </div>
+            <div>
+              <dt>출처</dt>
+              <dd>{getTodoSourceLabel(todo.sourceType)}</dd>
+            </div>
+          </dl>
+          <div className="todo-row-actions">
+            <select
+              value={todo.status || "NOT_STARTED"}
+              disabled={isSaving}
+              aria-label={`${todo.title} 진행상태`}
+              onChange={(event) => onStatusChange(todo, event.target.value)}
+            >
+              {TODO_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="inline-icon-button"
+              type="button"
+              disabled={isSaving}
+              title="TODO 수정"
+              aria-label={`${todo.title} TODO 수정`}
+              onClick={() => onStartEdit(todo)}
+            >
+              <Pencil size={14} aria-hidden="true" />
+            </button>
+            <button
+              className="inline-icon-button"
+              type="button"
+              disabled={isSaving}
+              title="TODO 삭제"
+              aria-label={`${todo.title} TODO 삭제`}
+              onClick={() => onDelete(todo)}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        {todo.description && !isEditing && (
+          <p className="todo-description">{todo.description}</p>
+        )}
+        {isEditing && (
+          <div className="todo-edit-panel">
+            <label>
+              TODO명
+              <input
+                value={editDraft.title}
+                disabled={isSaving}
+                onChange={(event) =>
+                  onEditDraftChange("title", event.target.value)
+                }
+              />
+            </label>
+            <label>
+              담당자
+              <input
+                value={editDraft.assignee}
+                disabled={isSaving}
+                onChange={(event) =>
+                  onEditDraftChange("assignee", event.target.value)
+                }
+              />
+            </label>
+            <label>
+              기한
+              <input
+                type="date"
+                value={editDraft.dueDate}
+                disabled={isSaving}
+                onChange={(event) =>
+                  onEditDraftChange("dueDate", event.target.value)
+                }
+              />
+            </label>
+            <label>
+              진행상태
+              <select
+                value={editDraft.status}
+                disabled={isSaving}
+                onChange={(event) =>
+                  onEditDraftChange("status", event.target.value)
+                }
+              >
+                {TODO_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="todo-edit-description">
+              상세내용
+              <textarea
+                rows={3}
+                value={editDraft.description}
+                disabled={isSaving}
+                onChange={(event) =>
+                  onEditDraftChange("description", event.target.value)
+                }
+              />
+            </label>
+            <div className="todo-edit-actions">
+              <button
+                className="mini-action-button"
+                type="button"
+                disabled={isSaving}
+                onClick={onCancelEdit}
+              >
+                취소
+              </button>
+              <button
+                className="mini-action-button primary"
+                type="button"
+                disabled={isSaving || !editDraft.title.trim()}
+                onClick={() => onSaveEdit(todo)}
+              >
+                {isSaving ? "저장 중" : "저장"}
+              </button>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="todo-manager-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="todo-manager-title"
+      >
+        <header className="settings-modal-header">
+          <div>
+            <span>TODO</span>
+            <h2 id="todo-manager-title">TODO 관리</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="TODO 관리 닫기"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+
+        {actionError && <p className="form-error">{actionError}</p>}
+
+        <div className="todo-manager-content">
+          {!hasProject ? (
+            <p className="file-manager-empty">프로젝트를 먼저 선택해 주세요.</p>
+          ) : (
+            <>
+              <div className="todo-manager-toolbar">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={onToggleImport}
+                >
+                  <FileText size={16} aria-hidden="true" />
+                  문서에서 TODO 불러오기
+                </button>
+                <div className="todo-filter-grid">
+                  <label>
+                    상태
+                    <select
+                      value={statusFilter}
+                      onChange={(event) =>
+                        onStatusFilterChange(event.target.value)
+                      }
+                    >
+                      {TODO_STATUS_FILTERS.map((option) => (
+                        <option key={option.value || "ALL"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    출처
+                    <select
+                      value={sourceFilter}
+                      onChange={(event) =>
+                        onSourceFilterChange(event.target.value)
+                      }
+                    >
+                      {TODO_SOURCE_FILTERS.map((option) => (
+                        <option key={option.value || "ALL"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              {isImportOpen && (
+                <section className="todo-import-panel">
+                  <div className="todo-import-controls">
+                    <label>
+                      문서 유형
+                      <select
+                        value={importDocumentType}
+                        onChange={(event) =>
+                          onImportDocumentTypeChange(event.target.value)
+                        }
+                      >
+                        {TODO_IMPORT_DOCUMENT_TYPES.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      기존 문서
+                      <select
+                        value={importDocumentId}
+                        disabled={isLoadingDocuments || !importDocuments.length}
+                        onChange={(event) =>
+                          onImportDocumentChange(event.target.value)
+                        }
+                      >
+                        <option value="">
+                          {isLoadingDocuments
+                            ? "문서 목록 로딩 중"
+                            : "문서 선택"}
+                        </option>
+                        {importDocuments.map((document) => (
+                          <option
+                            key={document.documentId}
+                            value={document.documentId}
+                          >
+                            {document.fileName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={!importDocumentId || isPreviewingImport}
+                      onClick={onPreviewImport}
+                    >
+                      {isPreviewingImport ? (
+                        <>
+                          <LoaderCircle size={16} aria-hidden="true" />
+                          미리보기 중
+                        </>
+                      ) : (
+                        "TODO 미리보기"
+                      )}
+                    </button>
+                  </div>
+                  <div className="todo-upload-row">
+                    <label htmlFor={uploadInputId}>
+                      새 문서 업로드
+                      <input
+                        key={importFile ? "selected" : "empty"}
+                        id={uploadInputId}
+                        type="file"
+                        accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
+                        onChange={(event) =>
+                          onImportFileChange(event.target.files?.[0] ?? null)
+                        }
+                      />
+                    </label>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={!importFile || isUploadingImportDocument}
+                      onClick={onUploadImportDocument}
+                    >
+                      {isUploadingImportDocument ? "업로드 중" : "업로드"}
+                    </button>
+                  </div>
+
+                  {importPreview && (
+                    <div className="todo-preview-panel">
+                      <div className="todo-preview-header">
+                        <strong>
+                          미리보기 {previewCount}개 · 선택 {selectedCount}개
+                        </strong>
+                        <div>
+                          <button
+                            className="mini-action-button"
+                            type="button"
+                            onClick={() => onSelectImportMode("skip-duplicates")}
+                          >
+                            중복 제외
+                          </button>
+                          <button
+                            className="mini-action-button"
+                            type="button"
+                            onClick={() => onSelectImportMode("all")}
+                          >
+                            모두 선택
+                          </button>
+                          <button
+                            className="mini-action-button"
+                            type="button"
+                            onClick={() => onSelectImportMode("none")}
+                          >
+                            선택 해제
+                          </button>
+                        </div>
+                      </div>
+                      {previewCount ? (
+                        <ul className="todo-preview-list">
+                          {previewNewItems.map((item) =>
+                            renderPreviewItem({ item }),
+                          )}
+                          {previewDuplicateItems.map((item) =>
+                            renderPreviewItem({
+                              item: item.candidate,
+                              duplicateLevel: item.duplicateLevel,
+                              matchedExisting: item.matchedExisting,
+                            }),
+                          )}
+                        </ul>
+                      ) : (
+                        <p className="file-manager-section-empty">
+                          문서에서 불러올 TODO가 없습니다.
+                        </p>
+                      )}
+                      <div className="todo-preview-actions">
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={
+                            !selectedCount ||
+                            !previewCount ||
+                            isCommittingImport
+                          }
+                          onClick={onCommitImport}
+                        >
+                          {isCommittingImport ? "저장 중" : "선택한 TODO 저장"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <section className="todo-list-section">
+                <div className="todo-list-header">
+                  <h3>TODO 목록</h3>
+                  <span>{todoItems.length}개</span>
+                </div>
+                {isLoading ? (
+                  <div className="file-manager-loading" role="status">
+                    <LoaderCircle size={18} aria-hidden="true" />
+                    TODO 목록을 불러오는 중입니다.
+                  </div>
+                ) : error ? (
+                  <p className="form-error">{error}</p>
+                ) : todoItems.length ? (
+                  <ul className="todo-list">{todoItems.map(renderTodoItem)}</ul>
+                ) : (
+                  <p className="file-manager-section-empty">
+                    등록된 TODO가 없습니다.
+                  </p>
+                )}
+              </section>
+            </>
+          )}
+        </div>
       </section>
     </div>
   );

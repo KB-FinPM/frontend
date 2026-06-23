@@ -1786,7 +1786,8 @@ p {
 }
 
 .settings-modal,
-.file-manager-modal {
+.file-manager-modal,
+.todo-manager-modal {
   display: grid;
   gap: 18px;
   width: min(520px, 100%);
@@ -1801,6 +1802,12 @@ p {
 .file-manager-modal {
   width: min(820px, 100%);
   max-height: min(760px, calc(100vh - 40px));
+  overflow: hidden;
+}
+
+.todo-manager-modal {
+  width: min(980px, 100%);
+  max-height: min(820px, calc(100vh - 40px));
   overflow: hidden;
 }
 
@@ -1872,6 +1879,282 @@ p {
   max-height: min(62vh, 520px);
   overflow: auto;
   padding-right: 2px;
+}
+
+.todo-manager-content {
+  min-height: 220px;
+  max-height: min(68vh, 640px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.todo-manager-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.todo-manager-toolbar .secondary-button {
+  width: auto;
+}
+
+.todo-filter-grid,
+.todo-import-controls,
+.todo-upload-row,
+.todo-edit-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.todo-filter-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.todo-filter-grid label,
+.todo-import-controls label,
+.todo-upload-row label,
+.todo-edit-panel label {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.todo-filter-grid select,
+.todo-import-controls select,
+.todo-upload-row input,
+.todo-edit-panel input,
+.todo-edit-panel select,
+.todo-edit-panel textarea,
+.todo-row-actions select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  color: #101828;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.todo-filter-grid select,
+.todo-import-controls select,
+.todo-edit-panel input,
+.todo-edit-panel select,
+.todo-row-actions select {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.todo-edit-panel textarea {
+  resize: vertical;
+  padding: 10px;
+}
+
+.todo-import-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.todo-import-controls {
+  grid-template-columns: minmax(140px, 0.5fr) minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+.todo-upload-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.todo-upload-row .secondary-button,
+.todo-import-controls .primary-button {
+  width: auto;
+}
+
+.todo-preview-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.todo-preview-header,
+.todo-list-header,
+.todo-preview-actions,
+.todo-row-actions,
+.todo-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.todo-preview-header,
+.todo-list-header {
+  justify-content: space-between;
+}
+
+.todo-preview-header strong,
+.todo-list-header h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 15px;
+}
+
+.todo-list-header span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.todo-preview-header > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.todo-preview-list,
+.todo-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-preview-item,
+.todo-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.todo-preview-item {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.todo-preview-item > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f6ed4;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.todo-preview-body,
+.todo-title-block {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.todo-preview-body strong,
+.todo-title-block strong {
+  color: #101828;
+  overflow-wrap: anywhere;
+}
+
+.todo-preview-body p,
+.todo-title-block span,
+.todo-description,
+.todo-duplicate-match p {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.todo-duplicate-match {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  background: #fff6f5;
+}
+
+.todo-duplicate-match span {
+  color: #b42318;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.todo-preview-actions {
+  justify-content: flex-end;
+}
+
+.todo-preview-actions .primary-button {
+  width: auto;
+}
+
+.todo-list-section {
+  display: grid;
+  gap: 10px;
+}
+
+.todo-item-main {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(240px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.todo-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.todo-meta dt {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.todo-meta dd {
+  margin: 3px 0 0;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.todo-row-actions {
+  justify-content: flex-end;
+}
+
+.todo-row-actions select {
+  width: 120px;
+}
+
+.todo-edit-panel {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 12px;
+  border: 1px solid #cfd7e6;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.todo-edit-description {
+  grid-column: 1 / -1;
+}
+
+.todo-edit-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
 }
 
 .file-manager-sections {
@@ -2305,27 +2588,50 @@ p {
     width: 100%;
   }
 
-  .file-manager-modal {
+  .file-manager-modal,
+  .todo-manager-modal {
     max-height: calc(100vh - 24px);
     padding: 18px;
   }
 
-  .file-manager-toolbar {
+  .file-manager-toolbar,
+  .todo-manager-toolbar,
+  .todo-import-controls,
+  .todo-upload-row,
+  .todo-item-main,
+  .todo-edit-panel {
     grid-template-columns: 1fr;
   }
 
-  .file-manager-toolbar .secondary-button {
+  .file-manager-toolbar .secondary-button,
+  .todo-manager-toolbar .secondary-button,
+  .todo-upload-row .secondary-button,
+  .todo-import-controls .primary-button,
+  .todo-preview-actions .primary-button {
     width: 100%;
   }
 
-  .uploaded-file-meta {
+  .uploaded-file-meta,
+  .todo-meta,
+  .todo-filter-grid {
     grid-template-columns: 1fr;
   }
 
   .uploaded-file-actions,
   .file-delete-confirm,
-  .file-delete-confirm div {
+  .file-delete-confirm div,
+  .todo-row-actions,
+  .todo-edit-actions,
+  .todo-preview-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .todo-row-actions select {
+    width: 100%;
+  }
+
+  .todo-preview-item {
+    grid-template-columns: 1fr;
   }
 }
