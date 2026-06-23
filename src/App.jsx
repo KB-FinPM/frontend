@@ -892,6 +892,70 @@ const getTodoSourceLabel = (sourceType) =>
   TODO_SOURCE_FILTERS.find((option) => option.value === sourceType)?.label ||
   "기타";
 
+const padDatePart = (value) => String(value).padStart(2, "0");
+
+const getTodayIsoDate = () => {
+  const today = new Date();
+  return [
+    today.getFullYear(),
+    padDatePart(today.getMonth() + 1),
+    padDatePart(today.getDate()),
+  ].join("-");
+};
+
+const buildIsoDate = (year, month, day) => {
+  const dateValue = new Date(year, month - 1, day);
+  if (
+    dateValue.getFullYear() !== year ||
+    dateValue.getMonth() !== month - 1 ||
+    dateValue.getDate() !== day
+  ) {
+    return "";
+  }
+  return [year, padDatePart(month), padDatePart(day)].join("-");
+};
+
+const normalizeTodoDueDate = (value, { defaultToday = false } = {}) => {
+  const text = String(value ?? "").trim();
+  if (!text) return defaultToday ? getTodayIsoDate() : "";
+  if (["NONE", "NULL", "TBD", "N/A", "NA", "미정"].includes(text.toUpperCase())) {
+    return defaultToday ? getTodayIsoDate() : "";
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return buildIsoDate(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]),
+      Number(isoMatch[3]),
+    );
+  }
+
+  const yearFirstMatch = text.match(
+    /(\d{4})\s*(?:[./-]|년)\s*(\d{1,2})\s*(?:[./-]|월)\s*(\d{1,2})/,
+  );
+  if (yearFirstMatch) {
+    return buildIsoDate(
+      Number(yearFirstMatch[1]),
+      Number(yearFirstMatch[2]),
+      Number(yearFirstMatch[3]),
+    );
+  }
+
+  const yearlessMatch = text.match(
+    /(?:^|\D)(\d{1,2})\s*(?:[./-]|월)\s*(\d{1,2})\s*(?:일)?(?:\D|$)/,
+  );
+  if (yearlessMatch) {
+    return buildIsoDate(
+      new Date().getFullYear(),
+      Number(yearlessMatch[1]),
+      Number(yearlessMatch[2]),
+    );
+  }
+
+  return defaultToday ? getTodayIsoDate() : "";
+};
+
 const normalizeTodo = (item = {}) => {
   const todoId =
     item.todo_id ??
@@ -902,14 +966,18 @@ const normalizeTodo = (item = {}) => {
     "";
   const sourceType =
     item.source_type ?? item.sourceType ?? item.document_type ?? item.documentType ?? "";
+  const dueDate = normalizeTodoDueDate(
+    item.due_date ?? item.dueDate ?? item.due_date_text ?? item.dueDateText,
+    { defaultToday: true },
+  );
   return {
     todoId,
     clientImportId:
       item.client_import_id ?? item.clientImportId ?? (todoId ? `IMPORT-${todoId}` : ""),
     title: item.title ?? "",
     assignee: item.assignee ?? "",
-    dueDate: item.due_date ?? item.dueDate ?? "",
-    dueDateText: item.due_date_text ?? item.dueDateText ?? "",
+    dueDate,
+    dueDateText: dueDate,
     status: item.status ?? "NOT_STARTED",
     sourceType,
     sourceDocumentId: item.source_document_id ?? item.sourceDocumentId ?? "",
@@ -965,7 +1033,9 @@ const toTodoImportPayload = (item) => {
     client_import_id: item.clientImportId || raw.client_import_id || item.todoId,
     title: item.title,
     assignee: item.assignee || null,
-    due_date: item.dueDate || null,
+    due_date: normalizeTodoDueDate(item.dueDate || item.dueDateText, {
+      defaultToday: true,
+    }),
     status: item.status || "NOT_STARTED",
     source_type: item.sourceType,
     source_document_id: item.sourceDocumentId || null,
@@ -2475,7 +2545,9 @@ function App() {
     setTodoEditDraft({
       title: todo.title || "",
       assignee: todo.assignee || "",
-      dueDate: todo.dueDate || "",
+      dueDate: normalizeTodoDueDate(todo.dueDate || todo.dueDateText, {
+        defaultToday: true,
+      }),
       description: todo.description || "",
       status: todo.status || "NOT_STARTED",
     });
@@ -2512,7 +2584,9 @@ function App() {
           payload: {
             title: nextTitle,
             assignee: todoEditDraft.assignee.trim() || null,
-            due_date: todoEditDraft.dueDate || null,
+            due_date: normalizeTodoDueDate(todoEditDraft.dueDate, {
+              defaultToday: true,
+            }),
             status: todoEditDraft.status || "NOT_STARTED",
             description: todoEditDraft.description.trim() || null,
           },
@@ -4576,9 +4650,7 @@ function TodoManagerModal({
         <div className="todo-item-main">
           <div className="todo-title-block">
             <strong>{todo.title || "제목 없음"}</strong>
-            <span>
-              {todo.sourceDocumentName || getTodoSourceLabel(todo.sourceType)}
-            </span>
+            <span>{getTodoStatusLabel(todo.status)}</span>
           </div>
           <dl className="todo-meta">
             <div>
