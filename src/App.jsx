@@ -44,6 +44,10 @@ import {
   saveCommandUsage,
 } from "./services/commandRecommendationService.js";
 import {
+  getAgentStatusLabel,
+  getGenerationAgentItems,
+} from "./services/generationAgentStatusService.js";
+import {
   getGenerationStageStepIndex,
   getGenerationProgressPayload,
   normalizeGenerationProgressPayload,
@@ -5303,276 +5307,6 @@ function getGenerationJobStageText(job) {
   );
 }
 
-const GENERATION_AGENT_ORDER = [
-  { key: "input", label: "Input Agent" },
-  { key: "generation", label: "Generation Agent" },
-  { key: "validation", label: "Validation Agent" },
-  { key: "output", label: "Output Agent" },
-];
-
-const normalizeProgressStatus = (value = "") => {
-  const statusText = String(value || "").toLowerCase();
-  if (
-    statusText.includes("complete") ||
-    statusText.includes("done") ||
-    statusText.includes("success") ||
-    statusText.includes("executed") ||
-    statusText.includes("완료")
-  ) {
-    return "completed";
-  }
-  if (
-    statusText.includes("running") ||
-    statusText.includes("executing") ||
-    statusText.includes("progress") ||
-    statusText.includes("processing") ||
-    statusText.includes("진행")
-  ) {
-    return "running";
-  }
-  if (
-    statusText.includes("fail") ||
-    statusText.includes("error") ||
-    statusText.includes("오류") ||
-    statusText.includes("실패")
-  ) {
-    return "failed";
-  }
-  if (statusText.includes("skip") || statusText.includes("건너")) {
-    return "skipped";
-  }
-  return "waiting";
-};
-
-const getProgressCountValue = (...values) => {
-  for (const value of values) {
-    const numericValue = toFiniteNumber(value);
-    if (numericValue !== null) return numericValue;
-  }
-  return null;
-};
-
-const createProgressUnitItem = (label, current, total) => {
-  if (current === null || total === null || total <= 0) return null;
-  return {
-    label,
-    text: `${label} ${formatProgressCount(current)} / ${formatProgressCount(total)}`,
-  };
-};
-
-const addProgressUnitItem = (items, item) => {
-  if (!item) return;
-  const key = item.label.toLowerCase();
-  if (items.some((currentItem) => currentItem.label.toLowerCase() === key)) return;
-  items.push(item);
-};
-
-const getGenerationUnitProgressItems = (progressState = {}) => {
-  const rawProgress = progressState?.rawProgress ?? {};
-  const items = [];
-
-  addProgressUnitItem(
-    items,
-    createProgressUnitItem(
-      "Chunk",
-      getProgressCountValue(
-        rawProgress.chunk_current,
-        rawProgress.chunk?.current,
-        rawProgress.chunks?.current,
-      ),
-      getProgressCountValue(
-        rawProgress.chunk_total,
-        rawProgress.chunk?.total,
-        rawProgress.chunks?.total,
-      ),
-    ),
-  );
-
-  addProgressUnitItem(
-    items,
-    createProgressUnitItem(
-      "Batch",
-      getProgressCountValue(
-        rawProgress.batch_current,
-        rawProgress.batch?.current,
-        rawProgress.batches?.current,
-        rawProgress.batch_progress?.current,
-      ),
-      getProgressCountValue(
-        rawProgress.batch_total,
-        rawProgress.batch?.total,
-        rawProgress.batches?.total,
-        rawProgress.batch_progress?.total,
-      ),
-    ),
-  );
-
-  const subProgressItems = Array.isArray(progressState?.subProgressItems)
-    ? progressState.subProgressItems
-    : [];
-  subProgressItems.forEach((item) => {
-    const itemText = `${item.type || ""} ${item.label || ""} ${
-      item.message || ""
-    }`.toLowerCase();
-    if (!itemText.includes("chunk") && !itemText.includes("batch")) return;
-    addProgressUnitItem(
-      items,
-      createProgressUnitItem(
-        itemText.includes("batch") ? "Batch" : "Chunk",
-        item.current,
-        item.total,
-      ),
-    );
-  });
-
-  const rawText = `${rawProgress.unit || ""} ${rawProgress.label || ""} ${
-    rawProgress.progress_text || ""
-  }`.toLowerCase();
-  if (rawText.includes("chunk") || rawText.includes("batch")) {
-    addProgressUnitItem(
-      items,
-      createProgressUnitItem(
-        rawText.includes("batch") ? "Batch" : "Chunk",
-        getProgressCountValue(rawProgress.current),
-        getProgressCountValue(rawProgress.total),
-      ),
-    );
-  }
-
-  return items;
-};
-
-const getAgentLabel = (value = "") => {
-  const normalizedValue = String(value || "")
-    .replace(/[_-]+/g, " ")
-    .trim();
-  const lowerValue = normalizedValue.toLowerCase();
-  if (lowerValue.includes("input")) return "Input Agent";
-  if (lowerValue.includes("validation") || lowerValue.includes("validate")) {
-    return "Validation Agent";
-  }
-  if (lowerValue.includes("output") || lowerValue.includes("export")) {
-    return "Output Agent";
-  }
-  if (
-    lowerValue.includes("generation") ||
-    lowerValue.includes("generator") ||
-    lowerValue.includes("document")
-  ) {
-    return "Generation Agent";
-  }
-  return normalizedValue || "Generation Agent";
-};
-
-const getAgentStatusFromPayload = (agentValue) => {
-  if (!agentValue || typeof agentValue !== "object") {
-    return normalizeProgressStatus(agentValue);
-  }
-  return normalizeProgressStatus(
-    agentValue.status ??
-      agentValue.state ??
-      agentValue.phase ??
-      agentValue.result ??
-      agentValue.progress_status,
-  );
-};
-
-const getGenerationAgentItemsFromPayload = (progressState = {}) => {
-  const rawProgress = progressState?.rawProgress ?? {};
-  const candidateSources = [
-    rawProgress.agent_statuses,
-    rawProgress.agent_status,
-    rawProgress.agents,
-    rawProgress.agent_steps,
-    rawProgress.steps,
-  ];
-
-  for (const source of candidateSources) {
-    if (!source) continue;
-    const entries = Array.isArray(source)
-      ? source.map((agent, index) => [agent?.name || agent?.agent || index, agent])
-      : Object.entries(source);
-    const agentItems = entries
-      .map(([key, value]) => ({
-        label: getAgentLabel(value?.label || value?.name || value?.agent || key),
-        status: getAgentStatusFromPayload(value),
-      }))
-      .filter((item) => item.label);
-    if (agentItems.length) {
-      return agentItems;
-    }
-  }
-
-  return [];
-};
-
-const getFallbackGenerationAgentItems = (progressState = {}, jobStatus, stageText) => {
-  if (jobStatus === GENERATION_JOB_STATUS.COMPLETED) {
-    return GENERATION_AGENT_ORDER.map((agent) => ({
-      ...agent,
-      status: "completed",
-    }));
-  }
-
-  const lowerText = `${progressState?.stage || ""} ${stageText || ""}`.toLowerCase();
-  let activeAgentIndex = 1;
-  if (
-    lowerText.includes("input") ||
-    lowerText.includes("요청") ||
-    lowerText.includes("업로드") ||
-    lowerText.includes("분석")
-  ) {
-    activeAgentIndex = 0;
-  } else if (lowerText.includes("validation") || lowerText.includes("검증")) {
-    activeAgentIndex = 2;
-  } else if (
-    lowerText.includes("output") ||
-    lowerText.includes("export") ||
-    lowerText.includes("파일") ||
-    lowerText.includes("저장")
-  ) {
-    activeAgentIndex = 3;
-  }
-
-  return GENERATION_AGENT_ORDER.map((agent, index) => {
-    if (jobStatus === GENERATION_JOB_STATUS.FAILED) {
-      return {
-        ...agent,
-        status:
-          index < activeAgentIndex
-            ? "completed"
-            : index === activeAgentIndex
-              ? "failed"
-              : "waiting",
-      };
-    }
-    return {
-      ...agent,
-      status:
-        index < activeAgentIndex
-          ? "completed"
-          : index === activeAgentIndex
-            ? "running"
-            : "waiting",
-    };
-  });
-};
-
-const getGenerationAgentItems = (progressState, jobStatus, stageText) => {
-  const payloadItems = getGenerationAgentItemsFromPayload(progressState);
-  return payloadItems.length
-    ? payloadItems
-    : getFallbackGenerationAgentItems(progressState, jobStatus, stageText);
-};
-
-const getAgentStatusLabel = (status) => {
-  if (status === "completed") return "완료";
-  if (status === "running") return "진행 중";
-  if (status === "failed") return "실패";
-  if (status === "skipped") return "건너뜀";
-  return "대기";
-};
-
 function GenerationStagePanel({ status, stageText }) {
   const isRunning = status === GENERATION_JOB_STATUS.RUNNING;
   const isCompleted = status === GENERATION_JOB_STATUS.COMPLETED;
@@ -5606,20 +5340,6 @@ function GenerationCompleteBadge() {
   );
 }
 
-function GenerationUnitProgress({ items }) {
-  if (!items.length) return null;
-  return (
-    <section className="generation-progress-section generation-progress-units">
-      <span>처리 단위</span>
-      <div>
-        {items.map((item) => (
-          <strong key={item.label}>{item.text}</strong>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function GenerationAgentStatusList({ items }) {
   if (!items.length) return null;
   return (
@@ -5638,7 +5358,30 @@ function GenerationAgentStatusList({ items }) {
               )}
               {item.status === "failed" && <X size={13} />}
             </span>
-            <strong>{item.label}</strong>
+            <div className="generation-agent-status__content">
+              <strong>{item.label}</strong>
+              {item.detail && (
+                <p className="generation-agent-status__detail">{item.detail}</p>
+              )}
+              {item.unitItems?.length > 0 && (
+                <div className="generation-agent-status__units">
+                  <span>
+                    {item.status === "failed"
+                      ? "실패 위치"
+                      : item.status === "completed"
+                        ? "처리 완료"
+                        : "상세 처리단위"}
+                  </span>
+                  <div>
+                    {item.unitItems.map((unitItem) => (
+                      <strong key={unitItem.key || unitItem.label}>
+                        {unitItem.text}
+                      </strong>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <small>{getAgentStatusLabel(item.status)}</small>
           </div>
         ))}
@@ -5676,7 +5419,6 @@ function GenerationProgressSurface({
   const isRunning = job.status === GENERATION_JOB_STATUS.RUNNING;
   const isCompleted = job.status === GENERATION_JOB_STATUS.COMPLETED;
   const isFailed = job.status === GENERATION_JOB_STATUS.FAILED;
-  const unitItems = getGenerationUnitProgressItems(job.progressState);
   const agentItems = getGenerationAgentItems(
     job.progressState,
     job.status,
@@ -5732,7 +5474,6 @@ function GenerationProgressSurface({
                   title="전체 진행률"
                 />
               </section>
-              <GenerationUnitProgress items={unitItems} />
               <GenerationAgentStatusList items={agentItems} />
             </div>
 

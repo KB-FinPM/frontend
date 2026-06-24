@@ -26,6 +26,10 @@ import {
   normalizeGenerationProgressPayload,
   normalizeSubProgress,
 } from "../src/services/generationProgressService.js";
+import {
+  getGenerationAgentItems,
+  getGenerationUnitProgressItems,
+} from "../src/services/generationAgentStatusService.js";
 import { ARTIFACT_TYPES, DOCUMENT_TYPES } from "../src/types/api.js";
 
 
@@ -612,6 +616,155 @@ test("sub progress without total falls back to loading text", () => {
   assert.equal(normalized.hasProgressBar, false);
   assert.equal(normalized.message, "임베딩/인덱싱 처리 중");
   assert.equal(normalized.largeDocumentHint, true);
+});
+
+test("generation agent rows attach chunk details to the active agent", () => {
+  const progressState = {
+    stage: "CORE_AGENT_EXTRACTION",
+    displayText: "Core Agent 요구사항 추출 중",
+    rawProgress: {
+      stage: "CORE_AGENT_EXTRACTION",
+      stage_label: "Core Agent 요구사항 추출 중",
+    },
+    subProgressItems: [
+      {
+        type: "CHUNK_PROCESSING",
+        label: "원본 문서 chunk 처리",
+        current: 31,
+        total: 31,
+        unit: "chunks",
+      },
+    ],
+  };
+
+  const agentItems = getGenerationAgentItems(
+    progressState,
+    "RUNNING",
+    "Core Agent 요구사항 추출 중",
+  );
+  const generationAgent = agentItems.find(
+    (item) => item.label === "Generation Agent",
+  );
+
+  assert.equal(generationAgent.status, "running");
+  assert.equal(generationAgent.detail, "Core Agent 요구사항 추출 중");
+  assert.deepEqual(
+    generationAgent.unitItems.map((item) => item.text),
+    ["Chunk 31 / 31"],
+  );
+  assert.equal(
+    agentItems.some(
+      (item) => item.label !== "Generation Agent" && item.unitItems.length > 0,
+    ),
+    false,
+  );
+});
+
+test("generation agent rows hide invalid chunk counts", () => {
+  const progressState = {
+    stage: "CORE_AGENT_EXTRACTION",
+    rawProgress: {
+      chunk_current: 0,
+      chunk_total: 0,
+      stage_label: "Core Agent 요구사항 추출 중",
+    },
+  };
+
+  assert.deepEqual(getGenerationUnitProgressItems(progressState), []);
+  assert.equal(
+    getGenerationAgentItems(
+      progressState,
+      "RUNNING",
+      "Core Agent 요구사항 추출 중",
+    ).some((item) => item.unitItems.length > 0),
+    false,
+  );
+});
+
+test("generation agent rows preserve agent-specific completion units", () => {
+  const progressState = {
+    rawProgress: {
+      agents: [
+        {
+          name: "Input Agent",
+          status: "COMPLETED",
+          chunks: { current: 12, total: 12 },
+        },
+        {
+          name: "Generation Agent",
+          status: "RUNNING",
+          detail: "Core Agent 요구사항 추출 중",
+          batches: { current: 1, total: 3 },
+        },
+        { name: "Validation Agent", status: "WAITING" },
+      ],
+      chunk_current: 31,
+      chunk_total: 31,
+    },
+  };
+
+  const agentItems = getGenerationAgentItems(
+    progressState,
+    "RUNNING",
+    "Core Agent 요구사항 추출 중",
+  );
+
+  assert.deepEqual(
+    agentItems.find((item) => item.label === "Input Agent").unitItems.map(
+      (item) => item.text,
+    ),
+    ["Chunk 12 / 12"],
+  );
+  assert.deepEqual(
+    agentItems.find((item) => item.label === "Generation Agent").unitItems.map(
+      (item) => item.text,
+    ),
+    ["Batch 1 / 3"],
+  );
+  assert.deepEqual(
+    agentItems.find((item) => item.label === "Validation Agent").unitItems,
+    [],
+  );
+});
+
+test("generation agent rows do not show global chunks after completion", () => {
+  const agentItems = getGenerationAgentItems(
+    {
+      rawProgress: {
+        chunk_current: 31,
+        chunk_total: 31,
+      },
+    },
+    "COMPLETED",
+    "생성 완료",
+  );
+
+  assert.equal(agentItems.every((item) => item.status === "completed"), true);
+  assert.equal(agentItems.some((item) => item.unitItems.length > 0), false);
+});
+
+test("generation agent rows attach failed chunk location to failed agent", () => {
+  const agentItems = getGenerationAgentItems(
+    {
+      stage: "CORE_AGENT_EXTRACTION",
+      rawProgress: {
+        stage_label: "Core Agent 요구사항 추출 중",
+        chunks: { current: 8, total: 31 },
+      },
+    },
+    "FAILED",
+    "Core Agent 요구사항 추출 중",
+  );
+  const generationAgent = agentItems.find(
+    (item) => item.label === "Generation Agent",
+  );
+
+  assert.equal(generationAgent.status, "failed");
+  assert.equal(generationAgent.detail, "Core Agent 요구사항 추출 중");
+  assert.deepEqual(
+    generationAgent.unitItems.map((item) => item.text),
+    ["Chunk 8 / 31"],
+  );
 });
 
 
