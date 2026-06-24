@@ -1854,6 +1854,11 @@ function App() {
   const [generationJob, setGenerationJob] = useState(null);
   const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
   const [isProgressMinimized, setIsProgressMinimized] = useState(false);
+  const isProgressMinimizedRef = useRef(false);
+  const setProgressMinimizedState = (nextValue) => {
+    isProgressMinimizedRef.current = nextValue;
+    setIsProgressMinimized(nextValue);
+  };
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
@@ -2034,7 +2039,7 @@ function App() {
     setGenerationProgress(null);
     setGenerationJob(null);
     setIsProgressModalOpen(false);
-    setIsProgressMinimized(false);
+    setProgressMinimizedState(false);
     setSelectedDocumentIds([]);
     setDocumentStatusMessage("");
   };
@@ -2059,7 +2064,7 @@ function App() {
     });
     setIsDocumentGenerationModalOpen(false);
     setIsProgressModalOpen(true);
-    setIsProgressMinimized(false);
+    setProgressMinimizedState(false);
   };
 
   const completeGenerationProgress = (statusResponse = null, requestType = "") => {
@@ -2086,8 +2091,13 @@ function App() {
       downloadFiles,
       errorMessage: "",
     }));
-    setIsProgressModalOpen(true);
-    setIsProgressMinimized(false);
+    if (isProgressMinimizedRef.current) {
+      setIsProgressModalOpen(false);
+      setProgressMinimizedState(true);
+    } else {
+      setIsProgressModalOpen(true);
+      setProgressMinimizedState(false);
+    }
     return completedProgress;
   };
 
@@ -2123,7 +2133,7 @@ function App() {
         "문서 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
     }));
     setIsProgressModalOpen(true);
-    setIsProgressMinimized(false);
+    setProgressMinimizedState(false);
     return failedProgress;
   };
 
@@ -4439,7 +4449,7 @@ function App() {
           setGenerationProgress(null);
           setGenerationJob(null);
           setIsProgressModalOpen(false);
-          setIsProgressMinimized(false);
+          setProgressMinimizedState(false);
         }
         setSelectedDocumentIds([]);
         setDocumentStatusMessage("");
@@ -4515,13 +4525,13 @@ function App() {
   const handleMinimizeProgressModal = () => {
     if (!generationJob) return;
     setIsProgressModalOpen(false);
-    setIsProgressMinimized(true);
+    setProgressMinimizedState(true);
   };
 
   const handleRestoreProgressModal = () => {
     if (!generationJob) return;
     setIsProgressModalOpen(true);
-    setIsProgressMinimized(false);
+    setProgressMinimizedState(false);
   };
 
   const handleCloseProgressModal = () => {
@@ -4530,7 +4540,7 @@ function App() {
       return;
     }
     setIsProgressModalOpen(false);
-    setIsProgressMinimized(false);
+    setProgressMinimizedState(false);
   };
 
   const handleConversationTitleEditStart = (conversation) => {
@@ -5587,6 +5597,15 @@ function GenerationStagePanel({ status, stageText }) {
   );
 }
 
+function GenerationCompleteBadge() {
+  return (
+    <div className="generation-complete-badge" role="status" aria-live="polite">
+      <Check size={18} aria-hidden="true" />
+      완료
+    </div>
+  );
+}
+
 function GenerationUnitProgress({ items }) {
   if (!items.length) return null;
   return (
@@ -5663,9 +5682,6 @@ function GenerationProgressSurface({
     job.status,
     stageText,
   );
-  const completedFileMessage = `${
-    job.downloadFiles?.[0]?.file_name || `${targetLabel} 파일`
-  }이 생성되었습니다.`;
   const title = isCompleted
     ? `${targetLabel} 생성 완료`
     : isFailed
@@ -5704,7 +5720,11 @@ function GenerationProgressSurface({
             </header>
 
             <div className="generation-progress-modal__body">
-              <GenerationStagePanel status={job.status} stageText={stageText} />
+              {isCompleted ? (
+                <GenerationCompleteBadge />
+              ) : (
+                <GenerationStagePanel status={job.status} stageText={stageText} />
+              )}
               <section className="generation-progress-section generation-progress-overall">
                 <ProgressBar
                   progress={progress}
@@ -5714,9 +5734,6 @@ function GenerationProgressSurface({
               </section>
               <GenerationUnitProgress items={unitItems} />
               <GenerationAgentStatusList items={agentItems} />
-              {isCompleted && (
-                <p className="generation-progress-result">{completedFileMessage}</p>
-              )}
             </div>
 
             {isCompleted && (
@@ -6239,19 +6256,6 @@ function ProjectSidebar({
           </div>
         </div>
         <button
-          className="sidebar-collapse-button"
-          type="button"
-          aria-label={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
-          title={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
-          onClick={onToggleCollapsed}
-        >
-          {isCollapsed ? (
-            <ChevronRight size={18} aria-hidden="true" />
-          ) : (
-            <ChevronLeft size={18} aria-hidden="true" />
-          )}
-        </button>
-        <button
           className="sidebar-close-button"
           type="button"
           aria-label="프로젝트 및 대화 목록 닫기"
@@ -6260,6 +6264,19 @@ function ProjectSidebar({
           <X size={18} aria-hidden="true" />
         </button>
       </div>
+      <button
+        className="sidebar-collapse-handle"
+        type="button"
+        aria-label={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+        title={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+        onClick={onToggleCollapsed}
+      >
+        {isCollapsed ? (
+          <ChevronRight size={20} aria-hidden="true" />
+        ) : (
+          <ChevronLeft size={20} aria-hidden="true" />
+        )}
+      </button>
 
       <section className="project-info">
         <div className="project-info-title">
