@@ -228,6 +228,14 @@ const DOCUMENT_HUB_NODE_BY_ID = Object.freeze(
     return nodeMap;
   }, {}),
 );
+const DOCUMENT_HUB_NODE_ID_BY_REQUEST_TYPE = Object.freeze(
+  DOCUMENT_HUB_NODES.reduce((nodeMap, node) => {
+    if (node.requestType) {
+      nodeMap[node.requestType] = node.id;
+    }
+    return nodeMap;
+  }, {}),
+);
 const OUTPUT_FORMAT_LABELS = Object.freeze({
   xlsx: "Excel(.xlsx)",
   pptx: "PowerPoint(.pptx)",
@@ -1782,6 +1790,8 @@ function App() {
   const [selectedDocumentHubNodeId, setSelectedDocumentHubNodeId] = useState(
     DOCUMENT_HUB_DEFAULT_NODE_ID,
   );
+  const [isDocumentGenerationModalOpen, setIsDocumentGenerationModalOpen] =
+    useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsStartDate, setSettingsStartDate] = useState("");
@@ -2250,6 +2260,7 @@ function App() {
       setLastCommandInfo(null);
       setSelectedDocumentIds([]);
       setSelectedDocumentHubNodeId(DOCUMENT_HUB_DEFAULT_NODE_ID);
+      setIsDocumentGenerationModalOpen(false);
       setIsChatPopupOpen(false);
       setDocumentError("");
       setDocumentStatusMessage("");
@@ -2464,6 +2475,7 @@ function App() {
     setDeletingConversationId("");
     setLastCommandInfo(null);
     setSelectedDocumentIds([]);
+    setIsDocumentGenerationModalOpen(false);
     setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
@@ -2486,6 +2498,7 @@ function App() {
     setDeletingConversationId("");
     setLastCommandInfo(null);
     setSelectedDocumentIds([]);
+    setIsDocumentGenerationModalOpen(false);
     setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
@@ -3302,6 +3315,14 @@ function App() {
   const handleSelectDocumentHubNode = (nodeId) => {
     if (!DOCUMENT_HUB_NODE_BY_ID[nodeId]) return;
     setSelectedDocumentHubNodeId(nodeId);
+    setIsDocumentGenerationModalOpen(true);
+    setDocumentError("");
+    setDocumentStatusMessage("");
+  };
+
+  const handleCloseDocumentGenerationModal = () => {
+    if (isResponding || isUploadingDocument) return;
+    setIsDocumentGenerationModalOpen(false);
     setDocumentError("");
     setDocumentStatusMessage("");
   };
@@ -3419,6 +3440,7 @@ function App() {
       await saveCommandUsage(project.projectId, messageText);
       setLastCommandInfo({ commandText: messageText });
       await loadUploadedFiles(backendResult.project ?? project);
+      setIsDocumentGenerationModalOpen(false);
     } catch (error) {
       reportUiError("handleHubDocumentChoice", error, {
         projectId: project?.projectId,
@@ -3621,8 +3643,51 @@ function App() {
         messageText: trimmedValue,
         targetProject,
       });
+      const openDocumentGenerationModalFromChat = async () => {
+        const nodeId =
+          DOCUMENT_HUB_NODE_ID_BY_REQUEST_TYPE[preparedRequest.requestType];
+        if (!nodeId) return false;
+
+        const localConversationId =
+          targetConversationId || createChatId("conversation");
+        const targetLabel =
+          preparedRequest.documentConfig?.targetLabel || "문서";
+        const assistantMessage = {
+          id: createChatId("assistant"),
+          role: "assistant",
+          content: `${targetLabel} 생성 팝업을 열었습니다. 기준 문서와 파일 형식을 확인한 뒤 생성해 주세요.`,
+          createdAt: formatDateTime(),
+          metadata: {
+            conversationId: localConversationId,
+            state: CHAT_STATES.IDLE,
+            suggestedActions: [],
+            commandActions: [],
+          },
+        };
+        const messageResult = await addMessagesToConversation(
+          targetProject.projectId,
+          localConversationId,
+          [userMessage, assistantMessage],
+        );
+        targetProject = messageResult.project;
+        targetConversationId = localConversationId;
+        setProject(messageResult.project);
+        setActiveConversationIdState(localConversationId);
+        setActiveConversationId(targetProject.projectId, localConversationId);
+        await saveCommandUsage(targetProject.projectId, trimmedValue);
+        setLastCommandInfo({ commandText: trimmedValue });
+        setSelectedDocumentIds([]);
+        setSelectedDocumentHubNodeId(nodeId);
+        setIsDocumentGenerationModalOpen(true);
+        setDocumentStatusMessage("");
+        setIsChatPopupOpen(true);
+        return true;
+      };
 
       if (preparedRequest.status === "UPLOAD_REQUIRED") {
+        if (await openDocumentGenerationModalFromChat()) {
+          return;
+        }
         await sendLocalRequiredInfoMessage({
           targetProject,
           targetConversationId,
@@ -3647,6 +3712,9 @@ function App() {
       }
 
       if (preparedRequest.status === "DOCUMENT_CHOICE_REQUIRED") {
+        if (await openDocumentGenerationModalFromChat()) {
+          return;
+        }
         await sendLocalRequiredInfoMessage({
           targetProject,
           targetConversationId,
@@ -4487,22 +4555,29 @@ function App() {
 
       <DocumentGenerationHub
         project={project}
-        fileBuckets={fileBuckets}
         nodes={documentHubNodes}
         selectedNode={selectedDocumentHubNode}
-        selectedRequest={selectedDocumentHubRequest}
         isSidebarDrawerOpen={isSidebarDrawerOpen}
-        isLoadingDocuments={isLoadingUploadedFiles}
-        isResponding={isResponding}
-        isUploadingDocument={isUploadingDocument}
-        generationProgress={generationProgress}
-        documentError={documentError}
-        documentStatusMessage={documentStatusMessage}
         onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
         onSelectNode={handleSelectDocumentHubNode}
-        onGenerate={handleHubDocumentChoice}
-        onUploadFiles={handleHubUploadFiles}
       />
+
+      {isDocumentGenerationModalOpen && (
+        <DocumentGenerationModal
+          selectedNode={selectedDocumentHubNode}
+          selectedRequest={selectedDocumentHubRequest}
+          isResponding={isResponding}
+          isUploadingDocument={isUploadingDocument}
+          generationProgress={generationProgress}
+          isLoadingDocuments={isLoadingUploadedFiles}
+          documentError={documentError}
+          documentStatusMessage={documentStatusMessage}
+          onClose={handleCloseDocumentGenerationModal}
+          onSelectNode={handleSelectDocumentHubNode}
+          onGenerate={handleHubDocumentChoice}
+          onUploadFiles={handleHubUploadFiles}
+        />
+      )}
 
       <FloatingChatButton
         isOpen={isChatPopupOpen}
@@ -4637,29 +4712,12 @@ function App() {
 
 function DocumentGenerationHub({
   project,
-  fileBuckets,
   nodes,
   selectedNode,
-  selectedRequest,
   isSidebarDrawerOpen,
-  isLoadingDocuments,
-  isResponding,
-  isUploadingDocument,
-  generationProgress,
-  documentError,
-  documentStatusMessage,
   onOpenSidebar,
   onSelectNode,
-  onGenerate,
-  onUploadFiles,
 }) {
-  const uploadedCount = fileBuckets.uploaded?.length ?? 0;
-  const generatedCount = fileBuckets.generated?.length ?? 0;
-  const readyCount = nodes.filter((node) => node.isReady).length;
-  const generatableNodes = nodes.filter((node) => node.isGeneratable);
-  const currentGeneratableLabel =
-    generatableNodes.map((node) => node.label).join(", ") || "준비 중";
-
   return (
     <section className="document-hub-panel" aria-label="문서 생성 허브">
       <header className="document-hub-header">
@@ -4677,88 +4735,23 @@ function DocumentGenerationHub({
         </div>
         <div className="document-hub-title">
           <strong>문서 생성</strong>
-          <span>
-            업로드한 문서와 생성된 산출물을 기준으로 다음에 만들 수 있는
-            문서를 확인하세요.
-          </span>
+          <span>문서 간 관계를 확인하고 생성할 문서를 선택하세요.</span>
         </div>
-        <dl className="document-hub-meta" aria-label="프로젝트 문서 정보">
-          <div>
-            <dt>프로젝트</dt>
-            <dd>{project.projectName || project.projectId}</dd>
-          </div>
-          <div>
-            <dt>시작일</dt>
-            <dd>{getProjectStartDate(project) || "미입력"}</dd>
-          </div>
-          <div>
-            <dt>업로드</dt>
-            <dd>{uploadedCount}개</dd>
-          </div>
-          <div>
-            <dt>생성</dt>
-            <dd>{generatedCount}개</dd>
-          </div>
-        </dl>
       </header>
 
       <div className="document-hub-scroll">
-        <section className="document-hub-overview" aria-label="프로젝트 문서 상태">
+        <section className="document-hub-intro" aria-label="문서 생성 안내">
           <div>
-            <p className="document-hub-eyebrow">프로젝트 문서 상태</p>
-            <h2>문서 흐름</h2>
-            <p>
-              기준 문서가 준비되면 관계도에서 다음 산출물이 자동으로
-              활성화됩니다.
-            </p>
-          </div>
-          <div className="document-hub-current-card">
-            <span>현재 생성 가능</span>
-            <strong>{currentGeneratableLabel}</strong>
-            <small>준비 문서 {readyCount}개</small>
+            <h2>생성 가능한 문서를 선택하세요</h2>
+            <p>문서 간 관계를 확인하고 카드를 클릭하면 생성 팝업이 열립니다.</p>
           </div>
         </section>
-
-        <DocumentStatusSummary nodes={nodes} />
 
         <DocumentRelationMap
           nodes={nodes}
           selectedNodeId={selectedNode?.id}
           onSelectNode={onSelectNode}
         />
-
-        <DocumentGenerationPanel
-          selectedNode={selectedNode}
-          selectedRequest={selectedRequest}
-          isResponding={isResponding}
-          isUploadingDocument={isUploadingDocument}
-          generationProgress={generationProgress}
-          isLoadingDocuments={isLoadingDocuments}
-          documentError={documentError}
-          documentStatusMessage={documentStatusMessage}
-          onSelectNode={onSelectNode}
-          onGenerate={onGenerate}
-          onUploadFiles={onUploadFiles}
-        />
-      </div>
-    </section>
-  );
-}
-
-function DocumentStatusSummary({ nodes }) {
-  return (
-    <section className="document-status-summary" aria-label="문서 상태 요약">
-      <div className="document-status-summary__header">
-        <strong>상태 요약</strong>
-        <span>업로드 문서와 생성 산출물을 함께 반영합니다.</span>
-      </div>
-      <div className="document-status-grid">
-        {nodes.map((node) => (
-          <div className="document-status-row" key={node.id}>
-            <span>{node.label}</span>
-            <DocumentStatusChip label={node.statusLabel} tone={node.statusTone} />
-          </div>
-        ))}
       </div>
     </section>
   );
@@ -4770,14 +4763,14 @@ function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
       <div className="document-map-card__header">
         <div>
           <h2>문서 관계도</h2>
-          <p>카드를 클릭하면 아래 생성 패널이 해당 문서로 바뀝니다.</p>
+          <p>카드를 클릭하면 해당 문서 생성 팝업이 열립니다.</p>
         </div>
       </div>
       <div className="document-map">
         <div className="document-map__canvas">
           <svg
             className="document-map__edges"
-            viewBox="0 0 900 430"
+            viewBox="0 0 1320 540"
             aria-hidden="true"
           >
             <defs>
@@ -4802,23 +4795,23 @@ function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
             </defs>
             <path
               className="document-map__edge is-required"
-              d="M212 168 C240 168 248 210 270 210"
+              d="M262 202 C310 202 330 230 382 230"
             />
             <path
               className="document-map__edge is-optional"
-              d="M212 292 C250 326 258 244 270 232"
+              d="M262 418 C318 418 328 280 382 260"
             />
             <path
               className="document-map__edge is-required"
-              d="M470 214 C500 214 500 156 515 156"
+              d="M682 230 C742 230 756 180 800 180"
             />
             <path
               className="document-map__edge is-required"
-              d="M470 232 C500 242 500 302 515 302"
+              d="M682 258 C742 292 756 406 800 406"
             />
             <path
               className="document-map__edge is-required"
-              d="M695 156 C715 156 712 218 720 220"
+              d="M1022 180 C1062 180 1082 180 1120 180"
             />
           </svg>
           {nodes.map((node) => (
@@ -4863,8 +4856,8 @@ function DocumentNodeCard({ node, isSelected, onSelectNode }) {
       onKeyDown={handleKeyDown}
     >
       <div className="document-node__header">
-        <strong>{node.label}</strong>
         <DocumentStatusChip label={node.statusLabel} tone={node.statusTone} />
+        <strong>{node.label}</strong>
       </div>
       <p>{getDocumentNodeDescription(node)}</p>
       <dl className="document-node__meta">
@@ -4872,32 +4865,7 @@ function DocumentNodeCard({ node, isSelected, onSelectNode }) {
           <dt>{node.kind === "target" ? "기준" : "역할"}</dt>
           <dd>{node.basisLabel}</dd>
         </div>
-        {node.nextNodes.length > 0 && (
-          <div>
-            <dt>다음</dt>
-            <dd>{node.nextNodes.map((nextNode) => nextNode.label).join(", ")}</dd>
-          </div>
-        )}
       </dl>
-      {node.nextNodes.length > 0 && node.isReady && (
-        <div className="document-node__next">
-          <span>이 문서로 만들 수 있는 산출물</span>
-          <div>
-            {node.nextNodes.map((nextNode) => (
-              <button
-                key={nextNode.id}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onSelectNode(nextNode.id);
-                }}
-              >
-                {nextNode.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       <span className="document-node__action">{node.actionLabel}</span>
     </article>
   );
@@ -4925,10 +4893,15 @@ function getDocumentNodeDescription(node) {
 }
 
 function DocumentStatusChip({ label, tone }) {
-  return <span className={`document-status-chip is-${tone}`}>{label}</span>;
+  return (
+    <span className={`document-status-chip is-${tone}`}>
+      <span className="document-status-light" aria-hidden="true" />
+      <span>{label}</span>
+    </span>
+  );
 }
 
-function DocumentGenerationPanel({
+function DocumentGenerationModal({
   selectedNode,
   selectedRequest,
   isResponding,
@@ -4937,6 +4910,7 @@ function DocumentGenerationPanel({
   isLoadingDocuments,
   documentError,
   documentStatusMessage,
+  onClose,
   onSelectNode,
   onGenerate,
   onUploadFiles,
@@ -4949,53 +4923,83 @@ function DocumentGenerationPanel({
       !selectedNode.isReady &&
       !selectedRequest?.documents?.length,
   );
+  const modalTitle = selectedNode?.requestType
+    ? `${selectedNode.label} 생성`
+    : selectedNode?.label || "문서 생성";
+  const isCloseDisabled = isResponding || isUploadingDocument;
 
   return (
-    <section className="document-generation-panel" aria-label="선택 문서 생성">
-      <div className="document-generation-panel__status">
-        {(documentError || documentStatusMessage || isUploadingDocument) && (
-          <div
-            className={`attachment-status ${documentError ? "is-error" : ""}`}
-            role="status"
-          >
-            {isUploadingDocument
-              ? "파일을 업로드하는 중입니다."
-              : documentError || documentStatusMessage}
+    <div className="modal-backdrop document-generation-modal-backdrop">
+      <section
+        className="document-generation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="document-generation-modal-title"
+      >
+        <header className="document-generation-modal__header">
+          <div>
+            <span>문서 생성</span>
+            <h2 id="document-generation-modal-title">{modalTitle}</h2>
           </div>
-        )}
-        {isResponding && generationProgress && (
-          <GenerationSubProgress progressState={generationProgress} />
-        )}
-      </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            disabled={isCloseDisabled}
+            aria-label="문서 생성 팝업 닫기"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
 
-      {DOCUMENT_HUB_SOURCE_NODE_IDS.includes(selectedNode?.id) ? (
-        <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
-      ) : shouldShowPrerequisiteGuide ? (
-        <BlockedDocumentPanel
-          node={selectedNode}
-          prerequisiteNode={prerequisiteNode}
-          onSelectNode={onSelectNode}
-        />
-      ) : selectedRequest ? (
-        <div className="document-generation-panel__choice">
-          {isLoadingDocuments && (
-            <div className="file-manager-loading" role="status">
-              <LoaderCircle size={18} aria-hidden="true" />
-              문서 상태를 불러오는 중입니다.
+        <div className="document-generation-modal__body">
+          <div className="document-generation-modal__status">
+            {(documentError || documentStatusMessage || isUploadingDocument) && (
+              <div
+                className={`attachment-status ${documentError ? "is-error" : ""}`}
+                role="status"
+              >
+                {isUploadingDocument
+                  ? "파일을 업로드하는 중입니다."
+                  : documentError || documentStatusMessage}
+              </div>
+            )}
+            {isResponding && generationProgress && (
+              <GenerationSubProgress progressState={generationProgress} />
+            )}
+          </div>
+
+          {DOCUMENT_HUB_SOURCE_NODE_IDS.includes(selectedNode?.id) ? (
+            <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
+          ) : shouldShowPrerequisiteGuide ? (
+            <BlockedDocumentPanel
+              node={selectedNode}
+              prerequisiteNode={prerequisiteNode}
+              onSelectNode={onSelectNode}
+            />
+          ) : selectedRequest ? (
+            <div className="document-generation-modal__choice">
+              {isLoadingDocuments && (
+                <div className="file-manager-loading" role="status">
+                  <LoaderCircle size={18} aria-hidden="true" />
+                  문서 상태를 불러오는 중입니다.
+                </div>
+              )}
+              <DefaultDocumentChoicePanel
+                request={selectedRequest}
+                isDisabled={isResponding}
+                isUploading={isUploadingDocument}
+                onChoice={onGenerate}
+                onUploadFiles={onUploadFiles}
+                onCancel={onClose}
+              />
             </div>
+          ) : (
+            <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
           )}
-          <DefaultDocumentChoicePanel
-            request={selectedRequest}
-            isDisabled={isResponding}
-            isUploading={isUploadingDocument}
-            onChoice={onGenerate}
-            onUploadFiles={onUploadFiles}
-          />
         </div>
-      ) : (
-        <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
-      )}
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -6979,6 +6983,7 @@ function DefaultDocumentChoicePanel({
   isUploading = false,
   onChoice,
   onUploadFiles,
+  onCancel = null,
 }) {
   const panelId = useId().replace(/:/g, "");
   const documents = Array.isArray(request?.documents) ? request.documents : [];
@@ -7364,6 +7369,16 @@ function DefaultDocumentChoicePanel({
         />
       )}
       <div className="document-choice-actions">
+        {onCancel && (
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={isDisabled || isUploading}
+            onClick={(event) => handlePanelAction(event, onCancel)}
+          >
+            취소
+          </button>
+        )}
         <button
           className="message-upload-button"
           type="button"
