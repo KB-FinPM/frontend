@@ -4,12 +4,16 @@ import {
   Bot,
   BriefcaseBusiness,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Download,
   FileText,
   FolderOpen,
   LoaderCircle,
   LogOut,
+  Maximize2,
   Menu,
+  Minimize2,
   Pencil,
   PlusCircle,
   Save,
@@ -1678,6 +1682,7 @@ const buildGenerationProgressFromStatus = (
       normalizedProgress.displayText ||
       getGenerationProgressDisplayText(generationProgress),
     label: GENERATION_PROGRESS_LABEL,
+    rawProgress: generationProgress,
     subProgressItems: normalizedProgress.subProgressItems,
     largeDocumentHint: normalizedProgress.largeDocumentHint,
   };
@@ -1724,6 +1729,7 @@ const buildGenerationFailureProgress = (failedIndex, sourceProgress = null) => {
     progress: sourceProgress?.progress ?? failedStep.progress,
     displayText: sourceProgress?.displayText || "생성 실패",
     label: sourceProgress?.label || GENERATION_PROGRESS_LABEL,
+    rawProgress: sourceProgress?.rawProgress ?? null,
     subProgressItems: sourceProgress?.subProgressItems ?? [],
     largeDocumentHint: sourceProgress?.largeDocumentHint ?? false,
     steps: GENERATION_PROGRESS_STEPS.map((step, index) => {
@@ -1849,6 +1855,7 @@ function App() {
   const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
   const [isProgressMinimized, setIsProgressMinimized] = useState(false);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
   const [fileBuckets, setFileBuckets] = useState({ uploaded: [], generated: [] });
   const [activeFileManagerTab, setActiveFileManagerTab] = useState(
@@ -1882,6 +1889,7 @@ function App() {
     status: "NOT_STARTED",
   });
   const [isTodoImportOpen, setIsTodoImportOpen] = useState(false);
+  const [isChatMaximized, setIsChatMaximized] = useState(false);
   const [todoImportDocumentType, setTodoImportDocumentType] = useState(
     DOCUMENT_TYPES.MEETING_NOTES,
   );
@@ -2056,12 +2064,18 @@ function App() {
 
   const completeGenerationProgress = (statusResponse = null, requestType = "") => {
     clearGenerationPolling();
+    const sourceProgress = statusResponse
+      ? buildGenerationProgressFromStatus(statusResponse, "COMPLETED", 100)
+      : null;
     const completedProgress = {
       ...buildGenerationProgress(100, "COMPLETED"),
       displayText: "완료",
       label: `${
         getGenerationTargetInfo(requestType).targetDocumentLabel
       } 생성 완료`,
+      rawProgress: sourceProgress?.rawProgress ?? null,
+      subProgressItems: sourceProgress?.subProgressItems ?? [],
+      largeDocumentHint: sourceProgress?.largeDocumentHint ?? false,
     };
     const downloadFiles = getGenerationDownloadFiles(statusResponse ?? {});
     setGenerationProgress(completedProgress);
@@ -4694,7 +4708,7 @@ function App() {
     <main
       className={`chat-app-shell ${
         isSidebarDrawerOpen ? "is-sidebar-open" : ""
-      }`}
+      } ${isSidebarCollapsed ? "is-sidebar-collapsed" : ""}`}
     >
       <button
         className="sidebar-backdrop"
@@ -4727,6 +4741,10 @@ function App() {
         onCancelDeleteConversation={() => setDeletingConversationId("")}
         onDeleteConversation={handleDeleteConversation}
         onCloseDrawer={() => setIsSidebarDrawerOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() =>
+          setIsSidebarCollapsed((currentCollapsed) => !currentCollapsed)
+        }
       />
 
       <DocumentGenerationHub
@@ -4768,7 +4786,12 @@ function App() {
       <FloatingChatButton
         isOpen={isChatPopupOpen}
         isBusy={isResponding}
-        onClick={() => setIsChatPopupOpen((isOpen) => !isOpen)}
+        onClick={() => {
+          if (isChatPopupOpen) {
+            setIsChatMaximized(false);
+          }
+          setIsChatPopupOpen((isOpen) => !isOpen);
+        }}
       />
 
       {isChatPopupOpen && (
@@ -4783,7 +4806,14 @@ function App() {
           documentStatusMessage={documentStatusMessage}
           commandRecommendations={commandRecommendations}
           scrollRef={scrollRef}
-          onClose={() => setIsChatPopupOpen(false)}
+          onClose={() => {
+            setIsChatPopupOpen(false);
+            setIsChatMaximized(false);
+          }}
+          isMaximized={isChatMaximized}
+          onToggleMaximized={() =>
+            setIsChatMaximized((currentMaximized) => !currentMaximized)
+          }
           conversations={conversations}
           activeConversationId={activeConversationId}
           editingConversationId={editingConversationId}
@@ -5245,7 +5275,7 @@ function getGenerationJobProgress(job) {
 function getGenerationJobStageText(job) {
   if (!job) return "";
   if (job.status === GENERATION_JOB_STATUS.COMPLETED) {
-    return "다운로드 가능";
+    return "생성 완료";
   }
   if (job.status === GENERATION_JOB_STATUS.FAILED) {
     return job.errorMessage || "문서 생성 중 오류가 발생했습니다.";
@@ -5260,6 +5290,341 @@ function getGenerationJobStageText(job) {
     runningStep?.name ||
     progressState.label ||
     "진행 상태를 확인하고 있습니다."
+  );
+}
+
+const GENERATION_AGENT_ORDER = [
+  { key: "input", label: "Input Agent" },
+  { key: "generation", label: "Generation Agent" },
+  { key: "validation", label: "Validation Agent" },
+  { key: "output", label: "Output Agent" },
+];
+
+const normalizeProgressStatus = (value = "") => {
+  const statusText = String(value || "").toLowerCase();
+  if (
+    statusText.includes("complete") ||
+    statusText.includes("done") ||
+    statusText.includes("success") ||
+    statusText.includes("executed") ||
+    statusText.includes("완료")
+  ) {
+    return "completed";
+  }
+  if (
+    statusText.includes("running") ||
+    statusText.includes("executing") ||
+    statusText.includes("progress") ||
+    statusText.includes("processing") ||
+    statusText.includes("진행")
+  ) {
+    return "running";
+  }
+  if (
+    statusText.includes("fail") ||
+    statusText.includes("error") ||
+    statusText.includes("오류") ||
+    statusText.includes("실패")
+  ) {
+    return "failed";
+  }
+  if (statusText.includes("skip") || statusText.includes("건너")) {
+    return "skipped";
+  }
+  return "waiting";
+};
+
+const getProgressCountValue = (...values) => {
+  for (const value of values) {
+    const numericValue = toFiniteNumber(value);
+    if (numericValue !== null) return numericValue;
+  }
+  return null;
+};
+
+const createProgressUnitItem = (label, current, total) => {
+  if (current === null || total === null || total <= 0) return null;
+  return {
+    label,
+    text: `${label} ${formatProgressCount(current)} / ${formatProgressCount(total)}`,
+  };
+};
+
+const addProgressUnitItem = (items, item) => {
+  if (!item) return;
+  const key = item.label.toLowerCase();
+  if (items.some((currentItem) => currentItem.label.toLowerCase() === key)) return;
+  items.push(item);
+};
+
+const getGenerationUnitProgressItems = (progressState = {}) => {
+  const rawProgress = progressState?.rawProgress ?? {};
+  const items = [];
+
+  addProgressUnitItem(
+    items,
+    createProgressUnitItem(
+      "Chunk",
+      getProgressCountValue(
+        rawProgress.chunk_current,
+        rawProgress.chunk?.current,
+        rawProgress.chunks?.current,
+      ),
+      getProgressCountValue(
+        rawProgress.chunk_total,
+        rawProgress.chunk?.total,
+        rawProgress.chunks?.total,
+      ),
+    ),
+  );
+
+  addProgressUnitItem(
+    items,
+    createProgressUnitItem(
+      "Batch",
+      getProgressCountValue(
+        rawProgress.batch_current,
+        rawProgress.batch?.current,
+        rawProgress.batches?.current,
+        rawProgress.batch_progress?.current,
+      ),
+      getProgressCountValue(
+        rawProgress.batch_total,
+        rawProgress.batch?.total,
+        rawProgress.batches?.total,
+        rawProgress.batch_progress?.total,
+      ),
+    ),
+  );
+
+  const subProgressItems = Array.isArray(progressState?.subProgressItems)
+    ? progressState.subProgressItems
+    : [];
+  subProgressItems.forEach((item) => {
+    const itemText = `${item.type || ""} ${item.label || ""} ${
+      item.message || ""
+    }`.toLowerCase();
+    if (!itemText.includes("chunk") && !itemText.includes("batch")) return;
+    addProgressUnitItem(
+      items,
+      createProgressUnitItem(
+        itemText.includes("batch") ? "Batch" : "Chunk",
+        item.current,
+        item.total,
+      ),
+    );
+  });
+
+  const rawText = `${rawProgress.unit || ""} ${rawProgress.label || ""} ${
+    rawProgress.progress_text || ""
+  }`.toLowerCase();
+  if (rawText.includes("chunk") || rawText.includes("batch")) {
+    addProgressUnitItem(
+      items,
+      createProgressUnitItem(
+        rawText.includes("batch") ? "Batch" : "Chunk",
+        getProgressCountValue(rawProgress.current),
+        getProgressCountValue(rawProgress.total),
+      ),
+    );
+  }
+
+  return items;
+};
+
+const getAgentLabel = (value = "") => {
+  const normalizedValue = String(value || "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  const lowerValue = normalizedValue.toLowerCase();
+  if (lowerValue.includes("input")) return "Input Agent";
+  if (lowerValue.includes("validation") || lowerValue.includes("validate")) {
+    return "Validation Agent";
+  }
+  if (lowerValue.includes("output") || lowerValue.includes("export")) {
+    return "Output Agent";
+  }
+  if (
+    lowerValue.includes("generation") ||
+    lowerValue.includes("generator") ||
+    lowerValue.includes("document")
+  ) {
+    return "Generation Agent";
+  }
+  return normalizedValue || "Generation Agent";
+};
+
+const getAgentStatusFromPayload = (agentValue) => {
+  if (!agentValue || typeof agentValue !== "object") {
+    return normalizeProgressStatus(agentValue);
+  }
+  return normalizeProgressStatus(
+    agentValue.status ??
+      agentValue.state ??
+      agentValue.phase ??
+      agentValue.result ??
+      agentValue.progress_status,
+  );
+};
+
+const getGenerationAgentItemsFromPayload = (progressState = {}) => {
+  const rawProgress = progressState?.rawProgress ?? {};
+  const candidateSources = [
+    rawProgress.agent_statuses,
+    rawProgress.agent_status,
+    rawProgress.agents,
+    rawProgress.agent_steps,
+    rawProgress.steps,
+  ];
+
+  for (const source of candidateSources) {
+    if (!source) continue;
+    const entries = Array.isArray(source)
+      ? source.map((agent, index) => [agent?.name || agent?.agent || index, agent])
+      : Object.entries(source);
+    const agentItems = entries
+      .map(([key, value]) => ({
+        label: getAgentLabel(value?.label || value?.name || value?.agent || key),
+        status: getAgentStatusFromPayload(value),
+      }))
+      .filter((item) => item.label);
+    if (agentItems.length) {
+      return agentItems;
+    }
+  }
+
+  return [];
+};
+
+const getFallbackGenerationAgentItems = (progressState = {}, jobStatus, stageText) => {
+  if (jobStatus === GENERATION_JOB_STATUS.COMPLETED) {
+    return GENERATION_AGENT_ORDER.map((agent) => ({
+      ...agent,
+      status: "completed",
+    }));
+  }
+
+  const lowerText = `${progressState?.stage || ""} ${stageText || ""}`.toLowerCase();
+  let activeAgentIndex = 1;
+  if (
+    lowerText.includes("input") ||
+    lowerText.includes("요청") ||
+    lowerText.includes("업로드") ||
+    lowerText.includes("분석")
+  ) {
+    activeAgentIndex = 0;
+  } else if (lowerText.includes("validation") || lowerText.includes("검증")) {
+    activeAgentIndex = 2;
+  } else if (
+    lowerText.includes("output") ||
+    lowerText.includes("export") ||
+    lowerText.includes("파일") ||
+    lowerText.includes("저장")
+  ) {
+    activeAgentIndex = 3;
+  }
+
+  return GENERATION_AGENT_ORDER.map((agent, index) => {
+    if (jobStatus === GENERATION_JOB_STATUS.FAILED) {
+      return {
+        ...agent,
+        status:
+          index < activeAgentIndex
+            ? "completed"
+            : index === activeAgentIndex
+              ? "failed"
+              : "waiting",
+      };
+    }
+    return {
+      ...agent,
+      status:
+        index < activeAgentIndex
+          ? "completed"
+          : index === activeAgentIndex
+            ? "running"
+            : "waiting",
+    };
+  });
+};
+
+const getGenerationAgentItems = (progressState, jobStatus, stageText) => {
+  const payloadItems = getGenerationAgentItemsFromPayload(progressState);
+  return payloadItems.length
+    ? payloadItems
+    : getFallbackGenerationAgentItems(progressState, jobStatus, stageText);
+};
+
+const getAgentStatusLabel = (status) => {
+  if (status === "completed") return "완료";
+  if (status === "running") return "진행 중";
+  if (status === "failed") return "실패";
+  if (status === "skipped") return "건너뜀";
+  return "대기";
+};
+
+function GenerationStagePanel({ status, stageText }) {
+  const isRunning = status === GENERATION_JOB_STATUS.RUNNING;
+  const isCompleted = status === GENERATION_JOB_STATUS.COMPLETED;
+  const isFailed = status === GENERATION_JOB_STATUS.FAILED;
+
+  return (
+    <section className="generation-progress-section generation-progress-current-stage">
+      <span>현재 단계</span>
+      <strong>
+        {isRunning && (
+          <LoaderCircle
+            className="generation-progress-spinner"
+            size={18}
+            aria-hidden="true"
+          />
+        )}
+        {isCompleted && <Check size={18} aria-hidden="true" />}
+        {isFailed && <X size={18} aria-hidden="true" />}
+        {stageText}
+      </strong>
+    </section>
+  );
+}
+
+function GenerationUnitProgress({ items }) {
+  if (!items.length) return null;
+  return (
+    <section className="generation-progress-section generation-progress-units">
+      <span>처리 단위</span>
+      <div>
+        {items.map((item) => (
+          <strong key={item.label}>{item.text}</strong>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function GenerationAgentStatusList({ items }) {
+  if (!items.length) return null;
+  return (
+    <section className="generation-progress-section generation-agent-status">
+      <span>에이전트 수행 상태</span>
+      <div className="generation-agent-status__list">
+        {items.map((item) => (
+          <div
+            className={`generation-agent-status__item is-${item.status}`}
+            key={`${item.label}-${item.status}`}
+          >
+            <span className="generation-agent-status__indicator" aria-hidden="true">
+              {item.status === "completed" && <Check size={13} />}
+              {item.status === "running" && (
+                <LoaderCircle className="generation-progress-spinner" size={13} />
+              )}
+              {item.status === "failed" && <X size={13} />}
+            </span>
+            <strong>{item.label}</strong>
+            <small>{getAgentStatusLabel(item.status)}</small>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -5292,6 +5657,15 @@ function GenerationProgressSurface({
   const isRunning = job.status === GENERATION_JOB_STATUS.RUNNING;
   const isCompleted = job.status === GENERATION_JOB_STATUS.COMPLETED;
   const isFailed = job.status === GENERATION_JOB_STATUS.FAILED;
+  const unitItems = getGenerationUnitProgressItems(job.progressState);
+  const agentItems = getGenerationAgentItems(
+    job.progressState,
+    job.status,
+    stageText,
+  );
+  const completedFileMessage = `${
+    job.downloadFiles?.[0]?.file_name || `${targetLabel} 파일`
+  }이 생성되었습니다.`;
   const title = isCompleted
     ? `${targetLabel} 생성 완료`
     : isFailed
@@ -5330,27 +5704,18 @@ function GenerationProgressSurface({
             </header>
 
             <div className="generation-progress-modal__body">
-              {isCompleted ? (
-                <p>
-                  {(job.downloadFiles?.[0]?.file_name ||
-                    `${targetLabel} 파일`) + "이 생성되었습니다."}
-                </p>
-              ) : isFailed ? (
-                <p>{stageText}</p>
-              ) : (
-                <>
-                  <p>문서를 분석하고 산출물을 생성하고 있습니다.</p>
-                  <ProgressBar
-                    progress={progress}
-                    label={`${progress}%`}
-                    title="전체 진행률"
-                  />
-                  <div className="generation-progress-stage">
-                    <span>현재 단계</span>
-                    <strong>{stageText}</strong>
-                  </div>
-                  <GenerationSubProgress progressState={job.progressState} />
-                </>
+              <GenerationStagePanel status={job.status} stageText={stageText} />
+              <section className="generation-progress-section generation-progress-overall">
+                <ProgressBar
+                  progress={progress}
+                  label={`${progress}%`}
+                  title="전체 진행률"
+                />
+              </section>
+              <GenerationUnitProgress items={unitItems} />
+              <GenerationAgentStatusList items={agentItems} />
+              {isCompleted && (
+                <p className="generation-progress-result">{completedFileMessage}</p>
               )}
             </div>
 
@@ -5464,6 +5829,8 @@ function ChatPopup({
   commandRecommendations,
   scrollRef,
   onClose,
+  isMaximized,
+  onToggleMaximized,
   conversations,
   activeConversationId,
   editingConversationId,
@@ -5493,14 +5860,9 @@ function ChatPopup({
     setIsHistoryOpen(false);
     onSelectConversation(conversationId);
   };
-  const handleSaveConversation = () => {
-    if (!activeConversation) return;
-    setIsHistoryOpen(true);
-    onEditConversation(activeConversation);
-  };
 
   return (
-    <div className="chat-popup-shell">
+    <div className={`chat-popup-shell ${isMaximized ? "is-maximized" : ""}`}>
       <nav className="chat-bookmark-rail" aria-label="채팅 빠른 메뉴">
         <button
           type="button"
@@ -5509,14 +5871,6 @@ function ChatPopup({
         >
           <FolderOpen size={15} aria-hidden="true" />
           이전
-        </button>
-        <button
-          type="button"
-          disabled={!activeConversation}
-          onClick={handleSaveConversation}
-        >
-          <Save size={15} aria-hidden="true" />
-          저장
         </button>
         <button type="button" onClick={onNewChat}>
           <PlusCircle size={15} aria-hidden="true" />
@@ -5589,14 +5943,29 @@ function ChatPopup({
             {project.projectName} · {project.projectId}
           </small>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          onClick={onClose}
-          aria-label="채팅 팝업 닫기"
-        >
-          <X size={18} aria-hidden="true" />
-        </button>
+        <div className="chat-popup__header-actions">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onToggleMaximized}
+            aria-label={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
+            title={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
+          >
+            {isMaximized ? (
+              <Minimize2 size={17} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={17} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="채팅 팝업 닫기"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="chat-popup__thread">
@@ -5849,9 +6218,14 @@ function ProjectSidebar({
   onCancelDeleteConversation,
   onDeleteConversation,
   onCloseDrawer,
+  isCollapsed,
+  onToggleCollapsed,
 }) {
   return (
-    <aside className="project-sidebar" aria-label="프로젝트 정보">
+    <aside
+      className={`project-sidebar ${isCollapsed ? "is-collapsed" : ""}`}
+      aria-label="프로젝트 정보"
+    >
       <div className="sidebar-brand">
         <div className="app-brand" aria-label="KB FinPM Agent">
           <img
@@ -5864,6 +6238,19 @@ function ProjectSidebar({
             <span>KB Hackathon</span>
           </div>
         </div>
+        <button
+          className="sidebar-collapse-button"
+          type="button"
+          aria-label={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+          title={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+          onClick={onToggleCollapsed}
+        >
+          {isCollapsed ? (
+            <ChevronRight size={18} aria-hidden="true" />
+          ) : (
+            <ChevronLeft size={18} aria-hidden="true" />
+          )}
+        </button>
         <button
           className="sidebar-close-button"
           type="button"
@@ -5906,27 +6293,30 @@ function ProjectSidebar({
         className="secondary-button"
         type="button"
         onClick={onOpenFileManager}
+        title="업로드 파일 목록"
       >
         <FileText size={16} aria-hidden="true" />
-        업로드 파일 목록
+        <span className="sidebar-action-label">업로드 파일 목록</span>
       </button>
 
       <button
         className="secondary-button"
         type="button"
         onClick={onOpenTodoManager}
+        title="할일 관리"
       >
         <Check size={16} aria-hidden="true" />
-        할일 관리
+        <span className="sidebar-action-label">할일 관리</span>
       </button>
 
       <button
         className="secondary-button"
         type="button"
         onClick={onChangeProject}
+        title="프로젝트 변경"
       >
         <LogOut size={16} aria-hidden="true" />
-        프로젝트 변경
+        <span className="sidebar-action-label">프로젝트 변경</span>
       </button>
     </aside>
   );
@@ -7468,7 +7858,6 @@ function DefaultDocumentChoicePanel({
   const primaryUseName = `${panelId}-primary-use-existing`;
   const optionalUseName = `${panelId}-optional-use-existing`;
   const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
-  const panelTitle = documentConfig.panelTitle || `${targetLabel} 생성`;
   const actionLabel =
     documentConfig.actionLabel || DOCUMENT_GENERATION_COPY.generate;
   const primaryLabel = primarySource?.label || "기준 문서";
@@ -7570,7 +7959,6 @@ function DefaultDocumentChoicePanel({
 
   return (
     <div className="message-document-choice-panel">
-      <strong className="document-choice-title">{panelTitle}</strong>
       <section className="document-choice-section document-choice-slot">
         <div className="document-choice-file-row">
           <label
