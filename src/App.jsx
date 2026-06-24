@@ -147,6 +147,11 @@ const DOCUMENT_GENERATION_COPY = Object.freeze({
   uploadLabel: "기준 문서 업로드",
   generate: "생성",
 });
+const GENERATION_JOB_STATUS = Object.freeze({
+  RUNNING: "RUNNING",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+});
 const DOCUMENT_HUB_DEFAULT_NODE_ID = "requirement-spec";
 const DOCUMENT_HUB_SOURCE_NODE_IDS = Object.freeze([
   "requirement-definition",
@@ -1424,6 +1429,37 @@ const getDocumentContextConfig = (requestType) => {
   return getRequiredDocumentConfig(requestType);
 };
 
+const getGenerationTargetInfo = (requestType = "") => {
+  const documentConfig = getDocumentContextConfig(requestType);
+  const relation = getRelation(requestType);
+  return {
+    requestType,
+    targetArtifactType:
+      documentConfig?.targetArtifactType || relation?.targetArtifactType || "",
+    targetDocumentLabel:
+      documentConfig?.targetLabel || relation?.targetLabel || "문서",
+  };
+};
+
+const normalizeDownloadFile = (file = {}) => ({
+  ...file,
+  artifact_id:
+    file.artifact_id ?? file.artifactId ?? file.file_id ?? file.fileId ?? "",
+  file_name:
+    file.file_name ?? file.fileName ?? file.name ?? file.original_file_name ?? "",
+});
+
+const getGenerationDownloadFiles = (statusResponse = {}) => {
+  const downloadFileLists = [
+    statusResponse.download_files,
+    statusResponse.downloadFiles,
+    statusResponse.result?.download_files,
+    statusResponse.result?.downloadFiles,
+  ];
+  const files = downloadFileLists.find(Array.isArray) ?? [];
+  return files.map(normalizeDownloadFile).filter((file) => file.artifact_id);
+};
+
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
@@ -1809,6 +1845,9 @@ function App() {
   const [documentStatusMessage, setDocumentStatusMessage] = useState("");
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(null);
+  const [generationJob, setGenerationJob] = useState(null);
+  const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
+  const [isProgressMinimized, setIsProgressMinimized] = useState(false);
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
   const [fileBuckets, setFileBuckets] = useState({ uploaded: [], generated: [] });
@@ -1983,32 +2022,60 @@ function App() {
   const resetGenerationState = () => {
     clearGenerationPolling({ rejectPending: true });
     setGenerationProgress(null);
+    setGenerationJob(null);
+    setIsProgressModalOpen(false);
+    setIsProgressMinimized(false);
     setSelectedDocumentIds([]);
     setDocumentStatusMessage("");
   };
 
-  const startGenerationProgress = () => {
+  const startGenerationProgress = (requestType = "") => {
     clearGenerationPolling({ rejectPending: true });
     progressStepIndexRef.current = 0;
-    setGenerationProgress({
+    const initialProgress = {
       ...buildGenerationProgress(GENERATION_PROGRESS_INITIAL_VALUE),
       displayText: "",
       label: GENERATION_PROGRESS_LABEL,
+    };
+    const targetInfo = getGenerationTargetInfo(requestType);
+    setGenerationProgress(initialProgress);
+    setGenerationJob({
+      ...targetInfo,
+      actionId: "",
+      status: GENERATION_JOB_STATUS.RUNNING,
+      progressState: initialProgress,
+      downloadFiles: [],
+      errorMessage: "",
     });
+    setIsDocumentGenerationModalOpen(false);
+    setIsProgressModalOpen(true);
+    setIsProgressMinimized(false);
   };
 
-  const completeGenerationProgress = () => {
+  const completeGenerationProgress = (statusResponse = null, requestType = "") => {
     clearGenerationPolling();
     const completedProgress = {
       ...buildGenerationProgress(100, "COMPLETED"),
       displayText: "완료",
-      label: "요구사항명세서 생성 완료",
+      label: `${
+        getGenerationTargetInfo(requestType).targetDocumentLabel
+      } 생성 완료`,
     };
+    const downloadFiles = getGenerationDownloadFiles(statusResponse ?? {});
     setGenerationProgress(completedProgress);
+    setGenerationJob((currentJob) => ({
+      ...(currentJob ?? getGenerationTargetInfo(requestType)),
+      status: GENERATION_JOB_STATUS.COMPLETED,
+      progressState: completedProgress,
+      downloadFiles,
+      errorMessage: "",
+    }));
+    setIsProgressModalOpen(true);
+    setIsProgressMinimized(false);
     return completedProgress;
   };
 
-  const failGenerationProgress = (statusResponse = null) => {
+  const failGenerationProgress = (statusResponse = null, requestType = "") => {
     clearGenerationPolling();
     const sourceProgress = statusResponse
       ? buildGenerationProgressFromStatus(
@@ -2030,6 +2097,17 @@ function App() {
       sourceProgress,
     );
     setGenerationProgress(failedProgress);
+    setGenerationJob((currentJob) => ({
+      ...(currentJob ?? getGenerationTargetInfo(requestType)),
+      status: GENERATION_JOB_STATUS.FAILED,
+      progressState: failedProgress,
+      downloadFiles: [],
+      errorMessage:
+        statusResponse?.message ||
+        "문서 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+    }));
+    setIsProgressModalOpen(true);
+    setIsProgressMinimized(false);
     return failedProgress;
   };
 
@@ -2042,6 +2120,16 @@ function App() {
       );
       progressStepIndexRef.current = getGenerationStepIndex(
         nextProgress.progress,
+      );
+      setGenerationJob((currentJob) =>
+        currentJob
+          ? {
+              ...currentJob,
+              status: GENERATION_JOB_STATUS.RUNNING,
+              progressState: nextProgress,
+              errorMessage: "",
+            }
+          : currentJob,
       );
       return nextProgress;
     });
@@ -2139,7 +2227,7 @@ function App() {
       const failedProgress = failGenerationProgress({
         status: GENERATION_ACTION_STATUS.FAILED,
         message: "문서 생성 진행 상태를 확인할 작업 ID가 없습니다.",
-      });
+      }, requestType);
       return {
         ...assistantMessage,
         content:
@@ -2153,9 +2241,12 @@ function App() {
         },
       };
     }
+    setGenerationJob((currentJob) =>
+      currentJob ? { ...currentJob, actionId: pollingActionId } : currentJob,
+    );
 
     if (assistantMessage.metadata?.state === CHAT_STATES.FAILED) {
-      const failedProgress = failGenerationProgress();
+      const failedProgress = failGenerationProgress(null, requestType);
       return {
         ...assistantMessage,
         metadata: {
@@ -2176,7 +2267,7 @@ function App() {
       statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
       statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
     ) {
-      const failedProgress = failGenerationProgress(statusResponse);
+      const failedProgress = failGenerationProgress(statusResponse, requestType);
       return {
         ...assistantMessage,
         content:
@@ -2196,7 +2287,7 @@ function App() {
       };
     }
 
-    const completedProgress = completeGenerationProgress();
+    const completedProgress = completeGenerationProgress(statusResponse, requestType);
     return {
       ...assistantMessage,
       content: statusResponse.message || assistantMessage.content,
@@ -2266,8 +2357,7 @@ function App() {
       setDocumentStatusMessage("");
       resetFileManagerState();
       resetTodoManagerState();
-      clearGenerationPolling({ rejectPending: true });
-      setGenerationProgress(null);
+      resetGenerationState();
       setRecentProjectId(loadedProject.projectId);
       syncProjectRoute(loadedProject.projectId, { replace: replaceHistory });
 
@@ -2677,6 +2767,35 @@ function App() {
       setFileActionError("생성 파일 다운로드 중 오류가 발생했습니다.");
     } finally {
       setDownloadingFileId("");
+    }
+  };
+
+  const handleDownloadDocumentNodeArtifact = async (node) => {
+    const latestArtifact = node?.latestArtifact;
+    if (!project?.projectId || !latestArtifact?.fileId) {
+      setDocumentError(
+        "다운로드할 생성 파일을 찾을 수 없습니다. 파일 목록에서 다시 확인해 주세요.",
+      );
+      return;
+    }
+
+    setDocumentError("");
+    try {
+      await downloadArtifactFile({
+        projectId: project.projectId,
+        artifactId: latestArtifact.fileId,
+        fileName: latestArtifact.fileName,
+      });
+    } catch (error) {
+      reportUiError("handleDownloadDocumentNodeArtifact", error, {
+        projectId: project?.projectId,
+        artifactId: latestArtifact.fileId,
+      });
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "다운로드할 생성 파일을 찾을 수 없습니다. 파일 목록에서 다시 확인해 주세요.",
+      );
     }
   };
 
@@ -3511,51 +3630,59 @@ function App() {
   }) => {
     const includeDocumentIdAliases =
       requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
-    if (getRequiredDocumentConfig(requestType)) {
-      startGenerationProgress();
+    const shouldTrackGeneration = Boolean(getRequiredDocumentConfig(requestType));
+    if (shouldTrackGeneration) {
+      startGenerationProgress(requestType);
     }
-    let assistantMessage = await sendProjectMessage({
-      project_id: targetProject.projectId,
-      conversation_id: targetConversationId || null,
-      message: messageText,
-      context: buildProjectContext(targetProject, documents, {
-        includeDocumentIdAliases,
-        extraContext,
-      }),
-    });
-    const backendConversationId =
-      assistantMessage.metadata?.conversationId ?? targetConversationId;
-    if (!backendConversationId) {
-      throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
+    try {
+      let assistantMessage = await sendProjectMessage({
+        project_id: targetProject.projectId,
+        conversation_id: targetConversationId || null,
+        message: messageText,
+        context: buildProjectContext(targetProject, documents, {
+          includeDocumentIdAliases,
+          extraContext,
+        }),
+      });
+      const backendConversationId =
+        assistantMessage.metadata?.conversationId ?? targetConversationId;
+      if (!backendConversationId) {
+        throw new Error("백엔드 대화 ID를 확인하지 못했습니다.");
+      }
+      assistantMessage = await resolveGenerationStartedAssistantMessage(
+        assistantMessage,
+        {
+          projectId: targetProject.projectId,
+          requestType,
+        },
+      );
+
+      const messageResult = await addMessagesToConversation(
+        targetProject.projectId,
+        backendConversationId,
+        userMessage ? [userMessage, assistantMessage] : [assistantMessage],
+      );
+      const selectedIds = documents
+        .map((document) => document.documentId)
+        .filter(Boolean);
+
+      setProject(messageResult.project);
+      setActiveConversationIdState(backendConversationId);
+      setActiveConversationId(targetProject.projectId, backendConversationId);
+      setSelectedDocumentIds(selectedIds);
+      setDocumentStatusMessage("");
+
+      return {
+        project: messageResult.project,
+        conversationId: backendConversationId,
+        assistantMessage,
+      };
+    } catch (error) {
+      if (shouldTrackGeneration && !isGenerationPollingCancelledError(error)) {
+        failGenerationProgress(null, requestType);
+      }
+      throw error;
     }
-    assistantMessage = await resolveGenerationStartedAssistantMessage(
-      assistantMessage,
-      {
-        projectId: targetProject.projectId,
-        requestType,
-      },
-    );
-
-    const messageResult = await addMessagesToConversation(
-      targetProject.projectId,
-      backendConversationId,
-      userMessage ? [userMessage, assistantMessage] : [assistantMessage],
-    );
-    const selectedIds = documents
-      .map((document) => document.documentId)
-      .filter(Boolean);
-
-    setProject(messageResult.project);
-    setActiveConversationIdState(backendConversationId);
-    setActiveConversationId(targetProject.projectId, backendConversationId);
-    setSelectedDocumentIds(selectedIds);
-    setDocumentStatusMessage("");
-
-    return {
-      project: messageResult.project,
-      conversationId: backendConversationId,
-      assistantMessage,
-    };
   };
 
   const prepareMessageRequest = async ({ messageText, targetProject }) => {
@@ -4134,7 +4261,13 @@ function App() {
     setIsResponding(true);
     setConversationActionError("");
     if (isConfirmGenerationAction) {
-      startGenerationProgress();
+      startGenerationProgress(
+        pendingAction?.requestType ||
+          pendingAction?.request_type ||
+          pendingAction?.payload?.requestType ||
+          pendingAction?.payload?.request_type ||
+          GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+      );
     }
 
     try {
@@ -4166,6 +4299,9 @@ function App() {
         assistantMessage.metadata?.conversationId ?? targetConversationId;
       if (isConfirmGenerationAction) {
         const pollingActionId = getAssistantActionId(assistantMessage) || actionId;
+        setGenerationJob((currentJob) =>
+          currentJob ? { ...currentJob, actionId: pollingActionId } : currentJob,
+        );
         if (assistantMessage.metadata?.state === CHAT_STATES.FAILED) {
           const failedProgress = failGenerationProgress();
           assistantMessage = {
@@ -4208,7 +4344,7 @@ function App() {
               },
             };
           } else {
-            const completedProgress = completeGenerationProgress();
+            const completedProgress = completeGenerationProgress(statusResponse);
             assistantMessage = {
               ...assistantMessage,
               content: statusResponse.message || assistantMessage.content,
@@ -4288,12 +4424,12 @@ function App() {
         clearGenerationPolling({ rejectPending: true });
         if (action.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION) {
           setGenerationProgress(null);
+          setGenerationJob(null);
+          setIsProgressModalOpen(false);
+          setIsProgressMinimized(false);
         }
         setSelectedDocumentIds([]);
         setDocumentStatusMessage("");
-        if (isConfirmGenerationAction) {
-          setGenerationProgress(null);
-        }
       }
     }
   };
@@ -4341,6 +4477,47 @@ function App() {
           : "파일을 다운로드하지 못했습니다.",
       );
     }
+  };
+
+  const handleDownloadGenerationJob = async () => {
+    const downloadFile = generationJob?.downloadFiles?.[0];
+    if (downloadFile?.artifact_id) {
+      await handleDownloadFile(downloadFile);
+      return;
+    }
+
+    const latestArtifact = generationJob?.targetArtifactType
+      ? getLatestGeneratedArtifact(fileBuckets, generationJob.targetArtifactType)
+      : null;
+    if (latestArtifact?.fileId) {
+      await handleDownloadDocumentNodeArtifact({ latestArtifact });
+      return;
+    }
+
+    setDocumentError(
+      "다운로드할 생성 파일을 찾을 수 없습니다. 파일 목록에서 다시 확인해 주세요.",
+    );
+  };
+
+  const handleMinimizeProgressModal = () => {
+    if (!generationJob) return;
+    setIsProgressModalOpen(false);
+    setIsProgressMinimized(true);
+  };
+
+  const handleRestoreProgressModal = () => {
+    if (!generationJob) return;
+    setIsProgressModalOpen(true);
+    setIsProgressMinimized(false);
+  };
+
+  const handleCloseProgressModal = () => {
+    if (generationJob?.status === GENERATION_JOB_STATUS.RUNNING) {
+      handleMinimizeProgressModal();
+      return;
+    }
+    setIsProgressModalOpen(false);
+    setIsProgressMinimized(false);
   };
 
   const handleConversationTitleEditStart = (conversation) => {
@@ -4560,6 +4737,7 @@ function App() {
         isSidebarDrawerOpen={isSidebarDrawerOpen}
         onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
         onSelectNode={handleSelectDocumentHubNode}
+        onDownloadNodeArtifact={handleDownloadDocumentNodeArtifact}
       />
 
       {isDocumentGenerationModalOpen && (
@@ -4579,6 +4757,16 @@ function App() {
         />
       )}
 
+      <GenerationProgressSurface
+        job={generationJob}
+        isOpen={isProgressModalOpen}
+        isMinimized={isProgressMinimized}
+        onMinimize={handleMinimizeProgressModal}
+        onRestore={handleRestoreProgressModal}
+        onClose={handleCloseProgressModal}
+        onDownload={handleDownloadGenerationJob}
+      />
+
       <FloatingChatButton
         isOpen={isChatPopupOpen}
         isBusy={isResponding}
@@ -4592,13 +4780,30 @@ function App() {
           activeMessages={activeMessages}
           isResponding={isResponding}
           isUploadingDocument={isUploadingDocument}
-          generationProgress={generationProgress}
           composerValue={composerValue}
           documentError={documentError}
           documentStatusMessage={documentStatusMessage}
           commandRecommendations={commandRecommendations}
           scrollRef={scrollRef}
           onClose={() => setIsChatPopupOpen(false)}
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          editingConversationId={editingConversationId}
+          editingConversationTitle={editingConversationTitle}
+          deletingConversationId={deletingConversationId}
+          conversationActionError={conversationActionError}
+          onNewChat={handleNewChat}
+          onSelectConversation={handleSelectConversation}
+          onEditConversation={handleConversationTitleEditStart}
+          onEditingConversationTitleChange={setEditingConversationTitle}
+          onConversationTitleSubmit={handleConversationTitleSubmit}
+          onCancelConversationTitleEdit={() => {
+            setEditingConversationId("");
+            setEditingConversationTitle("");
+          }}
+          onRequestDeleteConversation={setDeletingConversationId}
+          onCancelDeleteConversation={() => setDeletingConversationId("")}
+          onDeleteConversation={handleDeleteConversation}
           onComposerChange={setComposerValue}
           onMessageSubmit={handleMessageSubmit}
           onCommandRecommendationClick={handleCommandRecommendationClick}
@@ -4717,6 +4922,7 @@ function DocumentGenerationHub({
   isSidebarDrawerOpen,
   onOpenSidebar,
   onSelectNode,
+  onDownloadNodeArtifact,
 }) {
   return (
     <section className="document-hub-panel" aria-label="문서 생성 허브">
@@ -4751,13 +4957,19 @@ function DocumentGenerationHub({
           nodes={nodes}
           selectedNodeId={selectedNode?.id}
           onSelectNode={onSelectNode}
+          onDownloadNodeArtifact={onDownloadNodeArtifact}
         />
       </div>
     </section>
   );
 }
 
-function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
+function DocumentRelationMap({
+  nodes,
+  selectedNodeId,
+  onSelectNode,
+  onDownloadNodeArtifact,
+}) {
   return (
     <section className="document-map-card" aria-label="문서 관계도">
       <div className="document-map-card__header">
@@ -4820,6 +5032,7 @@ function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
               node={node}
               isSelected={node.id === selectedNodeId}
               onSelectNode={onSelectNode}
+              onDownloadNodeArtifact={onDownloadNodeArtifact}
             />
           ))}
         </div>
@@ -4828,13 +5041,21 @@ function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
   );
 }
 
-function DocumentNodeCard({ node, isSelected, onSelectNode }) {
+function DocumentNodeCard({
+  node,
+  isSelected,
+  onSelectNode,
+  onDownloadNodeArtifact,
+}) {
   const handleSelect = () => onSelectNode(node.id);
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleSelect();
-    }
+  const hasDownload = Boolean(node.latestArtifact?.fileId);
+  const handleActionClick = (event) => {
+    event.stopPropagation();
+    handleSelect();
+  };
+  const handleDownloadClick = (event) => {
+    event.stopPropagation();
+    onDownloadNodeArtifact?.(node);
   };
 
   return (
@@ -4849,11 +5070,8 @@ function DocumentNodeCard({ node, isSelected, onSelectNode }) {
       ]
         .filter(Boolean)
         .join(" ")}
-      role="button"
-      tabIndex={0}
-      aria-pressed={isSelected}
+      aria-current={isSelected ? "true" : undefined}
       onClick={handleSelect}
-      onKeyDown={handleKeyDown}
     >
       <div className="document-node__header">
         <DocumentStatusChip label={node.statusLabel} tone={node.statusTone} />
@@ -4861,12 +5079,36 @@ function DocumentNodeCard({ node, isSelected, onSelectNode }) {
       </div>
       <p>{getDocumentNodeDescription(node)}</p>
       <dl className="document-node__meta">
+        {node.latestArtifact && (
+          <div>
+            <dt>최근 파일</dt>
+            <dd>{node.latestArtifact.fileName || "생성 파일"}</dd>
+          </div>
+        )}
         <div>
           <dt>{node.kind === "target" ? "기준" : "역할"}</dt>
           <dd>{node.basisLabel}</dd>
         </div>
       </dl>
-      <span className="document-node__action">{node.actionLabel}</span>
+      <div className="document-node__actions">
+        <button
+          className="document-node__action is-primary"
+          type="button"
+          onClick={handleActionClick}
+        >
+          {node.actionLabel}
+        </button>
+        {hasDownload && (
+          <button
+            className="document-node__action is-secondary"
+            type="button"
+            onClick={handleDownloadClick}
+          >
+            <Download size={14} aria-hidden="true" />
+            다운로드
+          </button>
+        )}
+      </div>
     </article>
   );
 }
@@ -4991,7 +5233,6 @@ function DocumentGenerationModal({
                 isUploading={isUploadingDocument}
                 onChoice={onGenerate}
                 onUploadFiles={onUploadFiles}
-                onCancel={onClose}
               />
             </div>
           ) : (
@@ -5000,6 +5241,151 @@ function DocumentGenerationModal({
         </div>
       </section>
     </div>
+  );
+}
+
+function getGenerationJobProgress(job) {
+  return Math.max(
+    0,
+    Math.min(100, Math.round(job?.progressState?.progress ?? 0)),
+  );
+}
+
+function getGenerationJobStageText(job) {
+  if (!job) return "";
+  if (job.status === GENERATION_JOB_STATUS.COMPLETED) {
+    return "다운로드 가능";
+  }
+  if (job.status === GENERATION_JOB_STATUS.FAILED) {
+    return job.errorMessage || "문서 생성 중 오류가 발생했습니다.";
+  }
+  const progressState = job.progressState ?? {};
+  const runningStep = (progressState.steps ?? []).find(
+    (step) => step.status === "RUNNING" || step.status === "EXECUTING",
+  );
+  return (
+    progressState.displayText ||
+    runningStep?.message ||
+    runningStep?.name ||
+    progressState.label ||
+    "진행 상태를 확인하고 있습니다."
+  );
+}
+
+function GenerationProgressSurface({
+  job,
+  isOpen,
+  isMinimized,
+  onMinimize,
+  onRestore,
+  onClose,
+  onDownload,
+}) {
+  if (!job) return null;
+
+  const progress = getGenerationJobProgress(job);
+  const stageText = getGenerationJobStageText(job);
+  const targetLabel = job.targetDocumentLabel || "문서";
+  const isRunning = job.status === GENERATION_JOB_STATUS.RUNNING;
+  const isCompleted = job.status === GENERATION_JOB_STATUS.COMPLETED;
+  const isFailed = job.status === GENERATION_JOB_STATUS.FAILED;
+  const title = isCompleted
+    ? `${targetLabel} 생성 완료`
+    : isFailed
+    ? `${targetLabel} 생성 실패`
+    : `${targetLabel} 생성 중`;
+
+  return (
+    <>
+      {isOpen && (
+        <div className="modal-backdrop generation-progress-backdrop">
+          <section
+            className={`generation-progress-modal is-${job.status.toLowerCase()}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="generation-progress-title"
+          >
+            <header className="generation-progress-modal__header">
+              <div>
+                <span>진행상황</span>
+                <h2 id="generation-progress-title">{title}</h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={onClose}
+                aria-label="진행상황 팝업 닫기"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="generation-progress-modal__body">
+              {isCompleted ? (
+                <p>
+                  {(job.downloadFiles?.[0]?.file_name ||
+                    `${targetLabel} 파일`) + "이 생성되었습니다."}
+                </p>
+              ) : isFailed ? (
+                <p>{stageText}</p>
+              ) : (
+                <>
+                  <p>문서를 분석하고 산출물을 생성하고 있습니다.</p>
+                  <ProgressBar
+                    progress={progress}
+                    label={`${progress}%`}
+                    title="전체 진행률"
+                  />
+                  <div className="generation-progress-stage">
+                    <span>현재 단계</span>
+                    <strong>{stageText}</strong>
+                  </div>
+                  <GenerationSubProgress progressState={job.progressState} />
+                </>
+              )}
+            </div>
+
+            <footer className="generation-progress-modal__actions">
+              {isRunning && (
+                <button className="secondary-button" type="button" onClick={onMinimize}>
+                  최소화
+                </button>
+              )}
+              {isCompleted && (
+                <button
+                  className="message-upload-button"
+                  type="button"
+                  onClick={onDownload}
+                >
+                  <Download size={16} aria-hidden="true" />
+                  다운로드
+                </button>
+              )}
+              {!isRunning && (
+                <button className="secondary-button" type="button" onClick={onClose}>
+                  닫기
+                </button>
+              )}
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {isMinimized && (
+        <button
+          className={`generation-progress-toast is-${job.status.toLowerCase()}`}
+          type="button"
+          onClick={onRestore}
+        >
+          <span>
+            {title} · {stageText}
+          </span>
+          <span className="generation-progress-toast__bar" aria-hidden="true">
+            <span style={{ width: `${progress}%` }} />
+          </span>
+        </button>
+      )}
+    </>
   );
 }
 
@@ -5073,13 +5459,27 @@ function ChatPopup({
   activeMessages,
   isResponding,
   isUploadingDocument,
-  generationProgress,
   composerValue,
   documentError,
   documentStatusMessage,
   commandRecommendations,
   scrollRef,
   onClose,
+  conversations,
+  activeConversationId,
+  editingConversationId,
+  editingConversationTitle,
+  deletingConversationId,
+  conversationActionError,
+  onNewChat,
+  onSelectConversation,
+  onEditConversation,
+  onEditingConversationTitleChange,
+  onConversationTitleSubmit,
+  onCancelConversationTitleEdit,
+  onRequestDeleteConversation,
+  onCancelDeleteConversation,
+  onDeleteConversation,
   onComposerChange,
   onMessageSubmit,
   onCommandRecommendationClick,
@@ -5089,13 +5489,99 @@ function ChatPopup({
   onSuggestedActionClick,
   onCommandActionClick,
 }) {
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const handleSelectConversation = (conversationId) => {
+    setIsHistoryOpen(false);
+    onSelectConversation(conversationId);
+  };
+  const handleSaveConversation = () => {
+    if (!activeConversation) return;
+    setIsHistoryOpen(true);
+    onEditConversation(activeConversation);
+  };
+
   return (
-    <aside
-      className="chat-popup"
-      role="dialog"
-      aria-modal="false"
-      aria-label="PM Agent 채팅"
-    >
+    <div className="chat-popup-shell">
+      <nav className="chat-bookmark-rail" aria-label="채팅 빠른 메뉴">
+        <button
+          type="button"
+          onClick={() => setIsHistoryOpen((isOpen) => !isOpen)}
+          aria-expanded={isHistoryOpen}
+        >
+          <FolderOpen size={15} aria-hidden="true" />
+          이전
+        </button>
+        <button
+          type="button"
+          disabled={!activeConversation}
+          onClick={handleSaveConversation}
+        >
+          <Save size={15} aria-hidden="true" />
+          저장
+        </button>
+        <button type="button" onClick={onNewChat}>
+          <PlusCircle size={15} aria-hidden="true" />
+          새로
+        </button>
+      </nav>
+
+      {isHistoryOpen && (
+        <section className="chat-history-bookmark-panel" aria-label="이전 대화">
+          <div className="chat-history-bookmark-panel__header">
+            <strong>이전 대화</strong>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="이전 대화 닫기"
+              onClick={() => setIsHistoryOpen(false)}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+          {conversationActionError && (
+            <p className="sidebar-error">{conversationActionError}</p>
+          )}
+          {conversations.length ? (
+            <ul className="conversation-list">
+              {conversations.map((conversation) => (
+                <ConversationListItem
+                  key={conversation.conversationId}
+                  conversation={conversation}
+                  isActive={conversation.conversationId === activeConversationId}
+                  isEditing={
+                    conversation.conversationId === editingConversationId
+                  }
+                  isDeleting={
+                    conversation.conversationId === deletingConversationId
+                  }
+                  editingTitle={editingConversationTitle}
+                  onSelect={() =>
+                    handleSelectConversation(conversation.conversationId)
+                  }
+                  onEdit={() => onEditConversation(conversation)}
+                  onEditingTitleChange={onEditingConversationTitleChange}
+                  onTitleSubmit={onConversationTitleSubmit}
+                  onCancelEdit={onCancelConversationTitleEdit}
+                  onRequestDelete={() =>
+                    onRequestDeleteConversation(conversation.conversationId)
+                  }
+                  onCancelDelete={onCancelDeleteConversation}
+                  onDelete={() => onDeleteConversation(conversation.conversationId)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="conversation-empty">아직 대화가 없습니다.</p>
+          )}
+        </section>
+      )}
+
+      <aside
+        className="chat-popup"
+        role="dialog"
+        aria-modal="false"
+        aria-label="PM Agent 채팅"
+      >
       <header className="chat-popup__header">
         <div>
           <span>Chat</span>
@@ -5142,12 +5628,7 @@ function ChatPopup({
             description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
           />
         )}
-        {isResponding &&
-          (generationProgress ? (
-            <GenerationProgressMessage progressState={generationProgress} />
-          ) : (
-            <TypingMessage />
-          ))}
+        {isResponding && <TypingMessage />}
         <div ref={scrollRef} />
       </div>
 
@@ -5193,6 +5674,7 @@ function ChatPopup({
         </form>
       </footer>
     </aside>
+    </div>
   );
 }
 
@@ -5419,54 +5901,6 @@ function ProjectSidebar({
           </div>
         </dl>
         <p>{project.projectDescription || "프로젝트 설명이 아직 없습니다."}</p>
-      </section>
-
-      <section className="conversation-panel" aria-label="대화 목록">
-        <div className="conversation-panel-header">
-          <strong>이전 대화</strong>
-        </div>
-        <button className="new-chat-button" type="button" onClick={onNewChat}>
-          <PlusCircle size={17} aria-hidden="true" />새 채팅
-        </button>
-
-        {conversationActionError && (
-          <p className="sidebar-error">{conversationActionError}</p>
-        )}
-
-        {conversations.length ? (
-          <ul className="conversation-list">
-            {conversations.map((conversation) => (
-              <ConversationListItem
-                key={conversation.conversationId}
-                conversation={conversation}
-                isActive={conversation.conversationId === activeConversationId}
-                isEditing={
-                  conversation.conversationId === editingConversationId
-                }
-                isDeleting={
-                  conversation.conversationId === deletingConversationId
-                }
-                editingTitle={editingConversationTitle}
-                onSelect={() =>
-                  onSelectConversation(conversation.conversationId)
-                }
-                onEdit={() => onEditConversation(conversation)}
-                onEditingTitleChange={onEditingConversationTitleChange}
-                onTitleSubmit={onConversationTitleSubmit}
-                onCancelEdit={onCancelConversationTitleEdit}
-                onRequestDelete={() =>
-                  onRequestDeleteConversation(conversation.conversationId)
-                }
-                onCancelDelete={onCancelDeleteConversation}
-                onDelete={() =>
-                  onDeleteConversation(conversation.conversationId)
-                }
-              />
-            ))}
-          </ul>
-        ) : (
-          <p className="conversation-empty">아직 대화가 없습니다.</p>
-        )}
       </section>
 
       <button
@@ -6743,9 +7177,6 @@ function ChatMessage({
     isAssistant && !actionsResolved
       ? message.metadata?.documentChoiceRequest
       : null;
-  const generationProgressResult = isAssistant
-    ? message.metadata?.generationProgress
-    : null;
   const scheduleTodoItems = isAssistant
     ? message.metadata?.result?.items ?? []
     : [];
@@ -6851,12 +7282,6 @@ function ChatMessage({
                 uploadRequest,
               })
             }
-          />
-        )}
-        {generationProgressResult && (
-          <GenerationProgressResult
-            progressState={generationProgressResult}
-            downloadFiles={downloadFiles}
           />
         )}
         <ScheduleTodoResult
@@ -6983,7 +7408,6 @@ function DefaultDocumentChoicePanel({
   isUploading = false,
   onChoice,
   onUploadFiles,
-  onCancel = null,
 }) {
   const panelId = useId().replace(/:/g, "");
   const documents = Array.isArray(request?.documents) ? request.documents : [];
@@ -7369,16 +7793,6 @@ function DefaultDocumentChoicePanel({
         />
       )}
       <div className="document-choice-actions">
-        {onCancel && (
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={isDisabled || isUploading}
-            onClick={(event) => handlePanelAction(event, onCancel)}
-          >
-            취소
-          </button>
-        )}
         <button
           className="message-upload-button"
           type="button"
