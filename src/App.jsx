@@ -147,6 +147,87 @@ const DOCUMENT_GENERATION_COPY = Object.freeze({
   uploadLabel: "기준 문서 업로드",
   generate: "생성",
 });
+const DOCUMENT_HUB_DEFAULT_NODE_ID = "requirement-spec";
+const DOCUMENT_HUB_SOURCE_NODE_IDS = Object.freeze([
+  "requirement-definition",
+  "meeting-notes",
+]);
+const DOCUMENT_HUB_NODES = Object.freeze([
+  {
+    id: "requirement-definition",
+    label: "구축요건정의서",
+    documentType: DOCUMENT_TYPES.CONSTRUCTION_REQUIREMENT_DEFINITION,
+    kind: "source",
+    positionClass: "document-map__node--requirement-definition",
+    description: "요구사항명세서를 만들기 위한 기준 문서입니다.",
+    basisLabel: "업로드 문서",
+    nextNodeIds: ["requirement-spec"],
+  },
+  {
+    id: "meeting-notes",
+    label: "기술협상회의록",
+    documentType: DOCUMENT_TYPES.MEETING_NOTES,
+    kind: "optional",
+    positionClass: "document-map__node--meeting-notes",
+    description: "요구사항명세서 생성 시 함께 반영할 수 있는 선택 자료입니다.",
+    basisLabel: "선택 자료",
+    nextNodeIds: ["requirement-spec"],
+  },
+  {
+    id: "requirement-spec",
+    label: "요구사항명세서",
+    documentType: DOCUMENT_TYPES.REQUIREMENT_SPEC,
+    artifactType: "REQUIREMENT_SPEC",
+    requestType: GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC,
+    kind: "target",
+    positionClass: "document-map__node--requirement-spec",
+    basisLabel: "구축요건정의서",
+    requiredNodeIds: ["requirement-definition"],
+    optionalNodeIds: ["meeting-notes"],
+    nextNodeIds: ["screen-design", "wbs"],
+  },
+  {
+    id: "screen-design",
+    label: "화면설계서",
+    documentType: DOCUMENT_TYPES.SCREEN_DESIGN,
+    artifactType: "SCREEN_DESIGN",
+    requestType: GENERATION_REQUEST_TYPES.SCREEN_DESIGN_CREATE,
+    kind: "target",
+    positionClass: "document-map__node--screen-design",
+    basisLabel: "요구사항명세서",
+    requiredNodeIds: ["requirement-spec"],
+    nextNodeIds: ["unit-test"],
+  },
+  {
+    id: "wbs",
+    label: "WBS",
+    documentType: DOCUMENT_TYPES.WBS,
+    artifactType: "WBS",
+    requestType: GENERATION_REQUEST_TYPES.WBS_CREATE,
+    kind: "target",
+    positionClass: "document-map__node--wbs",
+    basisLabel: "요구사항명세서",
+    requiredNodeIds: ["requirement-spec"],
+    nextNodeIds: [],
+  },
+  {
+    id: "unit-test",
+    label: "단위테스트케이스",
+    artifactType: "UNITTEST_SPEC",
+    requestType: GENERATION_REQUEST_TYPES.UNIT_TEST_CREATE,
+    kind: "target",
+    positionClass: "document-map__node--unit-test",
+    basisLabel: "화면설계서",
+    requiredNodeIds: ["screen-design"],
+    nextNodeIds: [],
+  },
+]);
+const DOCUMENT_HUB_NODE_BY_ID = Object.freeze(
+  DOCUMENT_HUB_NODES.reduce((nodeMap, node) => {
+    nodeMap[node.id] = node;
+    return nodeMap;
+  }, {}),
+);
 const OUTPUT_FORMAT_LABELS = Object.freeze({
   xlsx: "Excel(.xlsx)",
   pptx: "PowerPoint(.pptx)",
@@ -897,6 +978,152 @@ const normalizeProjectDocumentCandidates = (response) => {
   );
 };
 
+const getDocumentHubCandidates = (fileBuckets = {}) => {
+  const uploadedDocuments = (fileBuckets.uploaded ?? []).map((file) => ({
+    documentId: file.fileId,
+    fileName: file.fileName,
+    documentType: file.documentType,
+    createdAt: file.uploadedAt,
+    updatedAt: file.raw?.updated_at ?? file.raw?.updatedAt ?? "",
+    displayLabel:
+      file.documentLabel ||
+      DOCUMENT_TYPE_LABELS[file.documentType] ||
+      DOCUMENT_TYPE_LABELS[DOCUMENT_TYPES.UNKNOWN],
+    sourceKind: FILE_KINDS.UPLOADED,
+  }));
+  const generatedDocuments = (fileBuckets.generated ?? [])
+    .map((file) => normalizeGeneratedSourceDocument(file.raw ?? file))
+    .filter(Boolean)
+    .map((document) => ({
+      ...document,
+      sourceKind: FILE_KINDS.GENERATED,
+    }));
+
+  return sortDocumentsByLatest(
+    uniqueDocumentsById([...uploadedDocuments, ...generatedDocuments]),
+  );
+};
+
+const getLatestHubDocument = (documents, documentType) =>
+  sortDocumentsByLatest(
+    documents.filter((document) => document.documentType === documentType),
+  )[0] ?? null;
+
+const getLatestGeneratedArtifact = (fileBuckets = {}, artifactType) =>
+  sortDocumentsByLatest(
+    (fileBuckets.generated ?? []).filter(
+      (file) => file.artifactType === artifactType,
+    ),
+  )[0] ?? null;
+
+const buildDocumentHubNodes = ({ fileBuckets, documents }) => {
+  const nodeReadiness = DOCUMENT_HUB_NODES.reduce((readiness, node) => {
+    const latestDocument = node.documentType
+      ? getLatestHubDocument(documents, node.documentType)
+      : null;
+    const latestArtifact = node.artifactType
+      ? getLatestGeneratedArtifact(fileBuckets, node.artifactType)
+      : null;
+    readiness[node.id] = Boolean(latestDocument || latestArtifact);
+    return readiness;
+  }, {});
+
+  return DOCUMENT_HUB_NODES.map((node) => {
+    const latestDocument = node.documentType
+      ? getLatestHubDocument(documents, node.documentType)
+      : null;
+    const latestArtifact = node.artifactType
+      ? getLatestGeneratedArtifact(fileBuckets, node.artifactType)
+      : null;
+    const isReady = Boolean(latestDocument || latestArtifact);
+    const requiredNodeIds = node.requiredNodeIds ?? [];
+    const missingRequiredNodes = requiredNodeIds
+      .map((nodeId) => DOCUMENT_HUB_NODE_BY_ID[nodeId])
+      .filter((requiredNode) => requiredNode && !nodeReadiness[requiredNode.id]);
+    const hasRequiredDocuments = missingRequiredNodes.length === 0;
+    const isGeneratable = Boolean(node.requestType && !isReady && hasRequiredDocuments);
+    let statusLabel = "대기중";
+    let statusTone = "waiting";
+    let actionLabel = "";
+
+    if (node.kind === "source") {
+      statusLabel = isReady ? "준비됨" : "업로드 필요";
+      statusTone = isReady ? "ready" : "blocked";
+      actionLabel = "요구사항명세서 생성하기";
+    } else if (node.kind === "optional") {
+      statusLabel = isReady ? "선택 자료 있음" : "대기중";
+      statusTone = isReady ? "optional" : "waiting";
+      actionLabel = "요구사항명세서에 반영";
+    } else if (isReady) {
+      statusLabel = "생성 완료";
+      statusTone = "completed";
+      actionLabel = "다시 생성";
+    } else if (isGeneratable) {
+      statusLabel = "생성 가능";
+      statusTone = "generatable";
+      actionLabel = "생성하기";
+    } else {
+      statusLabel = "기준 문서 필요";
+      statusTone = "blocked";
+      actionLabel = missingRequiredNodes[0]
+        ? `${missingRequiredNodes[0].label} 생성하기`
+        : "기준 문서 확인";
+    }
+
+    return {
+      ...node,
+      latestDocument,
+      latestArtifact,
+      isReady,
+      isGeneratable,
+      missingRequiredNodes,
+      statusLabel,
+      statusTone,
+      actionLabel,
+      nextNodes: (node.nextNodeIds ?? [])
+        .map((nodeId) => DOCUMENT_HUB_NODE_BY_ID[nodeId])
+        .filter(Boolean),
+    };
+  });
+};
+
+const buildDocumentHubChoiceRequest = ({ requestType, documents }) => {
+  const documentConfig = getRequiredDocumentConfig(requestType);
+  if (!documentConfig) return null;
+  const matchingDocuments = getMatchingDocuments(documents, documentConfig);
+  const optionalDocuments = (documentConfig.optionalSources ?? [])
+    .flatMap((source) =>
+      getMatchingDocuments(documents, {
+        documentTypes: [source.documentType],
+        keywords: source.keywords ?? [],
+      }),
+    )
+    .filter(
+      (document) =>
+        !matchingDocuments.some(
+          (primaryDocument) =>
+            primaryDocument.documentId === document.documentId,
+        ),
+    );
+
+  return {
+    originalMessage: `${documentConfig.targetLabel} 생성해줘`,
+    documentConfig: {
+      ...documentConfig,
+      panelTitle: `${documentConfig.targetLabel} 생성`,
+      actionLabel: `${documentConfig.targetLabel} 생성`,
+    },
+    documents: matchingDocuments,
+    optionalDocuments: uniqueDocumentsById(optionalDocuments),
+    defaultDocumentId: matchingDocuments[0]?.documentId || "",
+    defaultOptionalDocumentIds: uniqueDocumentsById(optionalDocuments)
+      .map((document) => document.documentId)
+      .filter(Boolean),
+    outputFormats: documentConfig.outputFormats,
+    outputFormat: documentConfig.defaultOutputFormat,
+  };
+};
+
 const padDatePart = (value) => String(value).padStart(2, "0");
 
 const getTodayIsoDate = () => {
@@ -1551,6 +1778,10 @@ function App() {
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
+  const [isChatPopupOpen, setIsChatPopupOpen] = useState(false);
+  const [selectedDocumentHubNodeId, setSelectedDocumentHubNodeId] = useState(
+    DOCUMENT_HUB_DEFAULT_NODE_ID,
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsStartDate, setSettingsStartDate] = useState("");
@@ -1630,6 +1861,32 @@ function App() {
     [activeConversationId, conversations],
   );
   const activeMessages = activeConversation?.messages ?? [];
+  const documentHubDocuments = useMemo(
+    () => getDocumentHubCandidates(fileBuckets),
+    [fileBuckets],
+  );
+  const documentHubNodes = useMemo(
+    () =>
+      buildDocumentHubNodes({
+        fileBuckets,
+        documents: documentHubDocuments,
+      }),
+    [documentHubDocuments, fileBuckets],
+  );
+  const selectedDocumentHubNode =
+    documentHubNodes.find((node) => node.id === selectedDocumentHubNodeId) ??
+    documentHubNodes.find((node) => node.id === DOCUMENT_HUB_DEFAULT_NODE_ID) ??
+    documentHubNodes[0];
+  const selectedDocumentHubRequest = useMemo(
+    () =>
+      selectedDocumentHubNode?.requestType
+        ? buildDocumentHubChoiceRequest({
+            requestType: selectedDocumentHubNode.requestType,
+            documents: documentHubDocuments,
+          })
+        : null,
+    [documentHubDocuments, selectedDocumentHubNode],
+  );
   const todoImportDocuments = useMemo(
     () => getTodoImportDocuments(fileBuckets),
     [fileBuckets],
@@ -1992,6 +2249,8 @@ function App() {
       setDeletingConversationId("");
       setLastCommandInfo(null);
       setSelectedDocumentIds([]);
+      setSelectedDocumentHubNodeId(DOCUMENT_HUB_DEFAULT_NODE_ID);
+      setIsChatPopupOpen(false);
       setDocumentError("");
       setDocumentStatusMessage("");
       resetFileManagerState();
@@ -2205,6 +2464,7 @@ function App() {
     setDeletingConversationId("");
     setLastCommandInfo(null);
     setSelectedDocumentIds([]);
+    setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
     resetGenerationState();
@@ -2226,6 +2486,7 @@ function App() {
     setDeletingConversationId("");
     setLastCommandInfo(null);
     setSelectedDocumentIds([]);
+    setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
     resetGenerationState();
@@ -2290,6 +2551,14 @@ function App() {
     setEditingFileTarget(null);
     setFileNameDraft("");
   };
+
+  useEffect(() => {
+    if (!project?.projectId) {
+      setFileBuckets({ uploaded: [], generated: [] });
+      return;
+    }
+    loadUploadedFiles(project);
+  }, [project?.projectId]);
 
   const handleDownloadUploadedFile = async (file) => {
     if (!project?.projectId) {
@@ -3027,6 +3296,143 @@ function App() {
       );
     } finally {
       setIsCommittingTodoImport(false);
+    }
+  };
+
+  const handleSelectDocumentHubNode = (nodeId) => {
+    if (!DOCUMENT_HUB_NODE_BY_ID[nodeId]) return;
+    setSelectedDocumentHubNodeId(nodeId);
+    setDocumentError("");
+    setDocumentStatusMessage("");
+  };
+
+  const handleHubUploadFiles = async (files, uploadRequest = {}) => {
+    if (!project?.projectId || isUploadingDocument) return;
+    const uploadFiles = Array.from(files ?? []).filter(Boolean);
+    if (!uploadFiles.length) return;
+
+    const [file] = uploadFiles;
+    const requestedDocumentType =
+      uploadRequest.documentType || DEFAULT_DOCUMENT_TYPE;
+    setIsUploadingDocument(true);
+    setDocumentError("");
+    setDocumentStatusMessage(`${file.name} 업로드 중입니다.`);
+
+    try {
+      const response = await uploadDocument({
+        projectId: project.projectId,
+        documentType: requestedDocumentType,
+        file,
+      });
+      const document = response?.document ?? {};
+      const uploadedDocumentId = document.document_id ?? document.documentId ?? "";
+      if (!uploadedDocumentId) {
+        throw new Error("업로드된 문서 정보를 확인하지 못했습니다.");
+      }
+      await loadUploadedFiles(project);
+      setDocumentStatusMessage(
+        `${file.name} 업로드가 완료되었습니다. 기준 문서를 확인한 뒤 생성해 주세요.`,
+      );
+    } catch (error) {
+      setDocumentError(
+        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
+      );
+      setDocumentStatusMessage("");
+    } finally {
+      setIsUploadingDocument(false);
+    }
+  };
+
+  const handleHubDocumentChoice = async ({
+    documentId,
+    optionalDocumentIds = [],
+    outputFormat = "",
+  }) => {
+    if (
+      !project?.projectId ||
+      isResponding ||
+      isUploadingDocument ||
+      !selectedDocumentHubRequest
+    ) {
+      return;
+    }
+
+    const request = selectedDocumentHubRequest;
+    const requestType = request.documentConfig?.requestType || "";
+    const selectedDocument =
+      request.documents.find((document) => document.documentId === documentId) ??
+      request.documents.find(
+        (document) => document.documentId === request.defaultDocumentId,
+      ) ??
+      request.documents[0];
+    const selectedOptionalDocuments = request.optionalDocuments.filter((document) =>
+      optionalDocumentIds.includes(document.documentId),
+    );
+    const selectedDocuments = uniqueDocumentsById([
+      selectedDocument,
+      ...selectedOptionalDocuments,
+    ]);
+    const relation = getRelation(requestType);
+    const selectedOutputFormat =
+      outputFormat ||
+      request.outputFormat ||
+      request.documentConfig?.defaultOutputFormat ||
+      getDefaultOutputFormat(relation);
+
+    if (!selectedDocument?.documentId) {
+      setDocumentError(
+        `${request.documentConfig?.primarySource?.label || "기준 문서"}를 선택하거나 업로드해 주세요.`,
+      );
+      return;
+    }
+
+    const messageText =
+      request.originalMessage ||
+      `${request.documentConfig?.targetLabel || "산출물"} 생성해줘`;
+    const userMessage = {
+      id: createChatId("user"),
+      role: "user",
+      content: messageText,
+      createdAt: formatDateTime(),
+    };
+
+    setIsResponding(true);
+    setConversationActionError("");
+    setDocumentError("");
+    setDocumentStatusMessage(
+      request.documentConfig?.startMessage || DOCUMENT_GENERATION_COPY.start,
+    );
+
+    try {
+      const backendResult = await sendBackendConversationMessage({
+        targetProject: project,
+        targetConversationId: activeConversationId,
+        messageText,
+        userMessage,
+        documents: selectedDocuments,
+        requestType,
+        extraContext: {
+          document_generation_mode: "use_existing",
+          output_format: selectedOutputFormat,
+        },
+      });
+      await saveCommandUsage(project.projectId, messageText);
+      setLastCommandInfo({ commandText: messageText });
+      await loadUploadedFiles(backendResult.project ?? project);
+    } catch (error) {
+      reportUiError("handleHubDocumentChoice", error, {
+        projectId: project?.projectId,
+        requestType,
+        documentId,
+        optionalDocumentIds,
+      });
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "선택한 문서로 생성을 진행하지 못했습니다.",
+      );
+    } finally {
+      setIsResponding(false);
     }
   };
 
@@ -4079,115 +4485,55 @@ function App() {
         onCloseDrawer={() => setIsSidebarDrawerOpen(false)}
       />
 
-      <section className="chat-panel" aria-label="PM Agent 채팅">
-        <header className="chat-header">
-          <button
-            className="sidebar-menu-button"
-            type="button"
-            aria-label="프로젝트 및 대화 목록 열기"
-            aria-expanded={isSidebarDrawerOpen}
-            onClick={() => setIsSidebarDrawerOpen(true)}
-          >
-            <Menu size={20} aria-hidden="true" />
-          </button>
-          <div className="assistant-avatar">
-            <BriefcaseBusiness size={20} aria-hidden="true" />
-          </div>
-          <div className="chat-title">
-            <strong>
-              {activeConversation?.title ?? "새 채팅을 시작해보세요"}
-            </strong>
-            <span>
-              {project.projectName} · {project.projectId}
-            </span>
-          </div>
-        </header>
+      <DocumentGenerationHub
+        project={project}
+        fileBuckets={fileBuckets}
+        nodes={documentHubNodes}
+        selectedNode={selectedDocumentHubNode}
+        selectedRequest={selectedDocumentHubRequest}
+        isSidebarDrawerOpen={isSidebarDrawerOpen}
+        isLoadingDocuments={isLoadingUploadedFiles}
+        isResponding={isResponding}
+        isUploadingDocument={isUploadingDocument}
+        generationProgress={generationProgress}
+        documentError={documentError}
+        documentStatusMessage={documentStatusMessage}
+        onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
+        onSelectNode={handleSelectDocumentHubNode}
+        onGenerate={handleHubDocumentChoice}
+        onUploadFiles={handleHubUploadFiles}
+      />
 
-        <div className="chat-thread">
-          {activeConversation ? (
-            activeMessages.length ? (
-              activeMessages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isResponding={isResponding}
-                  isUploadingDocument={isUploadingDocument}
-                  onAgentUploadFiles={handleAgentUploadFiles}
-                  onDownloadFile={handleDownloadFile}
-                  onDocumentChoice={handleDocumentChoice}
-                  onSuggestedActionClick={handleSuggestedActionClick}
-                  onCommandActionClick={handleCommandActionClick}
-                />
-              ))
-            ) : (
-              <EmptyChatState
-                title="새 채팅을 시작해보세요."
-                description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
-              />
-            )
-          ) : (
-            <EmptyChatState
-              title="새 채팅을 시작해보세요."
-              description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
-            />
-          )}
-          {isResponding &&
-            (generationProgress ? (
-              <GenerationProgressMessage progressState={generationProgress} />
-            ) : (
-              <TypingMessage />
-            ))}
-          <div ref={scrollRef} />
-        </div>
+      <FloatingChatButton
+        isOpen={isChatPopupOpen}
+        isBusy={isResponding}
+        onClick={() => setIsChatPopupOpen((isOpen) => !isOpen)}
+      />
 
-        <footer className="composer-area">
-          {(documentError || documentStatusMessage || isUploadingDocument) && (
-            <div
-              className={`attachment-status ${documentError ? "is-error" : ""}`}
-              role="status"
-            >
-              {isUploadingDocument
-                ? "파일을 업로드하는 중입니다."
-                : documentError || documentStatusMessage}
-            </div>
-          )}
-
-          <CommandRecommendationBar
-            recommendations={commandRecommendations}
-            isDisabled={isResponding}
-            onSelect={handleCommandRecommendationClick}
-          />
-
-          <form className="chat-composer" onSubmit={handleMessageSubmit}>
-            <textarea
-              value={composerValue}
-              placeholder="PM 산출물, 요구사항, 일정 관련 메시지를 입력하세요."
-              rows={1}
-              disabled={isResponding}
-              onChange={(event) => setComposerValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              aria-label="메시지 입력"
-            />
-            <button
-              className={`send-button ${
-                composerValue.trim() ? "" : "is-empty"
-              }`}
-              type="submit"
-              disabled={
-                !composerValue.trim() || isResponding || isUploadingDocument
-              }
-              aria-label="메시지 보내기"
-            >
-              <ArrowUp size={18} aria-hidden="true" />
-            </button>
-          </form>
-        </footer>
-      </section>
+      {isChatPopupOpen && (
+        <ChatPopup
+          project={project}
+          activeConversation={activeConversation}
+          activeMessages={activeMessages}
+          isResponding={isResponding}
+          isUploadingDocument={isUploadingDocument}
+          generationProgress={generationProgress}
+          composerValue={composerValue}
+          documentError={documentError}
+          documentStatusMessage={documentStatusMessage}
+          commandRecommendations={commandRecommendations}
+          scrollRef={scrollRef}
+          onClose={() => setIsChatPopupOpen(false)}
+          onComposerChange={setComposerValue}
+          onMessageSubmit={handleMessageSubmit}
+          onCommandRecommendationClick={handleCommandRecommendationClick}
+          onAgentUploadFiles={handleAgentUploadFiles}
+          onDownloadFile={handleDownloadFile}
+          onDocumentChoice={handleDocumentChoice}
+          onSuggestedActionClick={handleSuggestedActionClick}
+          onCommandActionClick={handleCommandActionClick}
+        />
+      )}
 
       {isSettingsOpen && (
         <ProjectSettingsModal
@@ -4286,6 +4632,563 @@ function App() {
         />
       )}
     </main>
+  );
+}
+
+function DocumentGenerationHub({
+  project,
+  fileBuckets,
+  nodes,
+  selectedNode,
+  selectedRequest,
+  isSidebarDrawerOpen,
+  isLoadingDocuments,
+  isResponding,
+  isUploadingDocument,
+  generationProgress,
+  documentError,
+  documentStatusMessage,
+  onOpenSidebar,
+  onSelectNode,
+  onGenerate,
+  onUploadFiles,
+}) {
+  const uploadedCount = fileBuckets.uploaded?.length ?? 0;
+  const generatedCount = fileBuckets.generated?.length ?? 0;
+  const readyCount = nodes.filter((node) => node.isReady).length;
+  const generatableNodes = nodes.filter((node) => node.isGeneratable);
+  const currentGeneratableLabel =
+    generatableNodes.map((node) => node.label).join(", ") || "준비 중";
+
+  return (
+    <section className="document-hub-panel" aria-label="문서 생성 허브">
+      <header className="document-hub-header">
+        <button
+          className="sidebar-menu-button"
+          type="button"
+          aria-label="프로젝트 및 대화 목록 열기"
+          aria-expanded={isSidebarDrawerOpen}
+          onClick={onOpenSidebar}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <div className="assistant-avatar">
+          <BriefcaseBusiness size={20} aria-hidden="true" />
+        </div>
+        <div className="document-hub-title">
+          <strong>문서 생성</strong>
+          <span>
+            업로드한 문서와 생성된 산출물을 기준으로 다음에 만들 수 있는
+            문서를 확인하세요.
+          </span>
+        </div>
+        <dl className="document-hub-meta" aria-label="프로젝트 문서 정보">
+          <div>
+            <dt>프로젝트</dt>
+            <dd>{project.projectName || project.projectId}</dd>
+          </div>
+          <div>
+            <dt>시작일</dt>
+            <dd>{getProjectStartDate(project) || "미입력"}</dd>
+          </div>
+          <div>
+            <dt>업로드</dt>
+            <dd>{uploadedCount}개</dd>
+          </div>
+          <div>
+            <dt>생성</dt>
+            <dd>{generatedCount}개</dd>
+          </div>
+        </dl>
+      </header>
+
+      <div className="document-hub-scroll">
+        <section className="document-hub-overview" aria-label="프로젝트 문서 상태">
+          <div>
+            <p className="document-hub-eyebrow">프로젝트 문서 상태</p>
+            <h2>문서 흐름</h2>
+            <p>
+              기준 문서가 준비되면 관계도에서 다음 산출물이 자동으로
+              활성화됩니다.
+            </p>
+          </div>
+          <div className="document-hub-current-card">
+            <span>현재 생성 가능</span>
+            <strong>{currentGeneratableLabel}</strong>
+            <small>준비 문서 {readyCount}개</small>
+          </div>
+        </section>
+
+        <DocumentStatusSummary nodes={nodes} />
+
+        <DocumentRelationMap
+          nodes={nodes}
+          selectedNodeId={selectedNode?.id}
+          onSelectNode={onSelectNode}
+        />
+
+        <DocumentGenerationPanel
+          selectedNode={selectedNode}
+          selectedRequest={selectedRequest}
+          isResponding={isResponding}
+          isUploadingDocument={isUploadingDocument}
+          generationProgress={generationProgress}
+          isLoadingDocuments={isLoadingDocuments}
+          documentError={documentError}
+          documentStatusMessage={documentStatusMessage}
+          onSelectNode={onSelectNode}
+          onGenerate={onGenerate}
+          onUploadFiles={onUploadFiles}
+        />
+      </div>
+    </section>
+  );
+}
+
+function DocumentStatusSummary({ nodes }) {
+  return (
+    <section className="document-status-summary" aria-label="문서 상태 요약">
+      <div className="document-status-summary__header">
+        <strong>상태 요약</strong>
+        <span>업로드 문서와 생성 산출물을 함께 반영합니다.</span>
+      </div>
+      <div className="document-status-grid">
+        {nodes.map((node) => (
+          <div className="document-status-row" key={node.id}>
+            <span>{node.label}</span>
+            <DocumentStatusChip label={node.statusLabel} tone={node.statusTone} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DocumentRelationMap({ nodes, selectedNodeId, onSelectNode }) {
+  return (
+    <section className="document-map-card" aria-label="문서 관계도">
+      <div className="document-map-card__header">
+        <div>
+          <h2>문서 관계도</h2>
+          <p>카드를 클릭하면 아래 생성 패널이 해당 문서로 바뀝니다.</p>
+        </div>
+      </div>
+      <div className="document-map">
+        <div className="document-map__canvas">
+          <svg
+            className="document-map__edges"
+            viewBox="0 0 900 430"
+            aria-hidden="true"
+          >
+            <defs>
+              <marker
+                id="document-map-arrow"
+                markerWidth="12"
+                markerHeight="12"
+                refX="10"
+                refY="6"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path
+                  d="M2 2L10 6L2 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2.4"
+                />
+              </marker>
+            </defs>
+            <path
+              className="document-map__edge is-required"
+              d="M212 168 C240 168 248 210 270 210"
+            />
+            <path
+              className="document-map__edge is-optional"
+              d="M212 292 C250 326 258 244 270 232"
+            />
+            <path
+              className="document-map__edge is-required"
+              d="M470 214 C500 214 500 156 515 156"
+            />
+            <path
+              className="document-map__edge is-required"
+              d="M470 232 C500 242 500 302 515 302"
+            />
+            <path
+              className="document-map__edge is-required"
+              d="M695 156 C715 156 712 218 720 220"
+            />
+          </svg>
+          {nodes.map((node) => (
+            <DocumentNodeCard
+              key={node.id}
+              node={node}
+              isSelected={node.id === selectedNodeId}
+              onSelectNode={onSelectNode}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DocumentNodeCard({ node, isSelected, onSelectNode }) {
+  const handleSelect = () => onSelectNode(node.id);
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleSelect();
+    }
+  };
+
+  return (
+    <article
+      className={[
+        "document-node",
+        "document-map__node",
+        node.positionClass,
+        isSelected ? "is-selected" : "",
+        node.isGeneratable ? "is-generatable" : "",
+        node.isReady ? "is-ready" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
+      onClick={handleSelect}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="document-node__header">
+        <strong>{node.label}</strong>
+        <DocumentStatusChip label={node.statusLabel} tone={node.statusTone} />
+      </div>
+      <p>{getDocumentNodeDescription(node)}</p>
+      <dl className="document-node__meta">
+        <div>
+          <dt>{node.kind === "target" ? "기준" : "역할"}</dt>
+          <dd>{node.basisLabel}</dd>
+        </div>
+        {node.nextNodes.length > 0 && (
+          <div>
+            <dt>다음</dt>
+            <dd>{node.nextNodes.map((nextNode) => nextNode.label).join(", ")}</dd>
+          </div>
+        )}
+      </dl>
+      {node.nextNodes.length > 0 && node.isReady && (
+        <div className="document-node__next">
+          <span>이 문서로 만들 수 있는 산출물</span>
+          <div>
+            {node.nextNodes.map((nextNode) => (
+              <button
+                key={nextNode.id}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectNode(nextNode.id);
+                }}
+              >
+                {nextNode.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <span className="document-node__action">{node.actionLabel}</span>
+    </article>
+  );
+}
+
+function getDocumentNodeDescription(node) {
+  if (node.kind === "optional") {
+    return node.isReady
+      ? "요구사항명세서 생성 시 함께 반영할 수 있습니다."
+      : "없어도 요구사항명세서 생성은 가능합니다.";
+  }
+  if (node.kind === "source") {
+    return node.isReady
+      ? "기준 문서가 준비되어 요구사항명세서를 생성할 수 있습니다."
+      : "요구사항명세서 생성을 위해 업로드가 필요합니다.";
+  }
+  if (node.isReady) {
+    return "문서가 준비되어 다음 산출물의 기준으로 사용할 수 있습니다.";
+  }
+  if (node.isGeneratable) {
+    return `${node.basisLabel}가 준비되어 바로 생성할 수 있습니다.`;
+  }
+  const missingLabel = node.missingRequiredNodes[0]?.label || node.basisLabel;
+  return `${missingLabel}가 필요합니다. 먼저 선행 문서를 준비해 주세요.`;
+}
+
+function DocumentStatusChip({ label, tone }) {
+  return <span className={`document-status-chip is-${tone}`}>{label}</span>;
+}
+
+function DocumentGenerationPanel({
+  selectedNode,
+  selectedRequest,
+  isResponding,
+  isUploadingDocument,
+  generationProgress,
+  isLoadingDocuments,
+  documentError,
+  documentStatusMessage,
+  onSelectNode,
+  onGenerate,
+  onUploadFiles,
+}) {
+  const prerequisiteNode = selectedNode?.missingRequiredNodes?.[0];
+  const shouldShowPrerequisiteGuide = Boolean(
+    selectedNode?.requestType &&
+      selectedNode.id !== DOCUMENT_HUB_DEFAULT_NODE_ID &&
+      selectedNode.missingRequiredNodes?.length &&
+      !selectedNode.isReady &&
+      !selectedRequest?.documents?.length,
+  );
+
+  return (
+    <section className="document-generation-panel" aria-label="선택 문서 생성">
+      <div className="document-generation-panel__status">
+        {(documentError || documentStatusMessage || isUploadingDocument) && (
+          <div
+            className={`attachment-status ${documentError ? "is-error" : ""}`}
+            role="status"
+          >
+            {isUploadingDocument
+              ? "파일을 업로드하는 중입니다."
+              : documentError || documentStatusMessage}
+          </div>
+        )}
+        {isResponding && generationProgress && (
+          <GenerationSubProgress progressState={generationProgress} />
+        )}
+      </div>
+
+      {DOCUMENT_HUB_SOURCE_NODE_IDS.includes(selectedNode?.id) ? (
+        <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
+      ) : shouldShowPrerequisiteGuide ? (
+        <BlockedDocumentPanel
+          node={selectedNode}
+          prerequisiteNode={prerequisiteNode}
+          onSelectNode={onSelectNode}
+        />
+      ) : selectedRequest ? (
+        <div className="document-generation-panel__choice">
+          {isLoadingDocuments && (
+            <div className="file-manager-loading" role="status">
+              <LoaderCircle size={18} aria-hidden="true" />
+              문서 상태를 불러오는 중입니다.
+            </div>
+          )}
+          <DefaultDocumentChoicePanel
+            request={selectedRequest}
+            isDisabled={isResponding}
+            isUploading={isUploadingDocument}
+            onChoice={onGenerate}
+            onUploadFiles={onUploadFiles}
+          />
+        </div>
+      ) : (
+        <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
+      )}
+    </section>
+  );
+}
+
+function SourceDocumentPanel({ node, onSelectNode }) {
+  const targetNode = DOCUMENT_HUB_NODE_BY_ID[node?.nextNodeIds?.[0]];
+  return (
+    <div className="document-panel-guide">
+      <div>
+        <span>{node?.statusLabel}</span>
+        <h2>{node?.label}</h2>
+        <p>{getDocumentNodeDescription(node)}</p>
+      </div>
+      {targetNode && (
+        <button
+          className="message-upload-button"
+          type="button"
+          onClick={() => onSelectNode(targetNode.id)}
+        >
+          {targetNode.label} 생성 패널 열기
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BlockedDocumentPanel({ node, prerequisiteNode, onSelectNode }) {
+  return (
+    <div className="document-panel-guide is-blocked">
+      <div>
+        <span>기준 문서 필요</span>
+        <h2>{node.label} 생성</h2>
+        <p>
+          {node.label}를 생성하려면 {prerequisiteNode?.label || node.basisLabel}가
+          필요합니다. 먼저 선행 문서를 준비해 주세요.
+        </p>
+      </div>
+      {prerequisiteNode && (
+        <button
+          className="message-upload-button"
+          type="button"
+          onClick={() => onSelectNode(prerequisiteNode.id)}
+        >
+          {prerequisiteNode.label} 생성하기
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FloatingChatButton({ isOpen, isBusy, onClick }) {
+  return (
+    <button
+      className={`floating-chat-button ${isOpen ? "is-open" : ""}`}
+      type="button"
+      aria-label={isOpen ? "채팅 팝업 닫기" : "채팅 팝업 열기"}
+      aria-pressed={isOpen}
+      onClick={onClick}
+    >
+      {isBusy ? (
+        <LoaderCircle size={22} aria-hidden="true" />
+      ) : (
+        <Bot size={22} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
+function ChatPopup({
+  project,
+  activeConversation,
+  activeMessages,
+  isResponding,
+  isUploadingDocument,
+  generationProgress,
+  composerValue,
+  documentError,
+  documentStatusMessage,
+  commandRecommendations,
+  scrollRef,
+  onClose,
+  onComposerChange,
+  onMessageSubmit,
+  onCommandRecommendationClick,
+  onAgentUploadFiles,
+  onDownloadFile,
+  onDocumentChoice,
+  onSuggestedActionClick,
+  onCommandActionClick,
+}) {
+  return (
+    <aside
+      className="chat-popup"
+      role="dialog"
+      aria-modal="false"
+      aria-label="PM Agent 채팅"
+    >
+      <header className="chat-popup__header">
+        <div>
+          <span>Chat</span>
+          <strong>{activeConversation?.title ?? "새 채팅"}</strong>
+          <small>
+            {project.projectName} · {project.projectId}
+          </small>
+        </div>
+        <button
+          className="icon-button"
+          type="button"
+          onClick={onClose}
+          aria-label="채팅 팝업 닫기"
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
+      </header>
+
+      <div className="chat-popup__thread">
+        {activeConversation ? (
+          activeMessages.length ? (
+            activeMessages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isResponding={isResponding}
+                isUploadingDocument={isUploadingDocument}
+                onAgentUploadFiles={onAgentUploadFiles}
+                onDownloadFile={onDownloadFile}
+                onDocumentChoice={onDocumentChoice}
+                onSuggestedActionClick={onSuggestedActionClick}
+                onCommandActionClick={onCommandActionClick}
+              />
+            ))
+          ) : (
+            <EmptyChatState
+              title="새 채팅을 시작해보세요."
+              description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
+            />
+          )
+        ) : (
+          <EmptyChatState
+            title="새 채팅을 시작해보세요."
+            description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
+          />
+        )}
+        {isResponding &&
+          (generationProgress ? (
+            <GenerationProgressMessage progressState={generationProgress} />
+          ) : (
+            <TypingMessage />
+          ))}
+        <div ref={scrollRef} />
+      </div>
+
+      <footer className="chat-popup__footer">
+        {(documentError || documentStatusMessage || isUploadingDocument) && (
+          <div
+            className={`attachment-status ${documentError ? "is-error" : ""}`}
+            role="status"
+          >
+            {isUploadingDocument
+              ? "파일을 업로드하는 중입니다."
+              : documentError || documentStatusMessage}
+          </div>
+        )}
+        <CommandRecommendationBar
+          recommendations={commandRecommendations}
+          isDisabled={isResponding}
+          onSelect={onCommandRecommendationClick}
+        />
+        <form className="chat-composer" onSubmit={onMessageSubmit}>
+          <textarea
+            value={composerValue}
+            placeholder="PM 산출물, 요구사항, 일정 관련 메시지를 입력하세요."
+            rows={1}
+            disabled={isResponding}
+            onChange={(event) => onComposerChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            aria-label="메시지 입력"
+          />
+          <button
+            className={`send-button ${composerValue.trim() ? "" : "is-empty"}`}
+            type="submit"
+            disabled={!composerValue.trim() || isResponding || isUploadingDocument}
+            aria-label="메시지 보내기"
+          >
+            <ArrowUp size={18} aria-hidden="true" />
+          </button>
+        </form>
+      </footer>
+    </aside>
   );
 }
 
