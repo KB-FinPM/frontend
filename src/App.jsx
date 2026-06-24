@@ -1963,9 +1963,11 @@ function App() {
     todoImportUseExisting,
   ]);
 
-  const resetFileManagerState = () => {
+  const resetFileManagerState = ({ resetBuckets = true } = {}) => {
     setIsFileManagerOpen(false);
-    setFileBuckets({ uploaded: [], generated: [] });
+    if (resetBuckets) {
+      setFileBuckets({ uploaded: [], generated: [] });
+    }
     setIsLoadingUploadedFiles(false);
     setFileManagerError("");
     setFileActionError("");
@@ -2569,8 +2571,6 @@ function App() {
     setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
-    resetGenerationState();
-    resetFileManagerState();
     setIsSidebarDrawerOpen(false);
   };
 
@@ -2592,7 +2592,6 @@ function App() {
     setIsChatPopupOpen(true);
     setDocumentError("");
     setDocumentStatusMessage("");
-    resetGenerationState();
     setIsSidebarDrawerOpen(false);
   };
 
@@ -4761,7 +4760,6 @@ function App() {
         job={generationJob}
         isOpen={isProgressModalOpen}
         isMinimized={isProgressMinimized}
-        onMinimize={handleMinimizeProgressModal}
         onRestore={handleRestoreProgressModal}
         onClose={handleCloseProgressModal}
         onDownload={handleDownloadGenerationJob}
@@ -4925,7 +4923,7 @@ function DocumentGenerationHub({
   onDownloadNodeArtifact,
 }) {
   return (
-    <section className="document-hub-panel" aria-label="문서 생성 허브">
+    <div className="document-hub-panel" role="main" aria-label="문서 생성 허브">
       <header className="document-hub-header">
         <button
           className="sidebar-menu-button"
@@ -4946,13 +4944,6 @@ function DocumentGenerationHub({
       </header>
 
       <div className="document-hub-scroll">
-        <section className="document-hub-intro" aria-label="문서 생성 안내">
-          <div>
-            <h2>생성 가능한 문서를 선택하세요</h2>
-            <p>문서 간 관계를 확인하고 카드를 클릭하면 생성 팝업이 열립니다.</p>
-          </div>
-        </section>
-
         <DocumentRelationMap
           nodes={nodes}
           selectedNodeId={selectedNode?.id}
@@ -4960,7 +4951,7 @@ function DocumentGenerationHub({
           onDownloadNodeArtifact={onDownloadNodeArtifact}
         />
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -4971,14 +4962,14 @@ function DocumentRelationMap({
   onDownloadNodeArtifact,
 }) {
   return (
-    <section className="document-map-card" aria-label="문서 관계도">
-      <div className="document-map-card__header">
+    <section className="document-map" aria-label="문서 관계도">
+      <div className="document-map__header">
         <div>
           <h2>문서 관계도</h2>
           <p>카드를 클릭하면 해당 문서 생성 팝업이 열립니다.</p>
         </div>
       </div>
-      <div className="document-map">
+      <div className="document-map__body">
         <div className="document-map__canvas">
           <svg
             className="document-map__edges"
@@ -5276,11 +5267,23 @@ function GenerationProgressSurface({
   job,
   isOpen,
   isMinimized,
-  onMinimize,
   onRestore,
   onClose,
   onDownload,
 }) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!job) return null;
 
   const progress = getGenerationJobProgress(job);
@@ -5298,12 +5301,16 @@ function GenerationProgressSurface({
   return (
     <>
       {isOpen && (
-        <div className="modal-backdrop generation-progress-backdrop">
+        <div
+          className="modal-backdrop generation-progress-backdrop"
+          onClick={onClose}
+        >
           <section
             className={`generation-progress-modal is-${job.status.toLowerCase()}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="generation-progress-title"
+            onClick={(event) => event.stopPropagation()}
           >
             <header className="generation-progress-modal__header">
               <div>
@@ -5314,7 +5321,9 @@ function GenerationProgressSurface({
                 className="icon-button"
                 type="button"
                 onClick={onClose}
-                aria-label="진행상황 팝업 닫기"
+                aria-label={
+                  isRunning ? "진행상황 팝업 최소화" : "진행상황 팝업 닫기"
+                }
               >
                 <X size={18} aria-hidden="true" />
               </button>
@@ -5345,28 +5354,18 @@ function GenerationProgressSurface({
               )}
             </div>
 
-            <footer className="generation-progress-modal__actions">
-              {isRunning && (
-                <button className="secondary-button" type="button" onClick={onMinimize}>
-                  최소화
-                </button>
-              )}
-              {isCompleted && (
+            {isCompleted && (
+              <footer className="generation-progress-modal__actions">
                 <button
-                  className="message-upload-button"
+                  className="message-upload-button generation-progress-modal__download"
                   type="button"
                   onClick={onDownload}
                 >
                   <Download size={16} aria-hidden="true" />
                   다운로드
                 </button>
-              )}
-              {!isRunning && (
-                <button className="secondary-button" type="button" onClick={onClose}>
-                  닫기
-                </button>
-              )}
-            </footer>
+              </footer>
+            )}
           </section>
         </div>
       )}
