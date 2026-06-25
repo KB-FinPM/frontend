@@ -143,6 +143,10 @@ const SCHEDULE_REGISTRATION_MODES = Object.freeze({
   EXISTING: "existing",
   UPLOAD: "upload",
 });
+const CALENDAR_VIEW_MODES = Object.freeze({
+  MONTH: "month",
+  WEEK: "week",
+});
 const FILE_KINDS = Object.freeze({
   UPLOADED: "uploaded",
   GENERATED: "generated",
@@ -1166,6 +1170,25 @@ const getTodayIsoDate = () => {
   ].join("-");
 };
 
+const parseIsoDate = (dateText = getTodayIsoDate()) => {
+  const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+};
+
+const formatIsoDate = (dateValue = new Date()) =>
+  [
+    dateValue.getFullYear(),
+    padDatePart(dateValue.getMonth() + 1),
+    padDatePart(dateValue.getDate()),
+  ].join("-");
+
+const addDaysToIsoDate = (dateText = getTodayIsoDate(), offset = 0) => {
+  const dateValue = parseIsoDate(dateText);
+  dateValue.setDate(dateValue.getDate() + offset);
+  return formatIsoDate(dateValue);
+};
+
 const buildIsoDate = (year, month, day) => {
   const dateValue = new Date(year, month - 1, day);
   if (
@@ -1240,6 +1263,14 @@ const formatMonthLabel = (monthKey = getMonthKeyFromDate()) => {
   return `${year}년 ${Number(month)}월`;
 };
 
+const formatWeekLabel = (dateText = getTodayIsoDate()) => {
+  const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  const firstDate = new Date(year, (month || 1) - 1, 1);
+  const weekNumber = Math.floor(((day || 1) + firstDate.getDay() - 1) / 7) + 1;
+  return `${year}년 ${Number(month)}월 ${weekNumber}주차`;
+};
+
 const formatDateLabel = (dateText = "") => {
   const normalizedDate = normalizeTodoDueDate(dateText);
   if (!normalizedDate) return "날짜 미정";
@@ -1272,6 +1303,24 @@ const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
   return Array.from({ length: Math.ceil(cells.length / 7) }, (_, index) =>
     cells.slice(index * 7, index * 7 + 7),
   );
+};
+
+const getCalendarWeek = (dateText = getTodayIsoDate()) => {
+  const anchorDate = parseIsoDate(dateText);
+  const startDate = new Date(anchorDate);
+  startDate.setDate(anchorDate.getDate() - anchorDate.getDay());
+  const anchorMonth = anchorDate.getMonth();
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const dateValue = new Date(startDate);
+    dateValue.setDate(startDate.getDate() + index);
+    return {
+      dateText: formatIsoDate(dateValue),
+      day: dateValue.getDate(),
+      month: dateValue.getMonth() + 1,
+      isCurrentMonth: dateValue.getMonth() === anchorMonth,
+    };
+  });
 };
 
 const getTodoScheduleRange = (todo = {}) => {
@@ -2062,6 +2111,9 @@ function App() {
     getMonthKeyFromIsoDate(getTodayIsoDate()),
   );
   const [selectedScheduleDate, setSelectedScheduleDate] = useState(getTodayIsoDate());
+  const [calendarViewMode, setCalendarViewMode] = useState(
+    CALENDAR_VIEW_MODES.MONTH,
+  );
   const [isScheduleDayModalOpen, setIsScheduleDayModalOpen] = useState(false);
   const [isScheduleRegistrationOpen, setIsScheduleRegistrationOpen] =
     useState(false);
@@ -2079,6 +2131,9 @@ function App() {
   const [isTodoManagerOpen, setIsTodoManagerOpen] = useState(false);
   const [todoItems, setTodoItems] = useState([]);
   const [todoStatusFilter, setTodoStatusFilter] = useState("");
+  const [todoTitleFilter, setTodoTitleFilter] = useState("");
+  const [todoAssigneeFilter, setTodoAssigneeFilter] = useState("");
+  const [todoDateFilter, setTodoDateFilter] = useState("");
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
   const [todoError, setTodoError] = useState("");
   const [todoActionError, setTodoActionError] = useState("");
@@ -3104,7 +3159,7 @@ function App() {
     }
   };
 
-  const loadTodos = async ({ status = todoStatusFilter } = {}) => {
+  const loadTodos = async ({ status = "" } = {}) => {
     if (!project?.projectId) {
       setTodoItems([]);
       setSelectedTodoIds([]);
@@ -3140,8 +3195,7 @@ function App() {
   };
 
   const openTodoManager = () => {
-    setActiveWorkspaceTab(WORKSPACE_TABS.SCHEDULE);
-    setIsTodoManagerOpen(false);
+    setIsTodoManagerOpen(true);
     setIsSidebarDrawerOpen(false);
     setTodoActionError("");
     setTodoError("");
@@ -3151,6 +3205,10 @@ function App() {
     setSelectedTodoIds([]);
     setBulkTodoStatus("IN_PROGRESS");
     setIsBulkTodoActionRunning(false);
+    setTodoStatusFilter("");
+    setTodoTitleFilter("");
+    setTodoAssigneeFilter("");
+    setTodoDateFilter("");
     if (!project?.projectId) {
       setTodoItems([]);
       setTodoError("프로젝트를 먼저 선택해 주세요.");
@@ -3169,6 +3227,10 @@ function App() {
     setSelectedTodoIds([]);
     setBulkTodoStatus("IN_PROGRESS");
     setIsBulkTodoActionRunning(false);
+    setTodoStatusFilter("");
+    setTodoTitleFilter("");
+    setTodoAssigneeFilter("");
+    setTodoDateFilter("");
     setIsTodoImportOpen(false);
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
@@ -3177,7 +3239,14 @@ function App() {
   const handleTodoStatusFilterChange = (value) => {
     setTodoStatusFilter(value);
     setSelectedTodoIds([]);
-    loadTodos({ status: value });
+  };
+
+  const handleTodoFilterReset = () => {
+    setTodoStatusFilter("");
+    setTodoTitleFilter("");
+    setTodoAssigneeFilter("");
+    setTodoDateFilter("");
+    setSelectedTodoIds([]);
   };
 
   const getSelectedVisibleTodoIds = () => {
@@ -3197,10 +3266,12 @@ function App() {
     );
   };
 
-  const handleSelectAllTodos = () => {
+  const handleSelectAllTodos = (visibleTodoIdsOverride = null) => {
     if (isBulkTodoActionRunning) return;
 
-    const visibleTodoIds = todoItems.map((item) => item.todoId).filter(Boolean);
+    const visibleTodoIds = Array.isArray(visibleTodoIdsOverride)
+      ? visibleTodoIdsOverride.filter(Boolean)
+      : todoItems.map((item) => item.todoId).filter(Boolean);
     if (!visibleTodoIds.length) return;
 
     setSelectedTodoIds((currentIds) => {
@@ -3712,6 +3783,16 @@ function App() {
 
   const handleScheduleMonthChange = (offset) => {
     setScheduleMonth((currentMonth) => addMonthsToMonthKey(currentMonth, offset));
+  };
+
+  const handleSchedulePeriodChange = (offset) => {
+    if (calendarViewMode === CALENDAR_VIEW_MODES.WEEK) {
+      const nextDate = addDaysToIsoDate(selectedScheduleDate, offset * 7);
+      setSelectedScheduleDate(nextDate);
+      setScheduleMonth(getMonthKeyFromIsoDate(nextDate));
+      return;
+    }
+    handleScheduleMonthChange(offset);
   };
 
   const resetScheduleRegistrationImportState = () => {
@@ -5155,6 +5236,7 @@ function App() {
           todos={todoItems}
           scheduleMonth={scheduleMonth}
           selectedDate={selectedScheduleDate}
+          calendarViewMode={calendarViewMode}
           isSidebarDrawerOpen={isSidebarDrawerOpen}
           isLoading={isLoadingTodos}
           error={todoError}
@@ -5162,7 +5244,8 @@ function App() {
           onTabChange={handleWorkspaceTabChange}
           onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
           onDateSelect={handleScheduleDateSelect}
-          onMonthChange={handleScheduleMonthChange}
+          onPeriodChange={handleSchedulePeriodChange}
+          onViewModeChange={setCalendarViewMode}
           onOpenRegistration={handleOpenScheduleRegistration}
         />
       )}
@@ -5195,7 +5278,6 @@ function App() {
 
       <FloatingChatButton
         isOpen={isChatPopupOpen}
-        isBusy={isResponding}
         onClick={() => {
           if (isChatPopupOpen) {
             setIsChatMaximized(false);
@@ -5301,6 +5383,9 @@ function App() {
           project={project}
           todoItems={todoItems}
           statusFilter={todoStatusFilter}
+          titleFilter={todoTitleFilter}
+          assigneeFilter={todoAssigneeFilter}
+          dateFilter={todoDateFilter}
           isLoading={isLoadingTodos}
           error={todoError}
           actionError={todoActionError}
@@ -5325,6 +5410,10 @@ function App() {
           isCommittingImport={isCommittingTodoImport}
           onClose={closeTodoManager}
           onStatusFilterChange={handleTodoStatusFilterChange}
+          onTitleFilterChange={setTodoTitleFilter}
+          onAssigneeFilterChange={setTodoAssigneeFilter}
+          onDateFilterChange={setTodoDateFilter}
+          onFilterReset={handleTodoFilterReset}
           onStatusChange={handleTodoStatusChange}
           onToggleTodoSelection={handleToggleTodoSelection}
           onSelectAllTodos={handleSelectAllTodos}
@@ -5483,11 +5572,70 @@ const getTodoStatusTone = (status = "") => {
 const getTodoStatusLabel = (status = "") =>
   TODO_STATUS_OPTIONS.find((option) => option.value === status)?.label || "진행전";
 
+function ScheduleStatusPicker({
+  status,
+  disabled = false,
+  ariaLabel = "진행상태",
+  onChange,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const currentStatus = status || "NOT_STARTED";
+
+  const handleSelect = (value) => {
+    setIsOpen(false);
+    if (value !== currentStatus) {
+      onChange(value);
+    }
+  };
+
+  return (
+    <div
+      className="schedule-status-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setIsOpen(false);
+        }
+      }}
+    >
+      <button
+        className={`schedule-status is-${getTodoStatusTone(currentStatus)}`}
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((currentOpen) => !currentOpen)}
+      >
+        <span>{getTodoStatusLabel(currentStatus)}</span>
+        <span aria-hidden="true">▾</span>
+      </button>
+      {isOpen && (
+        <div className="schedule-status-menu" role="listbox" aria-label={ariaLabel}>
+          {TODO_STATUS_OPTIONS.map((option) => (
+            <button
+              className={option.value === currentStatus ? "is-selected" : ""}
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === currentStatus}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => handleSelect(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectScheduleCalendar({
   project,
   todos,
   scheduleMonth,
   selectedDate,
+  calendarViewMode,
   isSidebarDrawerOpen,
   isLoading,
   error,
@@ -5495,16 +5643,24 @@ function ProjectScheduleCalendar({
   onTabChange,
   onOpenSidebar,
   onDateSelect,
-  onMonthChange,
+  onPeriodChange,
+  onViewModeChange,
   onOpenRegistration,
 }) {
-  const weeks = getCalendarWeeks(scheduleMonth);
+  const isWeekView = calendarViewMode === CALENDAR_VIEW_MODES.WEEK;
+  const weeks = isWeekView
+    ? [getCalendarWeek(selectedDate)]
+    : getCalendarWeeks(scheduleMonth);
   const datedTodos = useMemo(
     () => todos.filter((todo) => getTodoScheduleRange(todo)),
     [todos],
   );
   const today = getTodayIsoDate();
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+  const calendarTitle = isWeekView
+    ? formatWeekLabel(selectedDate)
+    : formatMonthLabel(scheduleMonth);
+  const navigationLabelPrefix = isWeekView ? "주" : "달";
 
   return (
     <div className="document-hub-panel schedule-panel" role="main" aria-label="프로젝트 일정">
@@ -5529,9 +5685,31 @@ function ProjectScheduleCalendar({
       <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
 
       <div className="schedule-scroll">
-        <section className="schedule-month-header" aria-label="월간 일정 도구">
-          <h2>{formatMonthLabel(scheduleMonth)}</h2>
-          <button className="primary-button" type="button" onClick={onOpenRegistration}>
+        <div className="schedule-view-toggle" role="group" aria-label="캘린더 보기 방식">
+          <button
+            className={calendarViewMode === CALENDAR_VIEW_MODES.MONTH ? "is-active" : ""}
+            type="button"
+            aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.MONTH}
+            onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.MONTH)}
+          >
+            월간
+          </button>
+          <button
+            className={calendarViewMode === CALENDAR_VIEW_MODES.WEEK ? "is-active" : ""}
+            type="button"
+            aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.WEEK}
+            onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.WEEK)}
+          >
+            주간
+          </button>
+        </div>
+        <section className="schedule-month-header" aria-label="캘린더 일정 도구">
+          <h2>{calendarTitle}</h2>
+          <button
+            className="primary-button schedule-register-button"
+            type="button"
+            onClick={onOpenRegistration}
+          >
             <PlusCircle size={16} aria-hidden="true" />
             일정 등록
           </button>
@@ -5544,12 +5722,15 @@ function ProjectScheduleCalendar({
           <button
             className="schedule-month-hit-zone schedule-month-hit-zone--prev"
             type="button"
-            aria-label="이전 달 보기"
-            onClick={() => onMonthChange(-1)}
+            aria-label={`이전 ${navigationLabelPrefix} 보기`}
+            onClick={() => onPeriodChange(-1)}
           >
             <ChevronLeft size={30} aria-hidden="true" />
           </button>
-          <section className="schedule-calendar" aria-label={`${formatMonthLabel(scheduleMonth)} 캘린더`}>
+          <section
+            className={`schedule-calendar ${isWeekView ? "is-week-view" : "is-month-view"}`}
+            aria-label={`${calendarTitle} 캘린더`}
+          >
             <div className="schedule-calendar__weekdays">
               {weekdayLabels.map((label) => (
                 <span key={label}>{label}</span>
@@ -5563,6 +5744,8 @@ function ProjectScheduleCalendar({
                   todos={datedTodos}
                   today={today}
                   selectedDate={selectedDate}
+                  isWeekView={isWeekView}
+                  weekdayLabels={weekdayLabels}
                   onDateSelect={onDateSelect}
                 />
               ))}
@@ -5571,8 +5754,8 @@ function ProjectScheduleCalendar({
           <button
             className="schedule-month-hit-zone schedule-month-hit-zone--next"
             type="button"
-            aria-label="다음 달 보기"
-            onClick={() => onMonthChange(1)}
+            aria-label={`다음 ${navigationLabelPrefix} 보기`}
+            onClick={() => onPeriodChange(1)}
           >
             <ChevronRight size={30} aria-hidden="true" />
           </button>
@@ -5582,18 +5765,31 @@ function ProjectScheduleCalendar({
   );
 }
 
-function ScheduleWeekRow({ week, todos, today, selectedDate, onDateSelect }) {
-  const { visibleSegments, hiddenCount } = getWeekScheduleSegments(week, todos);
+function ScheduleWeekRow({
+  week,
+  todos,
+  today,
+  selectedDate,
+  isWeekView = false,
+  weekdayLabels = [],
+  onDateSelect,
+}) {
+  const maxRows = isWeekView ? 8 : 3;
+  const { visibleSegments, hiddenCount } = getWeekScheduleSegments(
+    week,
+    todos,
+    maxRows,
+  );
 
   return (
-    <div className="schedule-week-row">
+    <div className={`schedule-week-row ${isWeekView ? "is-week-view" : ""}`}>
       <div className="schedule-week-days">
-        {week.map((cell) => (
+        {week.map((cell, index) => (
           <button
             key={cell.dateText}
             className={[
               "schedule-day",
-              cell.isCurrentMonth ? "" : "is-outside-month",
+              !isWeekView && !cell.isCurrentMonth ? "is-outside-month" : "",
               cell.dateText === today ? "is-today" : "",
               cell.dateText === selectedDate ? "is-selected" : "",
             ]
@@ -5602,7 +5798,14 @@ function ScheduleWeekRow({ week, todos, today, selectedDate, onDateSelect }) {
             type="button"
             onClick={() => onDateSelect(cell.dateText)}
           >
-            <span className="schedule-day__number">{cell.day}</span>
+            {isWeekView && (
+              <span className="schedule-day__weekday">
+                {weekdayLabels[index]}요일
+              </span>
+            )}
+            <span className="schedule-day__number">
+              {isWeekView ? `${cell.month}/${cell.day}` : cell.day}
+            </span>
           </button>
         ))}
       </div>
@@ -5630,7 +5833,7 @@ function ScheduleWeekRow({ week, todos, today, selectedDate, onDateSelect }) {
         {hiddenCount > 0 && (
           <button
             className="schedule-event-more"
-            style={{ gridColumn: "1 / -1", gridRow: 4 }}
+            style={{ gridColumn: "1 / -1", gridRow: maxRows + 1 }}
             type="button"
             onClick={() => onDateSelect(week[0].dateText)}
           >
@@ -5686,10 +5889,16 @@ function ScheduleDayModal({
                   <li className="schedule-day-item" key={todo.todoId || todo.title}>
                     <div className="schedule-day-item__main">
                       <div className="schedule-day-item__title">
-                        <strong>{todo.title || "제목 없음"}</strong>
-                        <span className={`schedule-status is-${getTodoStatusTone(todo.status)}`}>
-                          {getTodoStatusLabel(todo.status)}
-                        </span>
+                        <div>
+                          <strong>{todo.title || "제목 없음"}</strong>
+                          <small>{formatScheduleRangeLabel(todo)}</small>
+                        </div>
+                        <ScheduleStatusPicker
+                          status={todo.status}
+                          disabled={isSaving}
+                          ariaLabel={`${todo.title || "제목 없음"} 진행상태`}
+                          onChange={(status) => onStatusChange(todo, status)}
+                        />
                       </div>
                       {!isEditing && (
                         <>
@@ -5781,18 +5990,6 @@ function ScheduleDayModal({
                       </div>
                     ) : (
                       <div className="schedule-row-actions">
-                        <select
-                          value={todo.status || "NOT_STARTED"}
-                          disabled={isSaving}
-                          aria-label={`${todo.title} 진행상태`}
-                          onChange={(event) => onStatusChange(todo, event.target.value)}
-                        >
-                          {TODO_STATUS_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
                         <button
                           className="inline-icon-button"
                           type="button"
@@ -6472,15 +6669,6 @@ function GenerationStagePanel({ status, stageText }) {
   );
 }
 
-function GenerationCompleteBadge() {
-  return (
-    <div className="generation-complete-badge" role="status" aria-live="polite">
-      <Check size={18} aria-hidden="true" />
-      완료
-    </div>
-  );
-}
-
 function GenerationAgentStatusList({ items }) {
   if (!items.length) return null;
   return (
@@ -6570,6 +6758,11 @@ function GenerationProgressSurface({
     : isFailed
     ? `${targetLabel} 생성 실패`
     : `${targetLabel} 생성 중`;
+  const toastTitle = isCompleted
+    ? "문서 생성 완료"
+    : isFailed
+    ? "문서 생성 실패"
+    : "문서 생성 중";
 
   return (
     <>
@@ -6603,11 +6796,7 @@ function GenerationProgressSurface({
             </header>
 
             <div className="generation-progress-modal__body">
-              {isCompleted ? (
-                <GenerationCompleteBadge />
-              ) : (
-                <GenerationStagePanel status={job.status} stageText={stageText} />
-              )}
+              <GenerationStagePanel status={job.status} stageText={stageText} />
               <section className="generation-progress-section generation-progress-overall">
                 <ProgressBar
                   progress={progress}
@@ -6640,8 +6829,19 @@ function GenerationProgressSurface({
           type="button"
           onClick={onRestore}
         >
-          <span>
-            {title} · {stageText}
+          <span className="generation-progress-toast__title">
+            {isRunning && (
+              <LoaderCircle
+                className="generation-progress-spinner"
+                size={17}
+                aria-hidden="true"
+              />
+            )}
+            {isCompleted && <Check size={17} aria-hidden="true" />}
+            {isFailed && <X size={17} aria-hidden="true" />}
+            <span>
+              {toastTitle} · {stageText}
+            </span>
           </span>
           <span className="generation-progress-toast__bar" aria-hidden="true">
             <span style={{ width: `${progress}%` }} />
@@ -6698,7 +6898,7 @@ function BlockedDocumentPanel({ node, prerequisiteNode, onSelectNode }) {
   );
 }
 
-function FloatingChatButton({ isOpen, isBusy, onClick }) {
+function FloatingChatButton({ isOpen, onClick }) {
   return (
     <button
       className={`floating-chat-button ${isOpen ? "is-open" : ""}`}
@@ -6707,11 +6907,7 @@ function FloatingChatButton({ isOpen, isBusy, onClick }) {
       aria-pressed={isOpen}
       onClick={onClick}
     >
-      {isBusy ? (
-        <LoaderCircle size={22} aria-hidden="true" />
-      ) : (
-        <Bot size={22} aria-hidden="true" />
-      )}
+      <Bot size={22} aria-hidden="true" />
     </button>
   );
 }
@@ -7437,6 +7633,9 @@ function TodoManagerModal({
   project,
   todoItems,
   statusFilter,
+  titleFilter,
+  assigneeFilter,
+  dateFilter,
   isLoading,
   error,
   actionError,
@@ -7461,6 +7660,10 @@ function TodoManagerModal({
   isCommittingImport,
   onClose,
   onStatusFilterChange,
+  onTitleFilterChange,
+  onAssigneeFilterChange,
+  onDateFilterChange,
+  onFilterReset,
   onStatusChange,
   onToggleTodoSelection,
   onSelectAllTodos,
@@ -7495,9 +7698,38 @@ function TodoManagerModal({
     () => new Set(selectedTodoIds),
     [selectedTodoIds],
   );
+  const filteredTodoItems = useMemo(() => {
+    const normalizeSearchText = (value = "") =>
+      String(value ?? "").replace(/\s+/g, "").toLowerCase();
+    const normalizedTitle = normalizeSearchText(titleFilter);
+    const normalizedAssignee = normalizeSearchText(assigneeFilter);
+    const normalizedDate = normalizeTodoDueDate(dateFilter);
+
+    return todoItems.filter((todo) => {
+      if (
+        normalizedTitle &&
+        !normalizeSearchText(todo.title).includes(normalizedTitle)
+      ) {
+        return false;
+      }
+      if (
+        normalizedAssignee &&
+        !normalizeSearchText(todo.assignee).includes(normalizedAssignee)
+      ) {
+        return false;
+      }
+      if (statusFilter && (todo.status || "NOT_STARTED") !== statusFilter) {
+        return false;
+      }
+      if (normalizedDate && !isDateInTodoScheduleRange(todo, normalizedDate)) {
+        return false;
+      }
+      return true;
+    });
+  }, [assigneeFilter, dateFilter, statusFilter, titleFilter, todoItems]);
   const visibleTodoIds = useMemo(
-    () => todoItems.map((todo) => todo.todoId).filter(Boolean),
-    [todoItems],
+    () => filteredTodoItems.map((todo) => todo.todoId).filter(Boolean),
+    [filteredTodoItems],
   );
   const selectedVisibleTodoIds = useMemo(
     () => visibleTodoIds.filter((todoId) => selectedTodoIdSet.has(todoId)),
@@ -7774,17 +8006,36 @@ function TodoManagerModal({
           ) : (
             <>
               <div className="todo-manager-toolbar">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={onToggleImport}
-                >
-                  <FileText size={16} aria-hidden="true" />
-                  문서에서 할일 불러오기
-                </button>
                 <div className="todo-filter-grid">
                   <label>
-                    상태
+                    제목
+                    <input
+                      type="search"
+                      value={titleFilter}
+                      placeholder="할일명 검색"
+                      onChange={(event) => onTitleFilterChange(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    담당자
+                    <input
+                      type="search"
+                      value={assigneeFilter}
+                      placeholder="담당자 검색"
+                      onChange={(event) => onAssigneeFilterChange(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    기한
+                    <input
+                      type="date"
+                      value={dateFilter}
+                      onInput={(event) => onDateFilterChange(event.currentTarget.value)}
+                      onChange={(event) => onDateFilterChange(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    진행여부
                     <select
                       value={statusFilter}
                       onChange={(event) =>
@@ -7799,207 +8050,29 @@ function TodoManagerModal({
                     </select>
                   </label>
                 </div>
+                <div className="todo-filter-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => onStatusFilterChange(statusFilter)}
+                  >
+                    검색
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={onFilterReset}
+                  >
+                    초기화
+                  </button>
+                </div>
               </div>
-
-              {isImportOpen && (
-                <section className="todo-import-panel">
-                  <div className="todo-import-controls">
-                    <label>
-                      문서 종류
-                      <select
-                        value={importDocumentType}
-                        disabled={isImportBusy}
-                        onChange={(event) =>
-                          onImportDocumentTypeChange(event.target.value)
-                        }
-                      >
-                        {TODO_IMPORT_DOCUMENT_TYPES.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <fieldset className="todo-import-source-choice">
-                      <legend>기존 문서 사용</legend>
-                      <label>
-                        <input
-                          type="radio"
-                          name="todo-import-source"
-                          checked={importUseExisting}
-                          disabled={isImportBusy}
-                          onChange={() => onImportUseExistingChange(true)}
-                        />
-                        예
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="todo-import-source"
-                          checked={!importUseExisting}
-                          disabled={isImportBusy}
-                          onChange={() => onImportUseExistingChange(false)}
-                        />
-                        아니오
-                      </label>
-                    </fieldset>
-                  </div>
-                  <div className="todo-import-source-row">
-                    {importUseExisting ? (
-                      <label>
-                        {importDocumentLabel}
-                        <select
-                          value={importDocumentId}
-                          disabled={
-                            isImportBusy ||
-                            isLoadingDocuments ||
-                            !importDocuments.length
-                          }
-                          onChange={(event) =>
-                            onImportDocumentChange(event.target.value)
-                          }
-                        >
-                          <option value="">
-                            {isLoadingDocuments
-                              ? "문서 목록 로딩 중"
-                              : "문서 선택"}
-                          </option>
-                          {importDocuments.map((document) => (
-                            <option
-                              key={document.documentId}
-                              value={document.documentId}
-                            >
-                              {document.fileName}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : (
-                      <label
-                        className={`todo-import-upload-control ${
-                          isImportDragOver ? "is-drag-over" : ""
-                        }`}
-                        htmlFor={uploadInputId}
-                        onDragOver={handleImportDragOver}
-                        onDragLeave={handleImportDragLeave}
-                        onDrop={handleImportDrop}
-                      >
-                        <span>{importDocumentLabel}</span>
-                        <strong>
-                          {importFile ? importFile.name : "파일 선택 또는 드롭"}
-                        </strong>
-                        <input
-                          key={importFile ? "selected" : "empty"}
-                          id={uploadInputId}
-                          type="file"
-                          accept={TODO_IMPORT_ACCEPTED_TYPES.join(",")}
-                          disabled={isImportBusy}
-                          onChange={(event) =>
-                            onImportFileChange(event.target.files?.[0] ?? null)
-                          }
-                        />
-                      </label>
-                    )}
-                    <button
-                      className="primary-button"
-                      type="button"
-                      disabled={!canRunImport || isImportBusy}
-                      onClick={importUseExisting ? onPreviewImport : onUploadImportDocument}
-                    >
-                      {isUploadingImportDocument ? (
-                        <>
-                          <LoaderCircle size={16} aria-hidden="true" />
-                          업로드 중
-                        </>
-                      ) : isPreviewingImport ? (
-                        <>
-                          <LoaderCircle size={16} aria-hidden="true" />
-                          불러오는 중
-                        </>
-                      ) : (
-                        "할일 불러오기"
-                      )}
-                    </button>
-                  </div>
-                  {importStatusMessage && (
-                    <p className="todo-import-status" role="status">
-                      {importStatusMessage}
-                    </p>
-                  )}
-
-                  {importPreview && (
-                    <div className="todo-preview-panel">
-                      <div className="todo-preview-header">
-                        <strong>
-                          미리보기 {previewCount}개 · 선택 {selectedCount}개
-                        </strong>
-                        <div>
-                          <button
-                            className="mini-action-button"
-                            type="button"
-                            onClick={() => onSelectImportMode("skip-duplicates")}
-                          >
-                            중복 제외
-                          </button>
-                          <button
-                            className="mini-action-button"
-                            type="button"
-                            onClick={() => onSelectImportMode("all")}
-                          >
-                            모두 선택
-                          </button>
-                          <button
-                            className="mini-action-button"
-                            type="button"
-                            onClick={() => onSelectImportMode("none")}
-                          >
-                            선택 해제
-                          </button>
-                        </div>
-                      </div>
-                      {previewCount ? (
-                        <ul className="todo-preview-list">
-                          {previewNewItems.map((item) =>
-                            renderPreviewItem({ item }),
-                          )}
-                          {previewDuplicateItems.map((item) =>
-                            renderPreviewItem({
-                              item: item.candidate,
-                              duplicateLevel: item.duplicateLevel,
-                              matchedExisting: item.matchedExisting,
-                            }),
-                          )}
-                        </ul>
-                      ) : (
-                        <p className="file-manager-section-empty">
-                          문서에서 불러올 할일이 없습니다.
-                        </p>
-                      )}
-                      <div className="todo-preview-actions">
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={
-                            !selectedCount ||
-                            !previewCount ||
-                            isCommittingImport
-                          }
-                          onClick={onCommitImport}
-                        >
-                          {isCommittingImport ? "저장 중" : "선택한 할일 저장"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </section>
-              )}
-
               <section className="todo-list-section">
                 <div className="todo-list-header">
                   <div className="todo-list-heading">
                     <h3>할일 목록</h3>
                     <span>
-                      {todoItems.length}개 · 선택 {selectedVisibleCount}개
+                      전체 {todoItems.length}개 · 표시 {filteredTodoItems.length}개 · 선택 {selectedVisibleCount}개
                     </span>
                   </div>
                   <label className="todo-select-all">
@@ -8013,7 +8086,7 @@ function TodoManagerModal({
                         isLoading
                       }
                       aria-label="전체 할일 선택"
-                      onChange={onSelectAllTodos}
+                      onChange={() => onSelectAllTodos(visibleTodoIds)}
                     />
                     전체선택
                   </label>
@@ -8074,11 +8147,11 @@ function TodoManagerModal({
                   </div>
                 ) : error ? (
                   <p className="form-error">{error}</p>
-                ) : todoItems.length ? (
-                  <ul className="todo-list">{todoItems.map(renderTodoItem)}</ul>
+                ) : filteredTodoItems.length ? (
+                  <ul className="todo-list">{filteredTodoItems.map(renderTodoItem)}</ul>
                 ) : (
                   <p className="file-manager-section-empty">
-                    등록된 할일이 없습니다.
+                    조건에 맞는 할일이 없습니다.
                   </p>
                 )}
               </section>

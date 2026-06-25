@@ -1933,7 +1933,7 @@ p {
 
 .todo-manager-content {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding-right: 2px;
@@ -1942,7 +1942,7 @@ p {
 
 .todo-manager-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
@@ -1962,7 +1962,7 @@ p {
 }
 
 .todo-filter-grid {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
 }
 
 .todo-filter-grid label,
@@ -1977,6 +1977,7 @@ p {
   font-weight: 900;
 }
 
+.todo-filter-grid input,
 .todo-filter-grid select,
 .todo-import-controls select,
 .todo-import-source-row select,
@@ -1996,6 +1997,7 @@ p {
   font-weight: 800;
 }
 
+.todo-filter-grid input,
 .todo-filter-grid select,
 .todo-import-controls select,
 .todo-import-source-row select,
@@ -2004,6 +2006,16 @@ p {
 .todo-row-actions select {
   height: 38px;
   padding: 0 10px;
+}
+
+.todo-filter-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.todo-filter-actions .secondary-button {
+  min-height: 38px;
 }
 
 .todo-edit-panel textarea {
@@ -4302,6 +4314,7 @@ textarea {
 
 .todo-bulk-actions select,
 .todo-row-actions select,
+.todo-filter-grid input,
 .todo-filter-grid select,
 .todo-import-controls select,
 .todo-import-source-row select,
@@ -4344,6 +4357,10 @@ textarea {
   background: var(--kb-surface);
   font-size: 13px;
   font-weight: 800;
+}
+
+.todo-filter-grid input {
+  padding: 0 10px;
 }
 
 .todo-upload-row input {
@@ -4562,11 +4579,39 @@ textarea {
 .schedule-scroll {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   height: 100%;
   min-height: 0;
   overflow: auto;
   padding: 22px var(--kb-space-7) 30px;
+}
+
+.schedule-view-toggle {
+  display: inline-flex;
+  align-self: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--kb-border);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.9);
+}
+
+.schedule-view-toggle button {
+  min-width: 58px;
+  min-height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--kb-text-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.schedule-view-toggle button.is-active {
+  color: var(--kb-dark);
+  background: var(--kb-yellow-positive);
 }
 
 .schedule-month-header {
@@ -4601,6 +4646,10 @@ textarea {
   right: 0;
   top: 50%;
   min-height: 40px;
+  transform: translateY(-50%);
+}
+
+.schedule-month-header .schedule-register-button:hover:not(:disabled) {
   transform: translateY(-50%);
 }
 
@@ -4685,9 +4734,17 @@ textarea {
   min-height: 0;
 }
 
+.schedule-calendar.is-week-view .schedule-calendar__weeks {
+  grid-template-rows: minmax(520px, 1fr);
+}
+
 .schedule-week-row {
   position: relative;
   min-height: 0;
+}
+
+.schedule-week-row.is-week-view .schedule-day {
+  padding: 14px;
 }
 
 .schedule-week-days {
@@ -4737,6 +4794,12 @@ textarea {
   border-radius: 50%;
   font-size: 13px;
   font-weight: 900;
+}
+
+.schedule-day__weekday {
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .schedule-day.is-today .schedule-day__number {
@@ -4911,15 +4974,72 @@ textarea {
   gap: 12px;
 }
 
+.schedule-day-item__title > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .schedule-day-item__title strong {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+.schedule-day-item__title small {
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .schedule-status {
+  gap: 5px;
   flex: 0 0 auto;
   min-height: 24px;
+  border: 0;
   padding: 0 10px;
+  cursor: pointer;
+}
+
+.schedule-status:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.schedule-status-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.schedule-status-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 112px;
+  padding: 6px;
+  border: 1px solid var(--kb-border);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-surface);
+  box-shadow: var(--kb-shadow-sm);
+}
+
+.schedule-status-menu button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--kb-text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-status-menu button:hover,
+.schedule-status-menu button.is-selected {
+  background: #fff3c4;
 }
 
 .schedule-day-meta {
@@ -4957,15 +5077,6 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.schedule-row-actions select {
-  min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--kb-border);
-  border-radius: var(--kb-radius-sm);
-  background: var(--kb-surface);
-  font-weight: 750;
 }
 
 .schedule-edit-panel,
@@ -5867,25 +5978,6 @@ textarea {
   background: rgba(224, 49, 49, 0.12);
 }
 
-.generation-complete-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  justify-self: start;
-  gap: 7px;
-  min-height: 38px;
-  padding: 0 18px;
-  border: 1px solid rgba(19, 115, 51, 0.18);
-  border-radius: 999px;
-  color: #137333;
-  background: #e8f8ee;
-  font-weight: 800;
-}
-
-.generation-complete-badge svg {
-  flex: 0 0 auto;
-}
-
 .generation-progress-stage {
   display: grid;
   gap: 6px;
@@ -5943,11 +6035,31 @@ textarea {
   text-align: left;
 }
 
-.generation-progress-toast > span:first-child {
+.generation-progress-toast__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 850;
+}
+
+.generation-progress-toast__title > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 850;
+}
+
+.generation-progress-toast__title > svg {
+  flex: 0 0 auto;
+  color: var(--kb-yellow-positive);
+}
+
+.generation-progress-toast.is-completed .generation-progress-toast__title > svg {
+  color: var(--kb-success);
+}
+
+.generation-progress-toast.is-failed .generation-progress-toast__title > svg {
+  color: var(--kb-danger);
 }
 
 .generation-progress-toast__bar {
