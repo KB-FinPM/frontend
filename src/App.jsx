@@ -1309,7 +1309,7 @@ const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
 
   return Array.from({ length: Math.ceil(cells.length / 7) }, (_, index) =>
     cells.slice(index * 7, index * 7 + 7),
-  );
+  ).filter((week) => week.some((cell) => cell.isCurrentMonth));
 };
 
 const getCalendarWeek = (dateText = getTodayIsoDate()) => {
@@ -5708,26 +5708,28 @@ function ProjectScheduleCalendar({
       <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
 
       <div className="schedule-scroll">
-        <div className="schedule-view-toggle" role="group" aria-label="캘린더 보기 방식">
-          <button
-            className={calendarViewMode === CALENDAR_VIEW_MODES.MONTH ? "is-active" : ""}
-            type="button"
-            aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.MONTH}
-            onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.MONTH)}
-          >
-            월간
-          </button>
-          <button
-            className={calendarViewMode === CALENDAR_VIEW_MODES.WEEK ? "is-active" : ""}
-            type="button"
-            aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.WEEK}
-            onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.WEEK)}
-          >
-            주간
-          </button>
-        </div>
         <section className="schedule-month-header" aria-label="캘린더 일정 도구">
-          <h2>{calendarTitle}</h2>
+          <div className="schedule-month-header__main">
+            <h2>{calendarTitle}</h2>
+            <div className="schedule-view-toggle" role="group" aria-label="캘린더 보기 방식">
+              <button
+                className={calendarViewMode === CALENDAR_VIEW_MODES.MONTH ? "is-active" : ""}
+                type="button"
+                aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.MONTH}
+                onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.MONTH)}
+              >
+                월간
+              </button>
+              <button
+                className={calendarViewMode === CALENDAR_VIEW_MODES.WEEK ? "is-active" : ""}
+                type="button"
+                aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.WEEK}
+                onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.WEEK)}
+              >
+                주간
+              </button>
+            </div>
+          </div>
           <button
             className="primary-button schedule-register-button"
             type="button"
@@ -5759,7 +5761,10 @@ function ProjectScheduleCalendar({
                 <span key={label}>{label}</span>
               ))}
             </div>
-            <div className="schedule-calendar__weeks">
+            <div
+              className="schedule-calendar__weeks"
+              style={{ "--schedule-week-count": String(weeks.length) }}
+            >
               {weeks.map((week) => (
                 <ScheduleWeekRow
                   key={week[0]?.dateText}

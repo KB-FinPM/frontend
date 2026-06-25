@@ -4579,16 +4579,17 @@ textarea {
 .schedule-scroll {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   height: 100%;
   min-height: 0;
   overflow: auto;
-  padding: 22px var(--kb-space-7) 30px;
+  padding: 14px var(--kb-space-7) 28px;
 }
 
 .schedule-view-toggle {
   display: inline-flex;
-  align-self: center;
+  flex: 0 0 auto;
+  align-items: center;
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--kb-border);
@@ -4615,23 +4616,30 @@ textarea {
 }
 
 .schedule-month-header {
-  position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 16px;
-  min-height: 46px;
+  min-height: 40px;
+  margin: 0 0 2px;
+}
+
+.schedule-month-header__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .schedule-month-header h2 {
   margin: 0;
   color: var(--kb-text);
   font-family: var(--kb-font-title);
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 900;
   line-height: 1.1;
-  text-align: center;
+  white-space: nowrap;
 }
 
 .schedule-loading {
@@ -4642,15 +4650,12 @@ textarea {
 }
 
 .schedule-month-header .primary-button {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  min-height: 40px;
-  transform: translateY(-50%);
+  flex: 0 0 auto;
+  min-height: 38px;
 }
 
 .schedule-month-header .schedule-register-button:hover:not(:disabled) {
-  transform: translateY(-50%);
+  transform: none;
 }
 
 .schedule-calendar-shell {
@@ -4728,8 +4733,12 @@ textarea {
 }
 
 .schedule-calendar__weeks {
+  --schedule-week-row-min: 96px;
   display: grid;
-  grid-template-rows: repeat(6, minmax(96px, 1fr));
+  grid-template-rows: repeat(
+    var(--schedule-week-count, 6),
+    minmax(var(--schedule-week-row-min), 1fr)
+  );
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -6340,6 +6349,12 @@ textarea {
     min-height: 0;
   }
 
+  .schedule-month-header__main {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
   .schedule-month-header h2 {
     font-size: 24px;
     text-align: left;
@@ -6362,7 +6377,7 @@ textarea {
   }
 
   .schedule-calendar__weeks {
-    grid-template-rows: repeat(6, minmax(92px, 1fr));
+    --schedule-week-row-min: 92px;
   }
 
   .schedule-calendar.is-week-view .schedule-calendar__weeks {
