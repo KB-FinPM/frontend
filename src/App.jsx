@@ -1250,10 +1250,9 @@ const formatDateLabel = (dateText = "") => {
 const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
   const [year, month] = String(monthKey).split("-").map(Number);
   const firstDate = new Date(year, (month || 1) - 1, 1);
-  const lastDate = new Date(year, month || 1, 0);
   const cells = [];
   const leadingDays = firstDate.getDay();
-  const totalCells = Math.ceil((leadingDays + lastDate.getDate()) / 7) * 7;
+  const totalCells = 42;
 
   for (let index = 0; index < totalCells; index += 1) {
     const dayOffset = index - leadingDays + 1;
@@ -1275,6 +1274,101 @@ const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
   );
 };
 
+const getTodoScheduleRange = (todo = {}) => {
+  const dueDate = normalizeTodoDueDate(todo.dueDate || todo.dueDateText);
+  let startDate = normalizeTodoDueDate(
+    todo.startDate ||
+      todo.start_date ||
+      todo.plannedStartDate ||
+      todo.planned_start_date,
+  );
+  let endDate = normalizeTodoDueDate(
+    todo.endDate ||
+      todo.end_date ||
+      todo.plannedEndDate ||
+      todo.planned_end_date,
+  );
+
+  if (!startDate && !endDate && dueDate) {
+    startDate = dueDate;
+    endDate = dueDate;
+  } else if (startDate && !endDate) {
+    endDate = startDate;
+  } else if (endDate && !startDate) {
+    startDate = endDate;
+  }
+
+  if (!startDate || !endDate) return null;
+  if (endDate < startDate) {
+    return { startDate: endDate, endDate: startDate };
+  }
+  return { startDate, endDate };
+};
+
+const isDateInTodoScheduleRange = (todo, dateText) => {
+  const range = getTodoScheduleRange(todo);
+  return Boolean(range && range.startDate <= dateText && dateText <= range.endDate);
+};
+
+const formatScheduleRangeLabel = (todo = {}) => {
+  const range = getTodoScheduleRange(todo);
+  if (!range) return "기한 미정";
+  if (range.startDate === range.endDate) return range.endDate;
+  return `${range.startDate} ~ ${range.endDate}`;
+};
+
+const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
+  const weekStart = week[0]?.dateText;
+  const weekEnd = week[6]?.dateText;
+  if (!weekStart || !weekEnd) return { visibleSegments: [], hiddenCount: 0 };
+
+  const segments = todos
+    .map((todo) => {
+      const range = getTodoScheduleRange(todo);
+      if (!range || range.endDate < weekStart || range.startDate > weekEnd) {
+        return null;
+      }
+      const segmentStart = range.startDate < weekStart ? weekStart : range.startDate;
+      const segmentEnd = range.endDate > weekEnd ? weekEnd : range.endDate;
+      const startIndex = week.findIndex((cell) => cell.dateText === segmentStart);
+      const endIndex = week.findIndex((cell) => cell.dateText === segmentEnd);
+      if (startIndex < 0 || endIndex < 0) return null;
+      return {
+        todo,
+        range,
+        segmentStart,
+        segmentEnd,
+        startCol: startIndex + 1,
+        endCol: endIndex + 1,
+        duration: endIndex - startIndex + 1,
+      };
+    })
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        left.startCol - right.startCol ||
+        right.duration - left.duration ||
+        String(left.todo.title || "").localeCompare(String(right.todo.title || "")),
+    );
+
+  const laneEndColumns = [];
+  const visibleSegments = [];
+  let hiddenCount = 0;
+
+  segments.forEach((segment) => {
+    let lane = laneEndColumns.findIndex((endCol) => segment.startCol > endCol);
+    if (lane < 0) lane = laneEndColumns.length;
+    if (lane >= maxRows) {
+      hiddenCount += 1;
+      return;
+    }
+    laneEndColumns[lane] = segment.endCol;
+    visibleSegments.push({ ...segment, lane });
+  });
+
+  return { visibleSegments, hiddenCount };
+};
+
 const normalizeTodo = (item = {}) => {
   const todoId =
     item.todo_id ??
@@ -1289,14 +1383,29 @@ const normalizeTodo = (item = {}) => {
     item.due_date ?? item.dueDate ?? item.due_date_text ?? item.dueDateText,
     { defaultToday: false },
   );
+  const normalizedRange = getTodoScheduleRange({
+    startDate:
+      item.start_date ??
+      item.startDate ??
+      item.planned_start_date ??
+      item.plannedStartDate,
+    endDate:
+      item.end_date ??
+      item.endDate ??
+      item.planned_end_date ??
+      item.plannedEndDate,
+    dueDate,
+  });
   return {
     todoId,
     clientImportId:
       item.client_import_id ?? item.clientImportId ?? (todoId ? `IMPORT-${todoId}` : ""),
     title: item.title ?? "",
     assignee: item.assignee ?? "",
-    dueDate,
-    dueDateText: dueDate,
+    startDate: normalizedRange?.startDate || "",
+    endDate: normalizedRange?.endDate || "",
+    dueDate: normalizedRange?.endDate || dueDate,
+    dueDateText: normalizedRange?.endDate || dueDate,
     status: item.status ?? "NOT_STARTED",
     sourceType,
     sourceDocumentId: item.source_document_id ?? item.sourceDocumentId ?? "",
@@ -1347,14 +1456,15 @@ const normalizeTodoImportPreview = (response) => {
 
 const toTodoImportPayload = (item) => {
   const raw = item.raw ?? {};
+  const range = getTodoScheduleRange(item);
   return {
     todo_id: item.todoId || item.clientImportId || raw.todo_id || "",
     client_import_id: item.clientImportId || raw.client_import_id || item.todoId,
     title: item.title,
     assignee: item.assignee || null,
-    due_date: normalizeTodoDueDate(item.dueDate || item.dueDateText, {
-      defaultToday: false,
-    }),
+    start_date: range?.startDate || null,
+    end_date: range?.endDate || null,
+    due_date: range?.endDate || null,
     status: item.status || "NOT_STARTED",
     source_type: item.sourceType,
     source_document_id: item.sourceDocumentId || null,
@@ -1961,7 +2071,8 @@ function App() {
   const [scheduleDraft, setScheduleDraft] = useState({
     title: "",
     assignee: "",
-    dueDate: getTodayIsoDate(),
+    startDate: getTodayIsoDate(),
+    endDate: getTodayIsoDate(),
     status: "NOT_STARTED",
     description: "",
   });
@@ -1979,6 +2090,8 @@ function App() {
   const [todoEditDraft, setTodoEditDraft] = useState({
     title: "",
     assignee: "",
+    startDate: "",
+    endDate: "",
     dueDate: "",
     description: "",
     status: "NOT_STARTED",
@@ -2050,26 +2163,19 @@ function App() {
       ),
     [todoImportDocuments, todoImportDocumentType],
   );
-  const todosByDate = useMemo(() => {
-    const grouped = new Map();
-    todoItems.forEach((todo) => {
-      const dueDate = normalizeTodoDueDate(todo.dueDate || todo.dueDateText);
-      if (!dueDate) return;
-      if (!grouped.has(dueDate)) grouped.set(dueDate, []);
-      grouped.get(dueDate).push(todo);
-    });
-    return grouped;
-  }, [todoItems]);
   const undatedTodos = useMemo(
     () =>
       todoItems.filter(
-        (todo) => !normalizeTodoDueDate(todo.dueDate || todo.dueDateText),
+        (todo) => !getTodoScheduleRange(todo),
       ),
     [todoItems],
   );
   const selectedScheduleTodos = useMemo(
-    () => todosByDate.get(selectedScheduleDate) ?? [],
-    [selectedScheduleDate, todosByDate],
+    () =>
+      todoItems.filter((todo) =>
+        isDateInTodoScheduleRange(todo, selectedScheduleDate),
+      ),
+    [selectedScheduleDate, todoItems],
   );
 
   useEffect(() => {
@@ -2123,6 +2229,8 @@ function App() {
     setTodoEditDraft({
       title: "",
       assignee: "",
+      startDate: "",
+      endDate: "",
       dueDate: "",
       description: "",
       status: "NOT_STARTED",
@@ -3158,13 +3266,14 @@ function App() {
   };
 
   const handleStartTodoEdit = (todo) => {
+    const range = getTodoScheduleRange(todo);
     setEditingTodoId(todo.todoId);
     setTodoEditDraft({
       title: todo.title || "",
       assignee: todo.assignee || "",
-      dueDate: normalizeTodoDueDate(todo.dueDate || todo.dueDateText, {
-        defaultToday: false,
-      }),
+      startDate: range?.startDate || "",
+      endDate: range?.endDate || "",
+      dueDate: range?.endDate || "",
       description: todo.description || "",
       status: todo.status || "NOT_STARTED",
     });
@@ -3180,6 +3289,9 @@ function App() {
     setTodoEditDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
+      ...(field === "dueDate"
+        ? { startDate: value, endDate: value }
+        : {}),
     }));
   };
 
@@ -3188,6 +3300,18 @@ function App() {
     const nextTitle = todoEditDraft.title.trim();
     if (!nextTitle) {
       setTodoActionError("할일명을 입력해 주세요.");
+      return;
+    }
+    const nextStartDate = normalizeTodoDueDate(
+      todoEditDraft.startDate || todoEditDraft.dueDate,
+      { defaultToday: false },
+    );
+    const nextEndDate = normalizeTodoDueDate(
+      todoEditDraft.endDate || todoEditDraft.dueDate || todoEditDraft.startDate,
+      { defaultToday: false },
+    );
+    if ((nextStartDate && nextEndDate && nextEndDate < nextStartDate)) {
+      setTodoActionError("종료일은 시작일보다 빠를 수 없습니다.");
       return;
     }
 
@@ -3201,9 +3325,9 @@ function App() {
           payload: {
             title: nextTitle,
             assignee: todoEditDraft.assignee.trim() || null,
-            due_date: normalizeTodoDueDate(todoEditDraft.dueDate, {
-              defaultToday: false,
-            }),
+            start_date: nextStartDate || null,
+            end_date: nextEndDate || null,
+            due_date: nextEndDate || null,
             status: todoEditDraft.status || "NOT_STARTED",
             description: todoEditDraft.description.trim() || null,
           },
@@ -3617,7 +3741,8 @@ function App() {
     setScheduleDraft({
       title: "",
       assignee: "",
-      dueDate: initialDate,
+      startDate: initialDate,
+      endDate: initialDate,
       status: "NOT_STARTED",
       description: "",
     });
@@ -3667,13 +3792,18 @@ function App() {
     if (!project?.projectId || isCommittingTodoImport) return;
 
     const title = scheduleDraft.title.trim();
-    const dueDate = normalizeTodoDueDate(scheduleDraft.dueDate);
+    const startDate = normalizeTodoDueDate(scheduleDraft.startDate);
+    const endDate = normalizeTodoDueDate(scheduleDraft.endDate || scheduleDraft.startDate);
     if (!title) {
       setTodoActionError("할일명을 입력해 주세요.");
       return;
     }
-    if (!dueDate) {
-      setTodoActionError("캘린더에 표시할 기한을 선택해 주세요.");
+    if (!startDate || !endDate) {
+      setTodoActionError("캘린더에 표시할 시작일과 종료일을 선택해 주세요.");
+      return;
+    }
+    if (endDate < startDate) {
+      setTodoActionError("종료일은 시작일보다 빠를 수 없습니다.");
       return;
     }
 
@@ -3689,7 +3819,9 @@ function App() {
             client_import_id: clientImportId,
             title,
             assignee: scheduleDraft.assignee.trim() || null,
-            due_date: dueDate,
+            start_date: startDate,
+            end_date: endDate,
+            due_date: endDate,
             status: scheduleDraft.status || "NOT_STARTED",
             source_type: "MEETING_NOTES",
             description: scheduleDraft.description.trim() || null,
@@ -3702,8 +3834,8 @@ function App() {
           },
         ],
       });
-      setSelectedScheduleDate(dueDate);
-      setScheduleMonth(getMonthKeyFromIsoDate(dueDate));
+      setSelectedScheduleDate(startDate);
+      setScheduleMonth(getMonthKeyFromIsoDate(startDate));
       handleCloseScheduleRegistration();
       await loadTodos({ status: "" });
     } catch (error) {
@@ -5034,7 +5166,6 @@ function App() {
         <ProjectScheduleCalendar
           project={project}
           todos={todoItems}
-          todosByDate={todosByDate}
           undatedTodos={undatedTodos}
           scheduleMonth={scheduleMonth}
           selectedDate={selectedScheduleDate}
@@ -5369,7 +5500,7 @@ const getTodoStatusLabel = (status = "") =>
 
 function ProjectScheduleCalendar({
   project,
-  todosByDate,
+  todos,
   undatedTodos,
   scheduleMonth,
   selectedDate,
@@ -5385,6 +5516,10 @@ function ProjectScheduleCalendar({
   onOpenRegistration,
 }) {
   const weeks = getCalendarWeeks(scheduleMonth);
+  const datedTodos = useMemo(
+    () => todos.filter((todo) => getTodoScheduleRange(todo)),
+    [todos],
+  );
   const today = getTodayIsoDate();
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -5444,43 +5579,17 @@ function ProjectScheduleCalendar({
               <span key={label}>{label}</span>
             ))}
           </div>
-          <div className="schedule-calendar__grid">
-            {weeks.flat().map((cell) => {
-              const dayTodos = todosByDate.get(cell.dateText) ?? [];
-              const previewTodos = dayTodos.slice(0, 3);
-              const hiddenCount = Math.max(0, dayTodos.length - previewTodos.length);
-              return (
-                <button
-                  key={cell.dateText}
-                  className={[
-                    "schedule-day",
-                    cell.isCurrentMonth ? "" : "is-outside-month",
-                    cell.dateText === today ? "is-today" : "",
-                    cell.dateText === selectedDate ? "is-selected" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  type="button"
-                  onClick={() => onDateSelect(cell.dateText)}
-                >
-                  <span className="schedule-day__number">{cell.day}</span>
-                  <span className="schedule-day__items">
-                    {previewTodos.map((todo) => (
-                      <span
-                        className={`schedule-chip is-${getTodoStatusTone(todo.status)}`}
-                        key={todo.todoId || todo.title}
-                        title={todo.title}
-                      >
-                        {getTodoStatusLabel(todo.status)} · {todo.title || "제목 없음"}
-                      </span>
-                    ))}
-                    {hiddenCount > 0 && (
-                      <span className="schedule-chip-more">+{hiddenCount}개 더</span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="schedule-calendar__weeks">
+            {weeks.map((week) => (
+              <ScheduleWeekRow
+                key={week[0]?.dateText}
+                week={week}
+                todos={datedTodos}
+                today={today}
+                selectedDate={selectedDate}
+                onDateSelect={onDateSelect}
+              />
+            ))}
           </div>
         </section>
 
@@ -5502,6 +5611,66 @@ function ProjectScheduleCalendar({
             <p>기한 미정 할일이 없습니다.</p>
           )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+function ScheduleWeekRow({ week, todos, today, selectedDate, onDateSelect }) {
+  const { visibleSegments, hiddenCount } = getWeekScheduleSegments(week, todos);
+
+  return (
+    <div className="schedule-week-row">
+      <div className="schedule-week-days">
+        {week.map((cell) => (
+          <button
+            key={cell.dateText}
+            className={[
+              "schedule-day",
+              cell.isCurrentMonth ? "" : "is-outside-month",
+              cell.dateText === today ? "is-today" : "",
+              cell.dateText === selectedDate ? "is-selected" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            type="button"
+            onClick={() => onDateSelect(cell.dateText)}
+          >
+            <span className="schedule-day__number">{cell.day}</span>
+          </button>
+        ))}
+      </div>
+      <div className="schedule-event-layer">
+        {visibleSegments.map((segment) => (
+          <button
+            className={`calendar-event-bar calendar-event-bar--${getTodoStatusTone(
+              segment.todo.status,
+            )}`}
+            key={`${segment.todo.todoId || segment.todo.title}-${segment.segmentStart}`}
+            style={{
+              gridColumn: `${segment.startCol} / ${segment.endCol + 1}`,
+              gridRow: segment.lane + 1,
+            }}
+            title={`${formatScheduleRangeLabel(segment.todo)} · ${
+              segment.todo.title || "제목 없음"
+            }`}
+            type="button"
+            onClick={() => onDateSelect(segment.segmentStart)}
+          >
+            <span>{getTodoStatusLabel(segment.todo.status)}</span>
+            {segment.todo.title || "제목 없음"}
+          </button>
+        ))}
+        {hiddenCount > 0 && (
+          <button
+            className="schedule-event-more"
+            style={{ gridColumn: "1 / -1", gridRow: 4 }}
+            type="button"
+            onClick={() => onDateSelect(week[0].dateText)}
+          >
+            +{hiddenCount}개 더
+          </button>
+        )}
       </div>
     </div>
   );
@@ -5564,8 +5733,8 @@ function ScheduleDayModal({
                               <dd>{todo.assignee || "미정"}</dd>
                             </div>
                             <div>
-                              <dt>기한</dt>
-                              <dd>{todo.dueDate || "미정"}</dd>
+                              <dt>기간</dt>
+                              <dd>{formatScheduleRangeLabel(todo)}</dd>
                             </div>
                           </dl>
                           {todo.description && <p>{todo.description}</p>}
@@ -5591,12 +5760,21 @@ function ScheduleDayModal({
                           />
                         </label>
                         <label>
-                          기한
+                          시작일
                           <input
                             type="date"
-                            value={editDraft.dueDate}
-                            onInput={(event) => onEditDraftChange("dueDate", event.currentTarget.value)}
-                            onChange={(event) => onEditDraftChange("dueDate", event.target.value)}
+                            value={editDraft.startDate}
+                            onInput={(event) => onEditDraftChange("startDate", event.currentTarget.value)}
+                            onChange={(event) => onEditDraftChange("startDate", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          종료일
+                          <input
+                            type="date"
+                            value={editDraft.endDate}
+                            onInput={(event) => onEditDraftChange("endDate", event.currentTarget.value)}
+                            onChange={(event) => onEditDraftChange("endDate", event.target.value)}
                           />
                         </label>
                         <label>
@@ -5788,12 +5966,21 @@ function ScheduleRegistrationModal({
                 />
               </label>
               <label>
-                기한
+                시작일
                 <input
                   type="date"
-                  value={draft.dueDate}
-                  onInput={(event) => onDraftChange("dueDate", event.currentTarget.value)}
-                  onChange={(event) => onDraftChange("dueDate", event.target.value)}
+                  value={draft.startDate}
+                  onInput={(event) => onDraftChange("startDate", event.currentTarget.value)}
+                  onChange={(event) => onDraftChange("startDate", event.target.value)}
+                />
+              </label>
+              <label>
+                종료일
+                <input
+                  type="date"
+                  value={draft.endDate}
+                  onInput={(event) => onDraftChange("endDate", event.currentTarget.value)}
+                  onChange={(event) => onDraftChange("endDate", event.target.value)}
                 />
               </label>
               <label>
@@ -5968,8 +6155,8 @@ function ScheduleImportPreviewList({ preview, selectedIds, onToggleItem }) {
               <span>
                 <strong>{item.title || "제목 없음"}</strong>
                 <small>
-                  담당자: {item.assignee || "미정"} · 기한:{" "}
-                  {item.dueDate || item.dueDateText || "미정"} · 상태:{" "}
+                  담당자: {item.assignee || "미정"} · 기간:{" "}
+                  {formatScheduleRangeLabel(item)} · 상태:{" "}
                   {getTodoStatusLabel(item.status)}
                 </small>
                 {duplicate && (
@@ -7415,7 +7602,7 @@ function TodoManagerModal({
           <strong>{item.title || "제목 없음"}</strong>
           <p>
             {item.assignee || "담당자 미정"} ·{" "}
-            {item.dueDate || item.dueDateText || "기한 미정"}
+            {formatScheduleRangeLabel(item)}
           </p>
           {matchedExisting?.title && (
             <div className="todo-duplicate-match">
@@ -7423,9 +7610,7 @@ function TodoManagerModal({
               <strong>{matchedExisting.title}</strong>
               <p>
                 {matchedExisting.assignee || "담당자 미정"} ·{" "}
-                {matchedExisting.dueDate ||
-                  matchedExisting.dueDateText ||
-                  "기한 미정"}
+                {formatScheduleRangeLabel(matchedExisting)}
               </p>
             </div>
           )}
@@ -7463,8 +7648,8 @@ function TodoManagerModal({
               <dd>{todo.assignee || "미정"}</dd>
             </div>
             <div>
-              <dt>기한</dt>
-              <dd>{todo.dueDate || todo.dueDateText || "미정"}</dd>
+              <dt>기간</dt>
+              <dd>{formatScheduleRangeLabel(todo)}</dd>
             </div>
           </dl>
           <div className="todo-row-actions">
