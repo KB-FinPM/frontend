@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Bot,
   BriefcaseBusiness,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -132,6 +133,15 @@ const DOCUMENT_CONTEXT_REQUEST_TYPES = Object.freeze({
 const FILE_MANAGER_TABS = Object.freeze({
   UPLOADED: "uploaded",
   GENERATED: "generated",
+});
+const WORKSPACE_TABS = Object.freeze({
+  DOCUMENTS: "documents",
+  SCHEDULE: "schedule",
+});
+const SCHEDULE_REGISTRATION_MODES = Object.freeze({
+  MANUAL: "manual",
+  EXISTING: "existing",
+  UPLOAD: "upload",
 });
 const FILE_KINDS = Object.freeze({
   UPLOADED: "uploaded",
@@ -1209,6 +1219,62 @@ const normalizeTodoDueDate = (value, { defaultToday = false } = {}) => {
   return defaultToday ? getTodayIsoDate() : "";
 };
 
+const getMonthKeyFromDate = (dateValue = new Date()) =>
+  `${dateValue.getFullYear()}-${padDatePart(dateValue.getMonth() + 1)}`;
+
+const getMonthKeyFromIsoDate = (dateText = getTodayIsoDate()) => {
+  const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
+  return normalizedDate.slice(0, 7);
+};
+
+const addMonthsToMonthKey = (monthKey, offset) => {
+  const [year, month] = String(monthKey || getMonthKeyFromDate())
+    .split("-")
+    .map(Number);
+  const dateValue = new Date(year, (month || 1) - 1 + offset, 1);
+  return getMonthKeyFromDate(dateValue);
+};
+
+const formatMonthLabel = (monthKey = getMonthKeyFromDate()) => {
+  const [year, month] = String(monthKey).split("-");
+  return `${year}년 ${Number(month)}월`;
+};
+
+const formatDateLabel = (dateText = "") => {
+  const normalizedDate = normalizeTodoDueDate(dateText);
+  if (!normalizedDate) return "날짜 미정";
+  const [year, month, day] = normalizedDate.split("-");
+  return `${year}년 ${Number(month)}월 ${Number(day)}일`;
+};
+
+const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  const firstDate = new Date(year, (month || 1) - 1, 1);
+  const lastDate = new Date(year, month || 1, 0);
+  const cells = [];
+  const leadingDays = firstDate.getDay();
+  const totalCells = Math.ceil((leadingDays + lastDate.getDate()) / 7) * 7;
+
+  for (let index = 0; index < totalCells; index += 1) {
+    const dayOffset = index - leadingDays + 1;
+    const dateValue = new Date(year, (month || 1) - 1, dayOffset);
+    const dateText = [
+      dateValue.getFullYear(),
+      padDatePart(dateValue.getMonth() + 1),
+      padDatePart(dateValue.getDate()),
+    ].join("-");
+    cells.push({
+      dateText,
+      day: dateValue.getDate(),
+      isCurrentMonth: dateValue.getMonth() === (month || 1) - 1,
+    });
+  }
+
+  return Array.from({ length: Math.ceil(cells.length / 7) }, (_, index) =>
+    cells.slice(index * 7, index * 7 + 7),
+  );
+};
+
 const normalizeTodo = (item = {}) => {
   const todoId =
     item.todo_id ??
@@ -1221,7 +1287,7 @@ const normalizeTodo = (item = {}) => {
     item.source_type ?? item.sourceType ?? item.document_type ?? item.documentType ?? "";
   const dueDate = normalizeTodoDueDate(
     item.due_date ?? item.dueDate ?? item.due_date_text ?? item.dueDateText,
-    { defaultToday: true },
+    { defaultToday: false },
   );
   return {
     todoId,
@@ -1287,7 +1353,7 @@ const toTodoImportPayload = (item) => {
     title: item.title,
     assignee: item.assignee || null,
     due_date: normalizeTodoDueDate(item.dueDate || item.dueDateText, {
-      defaultToday: true,
+      defaultToday: false,
     }),
     status: item.status || "NOT_STARTED",
     source_type: item.sourceType,
@@ -1879,6 +1945,26 @@ function App() {
   const [editingFileTarget, setEditingFileTarget] = useState(null);
   const [renamingFileKey, setRenamingFileKey] = useState("");
   const [fileNameDraft, setFileNameDraft] = useState("");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState(
+    WORKSPACE_TABS.DOCUMENTS,
+  );
+  const [scheduleMonth, setScheduleMonth] = useState(() =>
+    getMonthKeyFromIsoDate(getTodayIsoDate()),
+  );
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState(getTodayIsoDate());
+  const [isScheduleDayModalOpen, setIsScheduleDayModalOpen] = useState(false);
+  const [isScheduleRegistrationOpen, setIsScheduleRegistrationOpen] =
+    useState(false);
+  const [scheduleRegistrationMode, setScheduleRegistrationMode] = useState(
+    SCHEDULE_REGISTRATION_MODES.MANUAL,
+  );
+  const [scheduleDraft, setScheduleDraft] = useState({
+    title: "",
+    assignee: "",
+    dueDate: getTodayIsoDate(),
+    status: "NOT_STARTED",
+    description: "",
+  });
   const [isTodoManagerOpen, setIsTodoManagerOpen] = useState(false);
   const [todoItems, setTodoItems] = useState([]);
   const [todoStatusFilter, setTodoStatusFilter] = useState("");
@@ -1964,6 +2050,34 @@ function App() {
       ),
     [todoImportDocuments, todoImportDocumentType],
   );
+  const todosByDate = useMemo(() => {
+    const grouped = new Map();
+    todoItems.forEach((todo) => {
+      const dueDate = normalizeTodoDueDate(todo.dueDate || todo.dueDateText);
+      if (!dueDate) return;
+      if (!grouped.has(dueDate)) grouped.set(dueDate, []);
+      grouped.get(dueDate).push(todo);
+    });
+    return grouped;
+  }, [todoItems]);
+  const undatedTodos = useMemo(
+    () =>
+      todoItems.filter(
+        (todo) => !normalizeTodoDueDate(todo.dueDate || todo.dueDateText),
+      ),
+    [todoItems],
+  );
+  const selectedScheduleTodos = useMemo(
+    () => todosByDate.get(selectedScheduleDate) ?? [],
+    [selectedScheduleDate, todosByDate],
+  );
+
+  useEffect(() => {
+    if (activeWorkspaceTab !== WORKSPACE_TABS.SCHEDULE) return;
+    if (!project?.projectId) return;
+    loadTodos({ status: "" });
+    loadUploadedFiles(project);
+  }, [activeWorkspaceTab, project?.projectId]);
 
   useEffect(() => {
     if (!isTodoImportOpen || !todoImportUseExisting) return;
@@ -2925,7 +3039,8 @@ function App() {
   };
 
   const openTodoManager = () => {
-    setIsTodoManagerOpen(true);
+    setActiveWorkspaceTab(WORKSPACE_TABS.SCHEDULE);
+    setIsTodoManagerOpen(false);
     setIsSidebarDrawerOpen(false);
     setTodoActionError("");
     setTodoError("");
@@ -2940,7 +3055,7 @@ function App() {
       setTodoError("프로젝트를 먼저 선택해 주세요.");
       return;
     }
-    loadTodos();
+    loadTodos({ status: "" });
     loadUploadedFiles(project);
   };
 
@@ -3048,7 +3163,7 @@ function App() {
       title: todo.title || "",
       assignee: todo.assignee || "",
       dueDate: normalizeTodoDueDate(todo.dueDate || todo.dueDateText, {
-        defaultToday: true,
+        defaultToday: false,
       }),
       description: todo.description || "",
       status: todo.status || "NOT_STARTED",
@@ -3087,7 +3202,7 @@ function App() {
             title: nextTitle,
             assignee: todoEditDraft.assignee.trim() || null,
             due_date: normalizeTodoDueDate(todoEditDraft.dueDate, {
-              defaultToday: true,
+              defaultToday: false,
             }),
             status: todoEditDraft.status || "NOT_STARTED",
             description: todoEditDraft.description.trim() || null,
@@ -3448,10 +3563,152 @@ function App() {
       setSelectedTodoImportIds([]);
       setIsTodoImportOpen(false);
       setTodoImportStatusMessage("");
-      await loadTodos();
+      if (isScheduleRegistrationOpen) {
+        setIsScheduleRegistrationOpen(false);
+      }
+      await loadTodos({ status: "" });
     } catch (error) {
       setTodoActionError(
         error instanceof Error ? error.message : "할일을 저장하지 못했습니다.",
+      );
+    } finally {
+      setIsCommittingTodoImport(false);
+    }
+  };
+
+  const handleWorkspaceTabChange = (tab) => {
+    setActiveWorkspaceTab(tab);
+    if (tab === WORKSPACE_TABS.SCHEDULE && project?.projectId) {
+      loadTodos({ status: "" });
+      loadUploadedFiles(project);
+    }
+  };
+
+  const handleScheduleDateSelect = (dateText) => {
+    const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
+    setSelectedScheduleDate(normalizedDate);
+    setScheduleMonth(getMonthKeyFromIsoDate(normalizedDate));
+    setEditingTodoId("");
+    setTodoActionError("");
+    setIsScheduleDayModalOpen(true);
+  };
+
+  const handleScheduleMonthChange = (offset) => {
+    setScheduleMonth((currentMonth) => addMonthsToMonthKey(currentMonth, offset));
+  };
+
+  const handleScheduleToday = () => {
+    const today = getTodayIsoDate();
+    setScheduleMonth(getMonthKeyFromIsoDate(today));
+    setSelectedScheduleDate(today);
+  };
+
+  const resetScheduleRegistrationImportState = () => {
+    setIsTodoImportOpen(true);
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    setTodoImportStatusMessage("");
+    setTodoActionError("");
+    setTodoImportFile(null);
+  };
+
+  const handleOpenScheduleRegistration = () => {
+    const initialDate = selectedScheduleDate || getTodayIsoDate();
+    setScheduleDraft({
+      title: "",
+      assignee: "",
+      dueDate: initialDate,
+      status: "NOT_STARTED",
+      description: "",
+    });
+    setScheduleRegistrationMode(SCHEDULE_REGISTRATION_MODES.MANUAL);
+    setTodoImportUseExisting(true);
+    resetScheduleRegistrationImportState();
+    if (
+      !todoImportDocumentId &&
+      filteredTodoImportDocuments[0]?.documentId
+    ) {
+      setTodoImportDocumentId(filteredTodoImportDocuments[0].documentId);
+    }
+    if (project?.projectId) {
+      loadUploadedFiles(project);
+    }
+    setIsScheduleRegistrationOpen(true);
+  };
+
+  const handleCloseScheduleRegistration = () => {
+    setIsScheduleRegistrationOpen(false);
+    setTodoActionError("");
+    setTodoImportStatusMessage("");
+    setTodoImportPreview(null);
+    setSelectedTodoImportIds([]);
+    setTodoImportFile(null);
+  };
+
+  const handleScheduleRegistrationModeChange = (mode) => {
+    setScheduleRegistrationMode(mode);
+    const useExisting = mode === SCHEDULE_REGISTRATION_MODES.EXISTING;
+    setTodoImportUseExisting(useExisting);
+    resetScheduleRegistrationImportState();
+    setTodoImportDocumentId(
+      useExisting ? filteredTodoImportDocuments[0]?.documentId || "" : "",
+    );
+  };
+
+  const handleScheduleDraftChange = (field, value) => {
+    setScheduleDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }));
+  };
+
+  const handleCreateManualSchedule = async (event) => {
+    event.preventDefault();
+    if (!project?.projectId || isCommittingTodoImport) return;
+
+    const title = scheduleDraft.title.trim();
+    const dueDate = normalizeTodoDueDate(scheduleDraft.dueDate);
+    if (!title) {
+      setTodoActionError("할일명을 입력해 주세요.");
+      return;
+    }
+    if (!dueDate) {
+      setTodoActionError("캘린더에 표시할 기한을 선택해 주세요.");
+      return;
+    }
+
+    const clientImportId = `MANUAL-${Date.now()}`;
+    setIsCommittingTodoImport(true);
+    setTodoActionError("");
+    try {
+      await commitProjectTodoImport({
+        projectId: project.projectId,
+        items: [
+          {
+            todo_id: clientImportId,
+            client_import_id: clientImportId,
+            title,
+            assignee: scheduleDraft.assignee.trim() || null,
+            due_date: dueDate,
+            status: scheduleDraft.status || "NOT_STARTED",
+            source_type: "MEETING_NOTES",
+            description: scheduleDraft.description.trim() || null,
+          },
+        ],
+        duplicateDecisions: [
+          {
+            client_import_id: clientImportId,
+            decision: "ADD",
+          },
+        ],
+      });
+      setSelectedScheduleDate(dueDate);
+      setScheduleMonth(getMonthKeyFromIsoDate(dueDate));
+      handleCloseScheduleRegistration();
+      await loadTodos({ status: "" });
+    } catch (error) {
+      setTodoActionError(
+        error instanceof Error ? error.message : "일정을 등록하지 못했습니다.",
       );
     } finally {
       setIsCommittingTodoImport(false);
@@ -4761,15 +5018,38 @@ function App() {
         }
       />
 
-      <DocumentGenerationHub
-        project={project}
-        nodes={documentHubNodes}
-        selectedNode={selectedDocumentHubNode}
-        isSidebarDrawerOpen={isSidebarDrawerOpen}
-        onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
-        onSelectNode={handleSelectDocumentHubNode}
-        onDownloadNodeArtifact={handleDownloadDocumentNodeArtifact}
-      />
+      {activeWorkspaceTab === WORKSPACE_TABS.DOCUMENTS ? (
+        <DocumentGenerationHub
+          project={project}
+          nodes={documentHubNodes}
+          selectedNode={selectedDocumentHubNode}
+          isSidebarDrawerOpen={isSidebarDrawerOpen}
+          activeTab={activeWorkspaceTab}
+          onTabChange={handleWorkspaceTabChange}
+          onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
+          onSelectNode={handleSelectDocumentHubNode}
+          onDownloadNodeArtifact={handleDownloadDocumentNodeArtifact}
+        />
+      ) : (
+        <ProjectScheduleCalendar
+          project={project}
+          todos={todoItems}
+          todosByDate={todosByDate}
+          undatedTodos={undatedTodos}
+          scheduleMonth={scheduleMonth}
+          selectedDate={selectedScheduleDate}
+          isSidebarDrawerOpen={isSidebarDrawerOpen}
+          isLoading={isLoadingTodos}
+          error={todoError}
+          activeTab={activeWorkspaceTab}
+          onTabChange={handleWorkspaceTabChange}
+          onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
+          onDateSelect={handleScheduleDateSelect}
+          onMonthChange={handleScheduleMonthChange}
+          onToday={handleScheduleToday}
+          onOpenRegistration={handleOpenScheduleRegistration}
+        />
+      )}
 
       {isDocumentGenerationModalOpen && (
         <DocumentGenerationModal
@@ -4953,6 +5233,56 @@ function App() {
           onCommitImport={handleCommitTodoImport}
         />
       )}
+      {isScheduleDayModalOpen && (
+        <ScheduleDayModal
+          dateText={selectedScheduleDate}
+          todos={selectedScheduleTodos}
+          actionError={todoActionError}
+          savingTodoId={savingTodoId}
+          editingTodoId={editingTodoId}
+          editDraft={todoEditDraft}
+          onClose={() => {
+            setIsScheduleDayModalOpen(false);
+            setEditingTodoId("");
+            setTodoActionError("");
+          }}
+          onStatusChange={handleTodoStatusChange}
+          onStartEdit={handleStartTodoEdit}
+          onCancelEdit={handleCancelTodoEdit}
+          onEditDraftChange={handleTodoEditDraftChange}
+          onSaveEdit={handleSaveTodoEdit}
+          onDelete={handleDeleteTodo}
+        />
+      )}
+      {isScheduleRegistrationOpen && (
+        <ScheduleRegistrationModal
+          mode={scheduleRegistrationMode}
+          draft={scheduleDraft}
+          importDocuments={filteredTodoImportDocuments}
+          importDocumentType={todoImportDocumentType}
+          importDocumentId={todoImportDocumentId}
+          importFile={todoImportFile}
+          importStatusMessage={todoImportStatusMessage}
+          importPreview={todoImportPreview}
+          selectedImportIds={selectedTodoImportIds}
+          isLoadingDocuments={isLoadingUploadedFiles}
+          isUploadingImportDocument={isUploadingTodoImportDocument}
+          isPreviewingImport={isPreviewingTodoImport}
+          isCommittingImport={isCommittingTodoImport}
+          actionError={todoActionError}
+          onClose={handleCloseScheduleRegistration}
+          onModeChange={handleScheduleRegistrationModeChange}
+          onDraftChange={handleScheduleDraftChange}
+          onCreateManual={handleCreateManualSchedule}
+          onImportDocumentTypeChange={handleTodoImportDocumentTypeChange}
+          onImportDocumentChange={handleTodoImportDocumentChange}
+          onImportFileChange={handleTodoImportFileChange}
+          onPreviewImport={handlePreviewTodoImport}
+          onToggleImportItem={handleToggleTodoImportItem}
+          onSelectImportMode={handleSelectTodoImportMode}
+          onCommitImport={handleCommitTodoImport}
+        />
+      )}
     </main>
   );
 }
@@ -4962,6 +5292,8 @@ function DocumentGenerationHub({
   nodes,
   selectedNode,
   isSidebarDrawerOpen,
+  activeTab,
+  onTabChange,
   onOpenSidebar,
   onSelectNode,
   onDownloadNodeArtifact,
@@ -4986,6 +5318,7 @@ function DocumentGenerationHub({
           <span>문서 간 관계를 확인하고 생성할 문서를 선택하세요.</span>
         </div>
       </header>
+      <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
 
       <div className="document-hub-scroll">
         <DocumentRelationMap
@@ -4996,6 +5329,661 @@ function DocumentGenerationHub({
         />
       </div>
     </div>
+  );
+}
+
+function WorkspaceTabs({ activeTab, onTabChange }) {
+  return (
+    <nav className="workspace-tabs" aria-label="프로젝트 작업 탭">
+      <button
+        className={activeTab === WORKSPACE_TABS.DOCUMENTS ? "is-active" : ""}
+        type="button"
+        aria-current={activeTab === WORKSPACE_TABS.DOCUMENTS ? "page" : undefined}
+        onClick={() => onTabChange(WORKSPACE_TABS.DOCUMENTS)}
+      >
+        <FileText size={16} aria-hidden="true" />
+        문서 생성
+      </button>
+      <button
+        className={activeTab === WORKSPACE_TABS.SCHEDULE ? "is-active" : ""}
+        type="button"
+        aria-current={activeTab === WORKSPACE_TABS.SCHEDULE ? "page" : undefined}
+        onClick={() => onTabChange(WORKSPACE_TABS.SCHEDULE)}
+      >
+        <CalendarDays size={16} aria-hidden="true" />
+        프로젝트 일정
+      </button>
+    </nav>
+  );
+}
+
+const getTodoStatusTone = (status = "") => {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "DONE" || normalized === "COMPLETED") return "done";
+  if (normalized === "IN_PROGRESS") return "in-progress";
+  return "not-started";
+};
+
+const getTodoStatusLabel = (status = "") =>
+  TODO_STATUS_OPTIONS.find((option) => option.value === status)?.label || "진행전";
+
+function ProjectScheduleCalendar({
+  project,
+  todosByDate,
+  undatedTodos,
+  scheduleMonth,
+  selectedDate,
+  isSidebarDrawerOpen,
+  isLoading,
+  error,
+  activeTab,
+  onTabChange,
+  onOpenSidebar,
+  onDateSelect,
+  onMonthChange,
+  onToday,
+  onOpenRegistration,
+}) {
+  const weeks = getCalendarWeeks(scheduleMonth);
+  const today = getTodayIsoDate();
+  const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+
+  return (
+    <div className="document-hub-panel schedule-panel" role="main" aria-label="프로젝트 일정">
+      <header className="document-hub-header">
+        <button
+          className="sidebar-menu-button"
+          type="button"
+          aria-label="프로젝트 및 대화 목록 열기"
+          aria-expanded={isSidebarDrawerOpen}
+          onClick={onOpenSidebar}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <div className="assistant-avatar">
+          <CalendarDays size={20} aria-hidden="true" />
+        </div>
+        <div className="document-hub-title">
+          <strong>프로젝트 일정</strong>
+          <span>{project.projectName}의 할일과 주요 일정을 월간 캘린더로 확인하세요.</span>
+        </div>
+      </header>
+      <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
+
+      <div className="schedule-scroll">
+        <section className="schedule-toolbar" aria-label="월간 일정 도구">
+          <div>
+            <h2>{formatMonthLabel(scheduleMonth)}</h2>
+            <span>
+              날짜를 선택하면 해당 일자의 일정 관리 팝업이 열립니다.
+            </span>
+          </div>
+          <div className="schedule-toolbar__actions">
+            <button className="secondary-button" type="button" onClick={() => onMonthChange(-1)}>
+              이전
+            </button>
+            <button className="secondary-button" type="button" onClick={onToday}>
+              오늘
+            </button>
+            <button className="secondary-button" type="button" onClick={() => onMonthChange(1)}>
+              다음
+            </button>
+            <button className="primary-button" type="button" onClick={onOpenRegistration}>
+              <PlusCircle size={16} aria-hidden="true" />
+              일정 등록
+            </button>
+          </div>
+        </section>
+
+        {error && <p className="form-error">{error}</p>}
+        {isLoading && <p className="schedule-loading">일정을 불러오는 중입니다.</p>}
+
+        <section className="schedule-calendar" aria-label={`${formatMonthLabel(scheduleMonth)} 캘린더`}>
+          <div className="schedule-calendar__weekdays">
+            {weekdayLabels.map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+          <div className="schedule-calendar__grid">
+            {weeks.flat().map((cell) => {
+              const dayTodos = todosByDate.get(cell.dateText) ?? [];
+              const previewTodos = dayTodos.slice(0, 3);
+              const hiddenCount = Math.max(0, dayTodos.length - previewTodos.length);
+              return (
+                <button
+                  key={cell.dateText}
+                  className={[
+                    "schedule-day",
+                    cell.isCurrentMonth ? "" : "is-outside-month",
+                    cell.dateText === today ? "is-today" : "",
+                    cell.dateText === selectedDate ? "is-selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                  onClick={() => onDateSelect(cell.dateText)}
+                >
+                  <span className="schedule-day__number">{cell.day}</span>
+                  <span className="schedule-day__items">
+                    {previewTodos.map((todo) => (
+                      <span
+                        className={`schedule-chip is-${getTodoStatusTone(todo.status)}`}
+                        key={todo.todoId || todo.title}
+                        title={todo.title}
+                      >
+                        {getTodoStatusLabel(todo.status)} · {todo.title || "제목 없음"}
+                      </span>
+                    ))}
+                    {hiddenCount > 0 && (
+                      <span className="schedule-chip-more">+{hiddenCount}개 더</span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="schedule-undated" aria-label="기한 미정 할일">
+          <div>
+            <h3>기한 미정 할일</h3>
+            <span>{undatedTodos.length}개</span>
+          </div>
+          {undatedTodos.length ? (
+            <ul>
+              {undatedTodos.slice(0, 8).map((todo) => (
+                <li key={todo.todoId || todo.title}>
+                  <strong>{todo.title || "제목 없음"}</strong>
+                  <span>{todo.assignee || "담당자 미정"}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>기한 미정 할일이 없습니다.</p>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ScheduleDayModal({
+  dateText,
+  todos,
+  actionError,
+  savingTodoId,
+  editingTodoId,
+  editDraft,
+  onClose,
+  onStatusChange,
+  onStartEdit,
+  onCancelEdit,
+  onEditDraftChange,
+  onSaveEdit,
+  onDelete,
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        className="schedule-day-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="schedule-day-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <span>프로젝트 일정</span>
+            <h2 id="schedule-day-title">{formatDateLabel(dateText)} 일정</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="일정 팝업 닫기" onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="schedule-day-modal__body">
+          {actionError && <p className="form-error">{actionError}</p>}
+          {todos.length ? (
+            <ul className="schedule-day-list">
+              {todos.map((todo) => {
+                const isEditing = editingTodoId === todo.todoId;
+                const isSaving = savingTodoId === todo.todoId;
+                return (
+                  <li className="schedule-day-item" key={todo.todoId || todo.title}>
+                    <div className="schedule-day-item__main">
+                      <div className="schedule-day-item__title">
+                        <strong>{todo.title || "제목 없음"}</strong>
+                        <span className={`schedule-status is-${getTodoStatusTone(todo.status)}`}>
+                          {getTodoStatusLabel(todo.status)}
+                        </span>
+                      </div>
+                      {!isEditing && (
+                        <>
+                          <dl className="schedule-day-meta">
+                            <div>
+                              <dt>담당자</dt>
+                              <dd>{todo.assignee || "미정"}</dd>
+                            </div>
+                            <div>
+                              <dt>기한</dt>
+                              <dd>{todo.dueDate || "미정"}</dd>
+                            </div>
+                          </dl>
+                          {todo.description && <p>{todo.description}</p>}
+                        </>
+                      )}
+                    </div>
+                    {isEditing ? (
+                      <div className="schedule-edit-panel">
+                        <label>
+                          할일명
+                          <input
+                            type="text"
+                            value={editDraft.title}
+                            onChange={(event) => onEditDraftChange("title", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          담당자
+                          <input
+                            type="text"
+                            value={editDraft.assignee}
+                            onChange={(event) => onEditDraftChange("assignee", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          기한
+                          <input
+                            type="date"
+                            value={editDraft.dueDate}
+                            onInput={(event) => onEditDraftChange("dueDate", event.currentTarget.value)}
+                            onChange={(event) => onEditDraftChange("dueDate", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          진행상태
+                          <select
+                            value={editDraft.status}
+                            onChange={(event) => onEditDraftChange("status", event.target.value)}
+                          >
+                            {TODO_STATUS_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="schedule-edit-description">
+                          상세내용
+                          <textarea
+                            rows={3}
+                            value={editDraft.description}
+                            onChange={(event) => onEditDraftChange("description", event.target.value)}
+                          />
+                        </label>
+                        <div className="schedule-row-actions">
+                          <button className="secondary-button" type="button" onClick={onCancelEdit}>
+                            취소
+                          </button>
+                          <button
+                            className="primary-button"
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => onSaveEdit(todo)}
+                          >
+                            <Save size={14} aria-hidden="true" />
+                            저장
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="schedule-row-actions">
+                        <select
+                          value={todo.status || "NOT_STARTED"}
+                          disabled={isSaving}
+                          aria-label={`${todo.title} 진행상태`}
+                          onChange={(event) => onStatusChange(todo, event.target.value)}
+                        >
+                          {TODO_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          title="일정 수정"
+                          aria-label={`${todo.title} 일정 수정`}
+                          onClick={() => onStartEdit(todo)}
+                        >
+                          <Pencil size={14} aria-hidden="true" />
+                        </button>
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          title="일정 삭제"
+                          aria-label={`${todo.title} 일정 삭제`}
+                          onClick={() => onDelete(todo)}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="empty-state">선택한 날짜에 등록된 일정이 없습니다.</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ScheduleRegistrationModal({
+  mode,
+  draft,
+  importDocuments,
+  importDocumentType,
+  importDocumentId,
+  importFile,
+  importStatusMessage,
+  importPreview,
+  selectedImportIds,
+  isLoadingDocuments,
+  isUploadingImportDocument,
+  isPreviewingImport,
+  isCommittingImport,
+  actionError,
+  onClose,
+  onModeChange,
+  onDraftChange,
+  onCreateManual,
+  onImportDocumentTypeChange,
+  onImportDocumentChange,
+  onImportFileChange,
+  onPreviewImport,
+  onToggleImportItem,
+  onSelectImportMode,
+  onCommitImport,
+}) {
+  const isImportMode = mode !== SCHEDULE_REGISTRATION_MODES.MANUAL;
+  const candidateCount =
+    (importPreview?.newItems?.length || 0) +
+    (importPreview?.duplicateItems?.length || 0);
+  const selectedCount = selectedImportIds.length;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        className="schedule-registration-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="schedule-registration-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <span>프로젝트 일정</span>
+            <h2 id="schedule-registration-title">일정 등록</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="일정 등록 닫기" onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="schedule-registration-body">
+          <fieldset className="schedule-mode-row">
+            <legend>등록 방식</legend>
+            <label>
+              <input
+                type="radio"
+                name="schedule-registration-mode"
+                checked={mode === SCHEDULE_REGISTRATION_MODES.MANUAL}
+                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.MANUAL)}
+              />
+              직접 등록
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="schedule-registration-mode"
+                checked={mode === SCHEDULE_REGISTRATION_MODES.EXISTING}
+                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.EXISTING)}
+              />
+              기존 문서 사용
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="schedule-registration-mode"
+                checked={mode === SCHEDULE_REGISTRATION_MODES.UPLOAD}
+                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.UPLOAD)}
+              />
+              문서 업로드
+            </label>
+          </fieldset>
+
+          {actionError && <p className="form-error">{actionError}</p>}
+
+          {mode === SCHEDULE_REGISTRATION_MODES.MANUAL ? (
+            <form className="schedule-manual-form" onSubmit={onCreateManual}>
+              <label>
+                할일명
+                <input
+                  type="text"
+                  value={draft.title}
+                  onChange={(event) => onDraftChange("title", event.target.value)}
+                  placeholder="예: 요구사항 누락 항목 검토"
+                />
+              </label>
+              <label>
+                담당자
+                <input
+                  type="text"
+                  value={draft.assignee}
+                  onChange={(event) => onDraftChange("assignee", event.target.value)}
+                  placeholder="담당자"
+                />
+              </label>
+              <label>
+                기한
+                <input
+                  type="date"
+                  value={draft.dueDate}
+                  onInput={(event) => onDraftChange("dueDate", event.currentTarget.value)}
+                  onChange={(event) => onDraftChange("dueDate", event.target.value)}
+                />
+              </label>
+              <label>
+                진행상태
+                <select
+                  value={draft.status}
+                  onChange={(event) => onDraftChange("status", event.target.value)}
+                >
+                  {TODO_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="schedule-manual-description">
+                상세내용
+                <textarea
+                  rows={4}
+                  value={draft.description}
+                  onChange={(event) => onDraftChange("description", event.target.value)}
+                  placeholder="상세 내용을 입력하세요."
+                />
+              </label>
+              <button className="primary-button" type="submit" disabled={isCommittingImport}>
+                {isCommittingImport ? "등록 중" : "등록"}
+              </button>
+            </form>
+          ) : (
+            <div className="schedule-import-panel">
+              <div className="schedule-import-grid">
+                <label>
+                  문서 유형
+                  <select
+                    value={importDocumentType}
+                    onChange={(event) => onImportDocumentTypeChange(event.target.value)}
+                  >
+                    {TODO_IMPORT_DOCUMENT_TYPES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {mode === SCHEDULE_REGISTRATION_MODES.EXISTING ? (
+                  <label>
+                    기존 문서
+                    <select
+                      value={importDocumentId}
+                      disabled={isLoadingDocuments || !importDocuments.length}
+                      onChange={(event) => onImportDocumentChange(event.target.value)}
+                    >
+                      {importDocuments.length ? (
+                        importDocuments.map((document) => (
+                          <option key={document.documentId} value={document.documentId}>
+                            {document.fileName}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">선택 가능한 문서가 없습니다</option>
+                      )}
+                    </select>
+                  </label>
+                ) : (
+                  <label
+                    className="schedule-upload-control"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      onImportFileChange(event.dataTransfer.files?.[0] || null);
+                    }}
+                  >
+                    파일 업로드
+                    <input
+                      type="file"
+                      accept=".doc,.docx,.xls,.xlsx,.pdf,.txt"
+                      onChange={(event) =>
+                        onImportFileChange(event.target.files?.[0] || null)
+                      }
+                    />
+                    <span>{importFile?.name || "파일 선택 또는 드래그 앤 드롭"}</span>
+                  </label>
+                )}
+              </div>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={
+                  isPreviewingImport ||
+                  isUploadingImportDocument ||
+                  (mode === SCHEDULE_REGISTRATION_MODES.EXISTING && !importDocumentId) ||
+                  (mode === SCHEDULE_REGISTRATION_MODES.UPLOAD && !importFile)
+                }
+                onClick={onPreviewImport}
+              >
+                {isPreviewingImport || isUploadingImportDocument
+                  ? "불러오는 중"
+                  : "할일 불러오기"}
+              </button>
+              {importStatusMessage && (
+                <p className="todo-import-status" role="status">
+                  {importStatusMessage}
+                </p>
+              )}
+              {importPreview && (
+                <div className="schedule-preview-panel">
+                  <div className="todo-preview-header">
+                    <div>
+                      <strong>불러온 할일</strong>
+                      <span>
+                        후보 {candidateCount}개 · 선택 {selectedCount}개
+                      </span>
+                    </div>
+                    <div>
+                      <button className="mini-action-button" type="button" onClick={() => onSelectImportMode("new")}>
+                        중복 제외
+                      </button>
+                      <button className="mini-action-button" type="button" onClick={() => onSelectImportMode("all")}>
+                        모두 선택
+                      </button>
+                    </div>
+                  </div>
+                  <ScheduleImportPreviewList
+                    preview={importPreview}
+                    selectedIds={selectedImportIds}
+                    onToggleItem={onToggleImportItem}
+                  />
+                  <button
+                    className="primary-button schedule-preview-submit"
+                    type="button"
+                    disabled={!selectedCount || isCommittingImport}
+                    onClick={onCommitImport}
+                  >
+                    {isCommittingImport
+                      ? "등록 중"
+                      : `선택한 ${selectedCount}개 등록`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ScheduleImportPreviewList({ preview, selectedIds, onToggleItem }) {
+  const rows = [
+    ...(preview?.newItems || []).map((item) => ({ item, duplicate: null })),
+    ...(preview?.duplicateItems || []).map((duplicate) => ({
+      item: duplicate.candidate,
+      duplicate,
+    })),
+  ];
+  if (!rows.length) {
+    return <p className="empty-state">문서에서 불러올 할일이 없습니다.</p>;
+  }
+
+  return (
+    <ul className="schedule-preview-list">
+      {rows.map(({ item, duplicate }) => {
+        const itemId = item.clientImportId || item.todoId;
+        return (
+          <li className={duplicate ? "is-duplicate" : ""} key={itemId || item.title}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(itemId)}
+                onChange={() => onToggleItem(itemId)}
+              />
+              <span>
+                <strong>{item.title || "제목 없음"}</strong>
+                <small>
+                  담당자: {item.assignee || "미정"} · 기한:{" "}
+                  {item.dueDate || item.dueDateText || "미정"} · 상태:{" "}
+                  {getTodoStatusLabel(item.status)}
+                </small>
+                {duplicate && (
+                  <em>
+                    중복 가능 · 기존 항목:{" "}
+                    {duplicate.matchedExisting?.title || "유사 할일"}
+                  </em>
+                )}
+              </span>
+            </label>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -6545,6 +7533,9 @@ function TodoManagerModal({
                 type="date"
                 value={editDraft.dueDate}
                 disabled={isBusy}
+                onInput={(event) =>
+                  onEditDraftChange("dueDate", event.currentTarget.value)
+                }
                 onChange={(event) =>
                   onEditDraftChange("dueDate", event.target.value)
                 }
