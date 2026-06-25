@@ -1267,8 +1267,15 @@ const formatWeekLabel = (dateText = getTodayIsoDate()) => {
   const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
   const [year, month, day] = normalizedDate.split("-").map(Number);
   const firstDate = new Date(year, (month || 1) - 1, 1);
-  const weekNumber = Math.floor(((day || 1) + firstDate.getDay() - 1) / 7) + 1;
+  const leadingDays = (firstDate.getDay() + 6) % 7;
+  const weekNumber = Math.floor(((day || 1) + leadingDays - 1) / 7) + 1;
   return `${year}년 ${Number(month)}월 ${weekNumber}주차`;
+};
+
+const formatWeekdayHeader = (dateText = getTodayIsoDate()) => {
+  const dateValue = parseIsoDate(dateText);
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][dateValue.getDay()];
+  return `${dateValue.getMonth() + 1}/${dateValue.getDate()}(${weekday})`;
 };
 
 const formatDateLabel = (dateText = "") => {
@@ -1308,7 +1315,7 @@ const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
 const getCalendarWeek = (dateText = getTodayIsoDate()) => {
   const anchorDate = parseIsoDate(dateText);
   const startDate = new Date(anchorDate);
-  startDate.setDate(anchorDate.getDate() - anchorDate.getDay());
+  startDate.setDate(anchorDate.getDate() - ((anchorDate.getDay() + 6) % 7));
   const anchorMonth = anchorDate.getMonth();
 
   return Array.from({ length: 7 }, (_, index) => {
@@ -3795,6 +3802,19 @@ function App() {
     handleScheduleMonthChange(offset);
   };
 
+  const handleCalendarViewModeChange = (nextMode) => {
+    if (nextMode === calendarViewMode) return;
+    setCalendarViewMode(nextMode);
+    if (nextMode === CALENDAR_VIEW_MODES.WEEK) {
+      const firstDateOfMonth = `${scheduleMonth}-01`;
+      setSelectedScheduleDate(firstDateOfMonth);
+      return;
+    }
+    if (nextMode === CALENDAR_VIEW_MODES.MONTH) {
+      setScheduleMonth(getMonthKeyFromIsoDate(selectedScheduleDate));
+    }
+  };
+
   const resetScheduleRegistrationImportState = () => {
     setIsTodoImportOpen(true);
     setTodoImportPreview(null);
@@ -5245,7 +5265,7 @@ function App() {
           onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
           onDateSelect={handleScheduleDateSelect}
           onPeriodChange={handleSchedulePeriodChange}
-          onViewModeChange={setCalendarViewMode}
+          onViewModeChange={handleCalendarViewModeChange}
           onOpenRegistration={handleOpenScheduleRegistration}
         />
       )}
@@ -5657,6 +5677,9 @@ function ProjectScheduleCalendar({
   );
   const today = getTodayIsoDate();
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+  const calendarWeekdayHeaders = isWeekView
+    ? weeks[0].map((cell) => formatWeekdayHeader(cell.dateText))
+    : weekdayLabels;
   const calendarTitle = isWeekView
     ? formatWeekLabel(selectedDate)
     : formatMonthLabel(scheduleMonth);
@@ -5732,7 +5755,7 @@ function ProjectScheduleCalendar({
             aria-label={`${calendarTitle} 캘린더`}
           >
             <div className="schedule-calendar__weekdays">
-              {weekdayLabels.map((label) => (
+              {calendarWeekdayHeaders.map((label) => (
                 <span key={label}>{label}</span>
               ))}
             </div>
@@ -5745,7 +5768,6 @@ function ProjectScheduleCalendar({
                   today={today}
                   selectedDate={selectedDate}
                   isWeekView={isWeekView}
-                  weekdayLabels={weekdayLabels}
                   onDateSelect={onDateSelect}
                 />
               ))}
@@ -5771,7 +5793,6 @@ function ScheduleWeekRow({
   today,
   selectedDate,
   isWeekView = false,
-  weekdayLabels = [],
   onDateSelect,
 }) {
   const maxRows = isWeekView ? 8 : 3;
@@ -5784,7 +5805,7 @@ function ScheduleWeekRow({
   return (
     <div className={`schedule-week-row ${isWeekView ? "is-week-view" : ""}`}>
       <div className="schedule-week-days">
-        {week.map((cell, index) => (
+        {week.map((cell) => (
           <button
             key={cell.dateText}
             className={[
@@ -5796,16 +5817,12 @@ function ScheduleWeekRow({
               .filter(Boolean)
               .join(" ")}
             type="button"
+            aria-label={`${formatDateLabel(cell.dateText)} 일정 보기`}
             onClick={() => onDateSelect(cell.dateText)}
           >
-            {isWeekView && (
-              <span className="schedule-day__weekday">
-                {weekdayLabels[index]}요일
-              </span>
+            {!isWeekView && (
+              <span className="schedule-day__number">{cell.day}</span>
             )}
-            <span className="schedule-day__number">
-              {isWeekView ? `${cell.month}/${cell.day}` : cell.day}
-            </span>
           </button>
         ))}
       </div>
