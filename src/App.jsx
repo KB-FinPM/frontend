@@ -137,6 +137,7 @@ const FILE_MANAGER_TABS = Object.freeze({
 const WORKSPACE_TABS = Object.freeze({
   DOCUMENTS: "documents",
   SCHEDULE: "schedule",
+  TODAY: "today",
 });
 const SCHEDULE_REGISTRATION_MODES = Object.freeze({
   MANUAL: "manual",
@@ -3773,8 +3774,13 @@ function App() {
 
   const handleWorkspaceTabChange = (tab) => {
     setActiveWorkspaceTab(tab);
-    if (tab === WORKSPACE_TABS.SCHEDULE && project?.projectId) {
+    if (
+      (tab === WORKSPACE_TABS.SCHEDULE || tab === WORKSPACE_TABS.TODAY) &&
+      project?.projectId
+    ) {
       loadTodos({ status: "" });
+    }
+    if (tab === WORKSPACE_TABS.SCHEDULE && project?.projectId) {
       loadUploadedFiles(project);
     }
   };
@@ -5238,7 +5244,7 @@ function App() {
         }
       />
 
-      {activeWorkspaceTab === WORKSPACE_TABS.DOCUMENTS ? (
+      {activeWorkspaceTab === WORKSPACE_TABS.DOCUMENTS && (
         <DocumentGenerationHub
           project={project}
           nodes={documentHubNodes}
@@ -5250,7 +5256,8 @@ function App() {
           onSelectNode={handleSelectDocumentHubNode}
           onDownloadNodeArtifact={handleDownloadDocumentNodeArtifact}
         />
-      ) : (
+      )}
+      {activeWorkspaceTab === WORKSPACE_TABS.SCHEDULE && (
         <ProjectScheduleCalendar
           project={project}
           todos={todoItems}
@@ -5267,6 +5274,28 @@ function App() {
           onPeriodChange={handleSchedulePeriodChange}
           onViewModeChange={handleCalendarViewModeChange}
           onOpenRegistration={handleOpenScheduleRegistration}
+        />
+      )}
+      {activeWorkspaceTab === WORKSPACE_TABS.TODAY && (
+        <TodayTasksView
+          project={project}
+          todos={todoItems}
+          isSidebarDrawerOpen={isSidebarDrawerOpen}
+          isLoading={isLoadingTodos}
+          error={todoError}
+          actionError={todoActionError}
+          savingTodoId={savingTodoId}
+          editingTodoId={editingTodoId}
+          editDraft={todoEditDraft}
+          activeTab={activeWorkspaceTab}
+          onTabChange={handleWorkspaceTabChange}
+          onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
+          onStatusChange={handleTodoStatusChange}
+          onStartEdit={handleStartTodoEdit}
+          onCancelEdit={handleCancelTodoEdit}
+          onEditDraftChange={handleTodoEditDraftChange}
+          onSaveEdit={handleSaveTodoEdit}
+          onDelete={handleDeleteTodo}
         />
       )}
 
@@ -5578,6 +5607,15 @@ function WorkspaceTabs({ activeTab, onTabChange }) {
         <CalendarDays size={16} aria-hidden="true" />
         프로젝트 일정
       </button>
+      <button
+        className={activeTab === WORKSPACE_TABS.TODAY ? "is-active" : ""}
+        type="button"
+        aria-current={activeTab === WORKSPACE_TABS.TODAY ? "page" : undefined}
+        onClick={() => onTabChange(WORKSPACE_TABS.TODAY)}
+      >
+        <Check size={16} aria-hidden="true" />
+        오늘의 할일
+      </button>
     </nav>
   );
 }
@@ -5709,8 +5747,7 @@ function ProjectScheduleCalendar({
 
       <div className="schedule-scroll">
         <section className="schedule-month-header" aria-label="캘린더 일정 도구">
-          <div className="schedule-month-header__main">
-            <h2>{calendarTitle}</h2>
+          <div className="schedule-month-header__left">
             <div className="schedule-view-toggle" role="group" aria-label="캘린더 보기 방식">
               <button
                 className={calendarViewMode === CALENDAR_VIEW_MODES.MONTH ? "is-active" : ""}
@@ -5730,14 +5767,17 @@ function ProjectScheduleCalendar({
               </button>
             </div>
           </div>
-          <button
-            className="primary-button schedule-register-button"
-            type="button"
-            onClick={onOpenRegistration}
-          >
-            <PlusCircle size={16} aria-hidden="true" />
-            일정 등록
-          </button>
+          <h2 className="schedule-month-header__title">{calendarTitle}</h2>
+          <div className="schedule-month-header__right">
+            <button
+              className="primary-button schedule-register-button"
+              type="button"
+              onClick={onOpenRegistration}
+            >
+              <PlusCircle size={16} aria-hidden="true" />
+              일정 등록
+            </button>
+          </div>
         </section>
 
         {error && <p className="form-error">{error}</p>}
@@ -5787,6 +5827,262 @@ function ProjectScheduleCalendar({
             <ChevronRight size={30} aria-hidden="true" />
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TodayTasksView({
+  project,
+  todos,
+  isSidebarDrawerOpen,
+  isLoading,
+  error,
+  actionError,
+  savingTodoId,
+  editingTodoId,
+  editDraft,
+  activeTab,
+  onTabChange,
+  onOpenSidebar,
+  onStatusChange,
+  onStartEdit,
+  onCancelEdit,
+  onEditDraftChange,
+  onSaveEdit,
+  onDelete,
+}) {
+  const today = getTodayIsoDate();
+  const todayTasks = useMemo(() => {
+    const statusRank = {
+      IN_PROGRESS: 0,
+      NOT_STARTED: 1,
+      DONE: 2,
+      COMPLETED: 2,
+    };
+
+    return todos
+      .filter((todo) => isDateInTodoScheduleRange(todo, today))
+      .sort((left, right) => {
+        const leftStatusRank = statusRank[String(left.status || "").toUpperCase()] ?? 1;
+        const rightStatusRank = statusRank[String(right.status || "").toUpperCase()] ?? 1;
+        const leftRange = getTodoScheduleRange(left);
+        const rightRange = getTodoScheduleRange(right);
+        return (
+          leftStatusRank - rightStatusRank ||
+          String(leftRange?.startDate || "").localeCompare(String(rightRange?.startDate || "")) ||
+          String(left.title || "").localeCompare(String(right.title || ""))
+        );
+      });
+  }, [todos, today]);
+  const doneCount = todayTasks.filter(
+    (todo) => getTodoStatusTone(todo.status) === "done",
+  ).length;
+  const activeCount = todayTasks.length - doneCount;
+
+  return (
+    <div className="document-hub-panel today-tasks-panel" role="main" aria-label="오늘의 할일">
+      <header className="document-hub-header">
+        <button
+          className="sidebar-menu-button"
+          type="button"
+          aria-label="프로젝트 및 대화 목록 열기"
+          aria-expanded={isSidebarDrawerOpen}
+          onClick={onOpenSidebar}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <div className="assistant-avatar">
+          <Check size={20} aria-hidden="true" />
+        </div>
+        <div className="document-hub-title">
+          <strong>오늘의 할일</strong>
+          <span>{project.projectName}의 오늘 진행할 할일을 카드로 확인하세요.</span>
+        </div>
+      </header>
+      <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
+
+      <div className="today-tasks-scroll">
+        <section className="today-tasks-summary" aria-label="오늘 할일 요약">
+          <div>
+            <span>오늘</span>
+            <h2>{formatDateLabel(today)}</h2>
+            <p>
+              오늘 진행해야 할 일정 {todayTasks.length}건
+              {doneCount ? ` · 완료 ${doneCount}건` : ""}
+            </p>
+          </div>
+          <div className="today-tasks-counter" aria-label={`진행 대상 ${activeCount}건`}>
+            <strong>{activeCount}</strong>
+            <span>진행 대상</span>
+          </div>
+        </section>
+
+        {(error || actionError) && (
+          <p className="form-error">{actionError || error}</p>
+        )}
+        {isLoading && <p className="schedule-loading">오늘의 할일을 불러오는 중입니다.</p>}
+
+        {todayTasks.length ? (
+          <ul className="today-task-list" aria-label="오늘의 할일 목록">
+            {todayTasks.map((todo) => {
+              const isEditing = editingTodoId === todo.todoId;
+              const isSaving = savingTodoId === todo.todoId;
+              return (
+                <li
+                  className={`today-task-card is-${getTodoStatusTone(todo.status)}`}
+                  key={todo.todoId || todo.title}
+                >
+                  <div className="today-task-card__content">
+                    <div className="today-task-card__title">
+                      <div>
+                        <strong>{todo.title || "제목 없음"}</strong>
+                        <small>{formatScheduleRangeLabel(todo)}</small>
+                      </div>
+                      <ScheduleStatusPicker
+                        status={todo.status}
+                        disabled={isSaving}
+                        ariaLabel={`${todo.title || "제목 없음"} 진행상태`}
+                        onChange={(status) => onStatusChange(todo, status)}
+                      />
+                    </div>
+
+                    {isEditing ? (
+                      <div className="schedule-edit-panel">
+                        <label>
+                          할일명
+                          <input
+                            type="text"
+                            value={editDraft.title}
+                            onChange={(event) => onEditDraftChange("title", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          담당자
+                          <input
+                            type="text"
+                            value={editDraft.assignee}
+                            onChange={(event) =>
+                              onEditDraftChange("assignee", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          시작일
+                          <input
+                            type="date"
+                            value={editDraft.startDate}
+                            onInput={(event) =>
+                              onEditDraftChange("startDate", event.currentTarget.value)
+                            }
+                            onChange={(event) =>
+                              onEditDraftChange("startDate", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          종료일
+                          <input
+                            type="date"
+                            value={editDraft.endDate}
+                            onInput={(event) =>
+                              onEditDraftChange("endDate", event.currentTarget.value)
+                            }
+                            onChange={(event) =>
+                              onEditDraftChange("endDate", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          진행상태
+                          <select
+                            value={editDraft.status}
+                            onChange={(event) => onEditDraftChange("status", event.target.value)}
+                          >
+                            {TODO_STATUS_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="schedule-edit-description">
+                          상세내용
+                          <textarea
+                            rows={3}
+                            value={editDraft.description}
+                            onChange={(event) =>
+                              onEditDraftChange("description", event.target.value)
+                            }
+                          />
+                        </label>
+                        <div className="schedule-row-actions">
+                          <button className="secondary-button" type="button" onClick={onCancelEdit}>
+                            취소
+                          </button>
+                          <button
+                            className="primary-button"
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => onSaveEdit(todo)}
+                          >
+                            <Save size={14} aria-hidden="true" />
+                            저장
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <dl className="today-task-meta">
+                          <div>
+                            <dt>담당자</dt>
+                            <dd>{todo.assignee || "미정"}</dd>
+                          </div>
+                          <div>
+                            <dt>기한</dt>
+                            <dd>{formatScheduleRangeLabel(todo)}</dd>
+                          </div>
+                        </dl>
+                        <p>{todo.description || "상세내용이 없습니다."}</p>
+                      </>
+                    )}
+                  </div>
+
+                  {!isEditing && (
+                    <div className="schedule-row-actions">
+                      <button
+                        className="inline-icon-button"
+                        type="button"
+                        title="할일 수정"
+                        aria-label={`${todo.title || "제목 없음"} 할일 수정`}
+                        onClick={() => onStartEdit(todo)}
+                      >
+                        <Pencil size={14} aria-hidden="true" />
+                      </button>
+                      <button
+                        className="inline-icon-button"
+                        type="button"
+                        title="할일 삭제"
+                        aria-label={`${todo.title || "제목 없음"} 할일 삭제`}
+                        onClick={() => onDelete(todo)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          !isLoading && (
+            <section className="today-tasks-empty" aria-label="오늘의 할일 없음">
+              <Check size={22} aria-hidden="true" />
+              <strong>오늘 진행할 할일이 없습니다.</strong>
+              <p>프로젝트 일정에서 일정을 등록하거나 문서에서 할일을 불러올 수 있습니다.</p>
+            </section>
+          )
+        )}
       </div>
     </div>
   );
@@ -6077,6 +6373,23 @@ function ScheduleRegistrationModal({
     (importPreview?.newItems?.length || 0) +
     (importPreview?.duplicateItems?.length || 0);
   const selectedCount = selectedImportIds.length;
+  const registrationModeOptions = [
+    {
+      value: SCHEDULE_REGISTRATION_MODES.MANUAL,
+      title: "직접 등록",
+      description: "할일을 직접 입력합니다.",
+    },
+    {
+      value: SCHEDULE_REGISTRATION_MODES.EXISTING,
+      title: "기존 문서 사용",
+      description: "등록된 회의록/WBS에서 불러옵니다.",
+    },
+    {
+      value: SCHEDULE_REGISTRATION_MODES.UPLOAD,
+      title: "문서 업로드",
+      description: "새 문서를 업로드해 불러옵니다.",
+    },
+  ];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -6087,45 +6400,40 @@ function ScheduleRegistrationModal({
         aria-labelledby="schedule-registration-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="modal-header">
-          <div>
-            <span>프로젝트 일정</span>
+        <header className="modal-header schedule-registration-header">
+          <div className="modal-header__copy">
             <h2 id="schedule-registration-title">일정 등록</h2>
+            <p>직접 입력하거나 문서에서 할일을 불러와 등록합니다.</p>
           </div>
           <button className="icon-button" type="button" aria-label="일정 등록 닫기" onClick={onClose}>
             <X size={18} aria-hidden="true" />
           </button>
         </header>
         <div className="schedule-registration-body">
-          <fieldset className="schedule-mode-row">
+          <fieldset
+            className="schedule-registration-mode"
+            role="radiogroup"
+            aria-label="등록 방식"
+          >
             <legend>등록 방식</legend>
-            <label>
-              <input
-                type="radio"
-                name="schedule-registration-mode"
-                checked={mode === SCHEDULE_REGISTRATION_MODES.MANUAL}
-                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.MANUAL)}
-              />
-              직접 등록
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="schedule-registration-mode"
-                checked={mode === SCHEDULE_REGISTRATION_MODES.EXISTING}
-                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.EXISTING)}
-              />
-              기존 문서 사용
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="schedule-registration-mode"
-                checked={mode === SCHEDULE_REGISTRATION_MODES.UPLOAD}
-                onChange={() => onModeChange(SCHEDULE_REGISTRATION_MODES.UPLOAD)}
-              />
-              문서 업로드
-            </label>
+            {registrationModeOptions.map((option) => (
+              <label
+                className={`registration-mode-card ${
+                  mode === option.value ? "is-selected" : ""
+                }`}
+                key={option.value}
+              >
+                <input
+                  type="radio"
+                  name="schedule-registration-mode"
+                  value={option.value}
+                  checked={mode === option.value}
+                  onChange={() => onModeChange(option.value)}
+                />
+                <strong>{option.title}</strong>
+                <span>{option.description}</span>
+              </label>
+            ))}
           </fieldset>
 
           {actionError && <p className="form-error">{actionError}</p>}
