@@ -2163,13 +2163,6 @@ function App() {
       ),
     [todoImportDocuments, todoImportDocumentType],
   );
-  const undatedTodos = useMemo(
-    () =>
-      todoItems.filter(
-        (todo) => !getTodoScheduleRange(todo),
-      ),
-    [todoItems],
-  );
   const selectedScheduleTodos = useMemo(
     () =>
       todoItems.filter((todo) =>
@@ -3721,12 +3714,6 @@ function App() {
     setScheduleMonth((currentMonth) => addMonthsToMonthKey(currentMonth, offset));
   };
 
-  const handleScheduleToday = () => {
-    const today = getTodayIsoDate();
-    setScheduleMonth(getMonthKeyFromIsoDate(today));
-    setSelectedScheduleDate(today);
-  };
-
   const resetScheduleRegistrationImportState = () => {
     setIsTodoImportOpen(true);
     setTodoImportPreview(null);
@@ -5166,7 +5153,6 @@ function App() {
         <ProjectScheduleCalendar
           project={project}
           todos={todoItems}
-          undatedTodos={undatedTodos}
           scheduleMonth={scheduleMonth}
           selectedDate={selectedScheduleDate}
           isSidebarDrawerOpen={isSidebarDrawerOpen}
@@ -5177,7 +5163,6 @@ function App() {
           onOpenSidebar={() => setIsSidebarDrawerOpen(true)}
           onDateSelect={handleScheduleDateSelect}
           onMonthChange={handleScheduleMonthChange}
-          onToday={handleScheduleToday}
           onOpenRegistration={handleOpenScheduleRegistration}
         />
       )}
@@ -5501,7 +5486,6 @@ const getTodoStatusLabel = (status = "") =>
 function ProjectScheduleCalendar({
   project,
   todos,
-  undatedTodos,
   scheduleMonth,
   selectedDate,
   isSidebarDrawerOpen,
@@ -5512,7 +5496,6 @@ function ProjectScheduleCalendar({
   onOpenSidebar,
   onDateSelect,
   onMonthChange,
-  onToday,
   onOpenRegistration,
 }) {
   const weeks = getCalendarWeeks(scheduleMonth);
@@ -5546,71 +5529,54 @@ function ProjectScheduleCalendar({
       <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
 
       <div className="schedule-scroll">
-        <section className="schedule-toolbar" aria-label="월간 일정 도구">
-          <div>
-            <h2>{formatMonthLabel(scheduleMonth)}</h2>
-            <span>
-              날짜를 선택하면 해당 일자의 일정 관리 팝업이 열립니다.
-            </span>
-          </div>
-          <div className="schedule-toolbar__actions">
-            <button className="secondary-button" type="button" onClick={() => onMonthChange(-1)}>
-              이전
-            </button>
-            <button className="secondary-button" type="button" onClick={onToday}>
-              오늘
-            </button>
-            <button className="secondary-button" type="button" onClick={() => onMonthChange(1)}>
-              다음
-            </button>
-            <button className="primary-button" type="button" onClick={onOpenRegistration}>
-              <PlusCircle size={16} aria-hidden="true" />
-              일정 등록
-            </button>
-          </div>
+        <section className="schedule-month-header" aria-label="월간 일정 도구">
+          <h2>{formatMonthLabel(scheduleMonth)}</h2>
+          <button className="primary-button" type="button" onClick={onOpenRegistration}>
+            <PlusCircle size={16} aria-hidden="true" />
+            일정 등록
+          </button>
         </section>
 
         {error && <p className="form-error">{error}</p>}
         {isLoading && <p className="schedule-loading">일정을 불러오는 중입니다.</p>}
 
-        <section className="schedule-calendar" aria-label={`${formatMonthLabel(scheduleMonth)} 캘린더`}>
-          <div className="schedule-calendar__weekdays">
-            {weekdayLabels.map((label) => (
-              <span key={label}>{label}</span>
-            ))}
-          </div>
-          <div className="schedule-calendar__weeks">
-            {weeks.map((week) => (
-              <ScheduleWeekRow
-                key={week[0]?.dateText}
-                week={week}
-                todos={datedTodos}
-                today={today}
-                selectedDate={selectedDate}
-                onDateSelect={onDateSelect}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="schedule-undated" aria-label="기한 미정 할일">
-          <div>
-            <h3>기한 미정 할일</h3>
-            <span>{undatedTodos.length}개</span>
-          </div>
-          {undatedTodos.length ? (
-            <ul>
-              {undatedTodos.slice(0, 8).map((todo) => (
-                <li key={todo.todoId || todo.title}>
-                  <strong>{todo.title || "제목 없음"}</strong>
-                  <span>{todo.assignee || "담당자 미정"}</span>
-                </li>
+        <div className="schedule-calendar-shell">
+          <button
+            className="schedule-month-hit-zone schedule-month-hit-zone--prev"
+            type="button"
+            aria-label="이전 달 보기"
+            onClick={() => onMonthChange(-1)}
+          >
+            <ChevronLeft size={30} aria-hidden="true" />
+          </button>
+          <section className="schedule-calendar" aria-label={`${formatMonthLabel(scheduleMonth)} 캘린더`}>
+            <div className="schedule-calendar__weekdays">
+              {weekdayLabels.map((label) => (
+                <span key={label}>{label}</span>
               ))}
-            </ul>
-          ) : (
-            <p>기한 미정 할일이 없습니다.</p>
-          )}
-        </section>
+            </div>
+            <div className="schedule-calendar__weeks">
+              {weeks.map((week) => (
+                <ScheduleWeekRow
+                  key={week[0]?.dateText}
+                  week={week}
+                  todos={datedTodos}
+                  today={today}
+                  selectedDate={selectedDate}
+                  onDateSelect={onDateSelect}
+                />
+              ))}
+            </div>
+          </section>
+          <button
+            className="schedule-month-hit-zone schedule-month-hit-zone--next"
+            type="button"
+            aria-label="다음 달 보기"
+            onClick={() => onMonthChange(1)}
+          >
+            <ChevronRight size={30} aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </div>
   );
