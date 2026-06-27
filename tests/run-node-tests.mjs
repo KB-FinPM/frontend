@@ -12,7 +12,11 @@ import {
   downloadArtifactFile,
   getProject,
 } from "../src/api/finpmApi.js";
-import { createAssistantMessageFromResponse } from "../src/services/chatService.js";
+import {
+  createAssistantMessageFromResponse,
+  sanitizeActionStatusResponse,
+  sanitizeCompletedActionStatusResponse,
+} from "../src/services/chatService.js";
 import {
   getDefaultCommands,
   getCommandRecommendations,
@@ -396,6 +400,37 @@ test("createAssistantMessageFromResponse preserves correction notices", () => {
   assert.deepEqual(message.metadata.corrections, [
     { source: "화면 설개서", target: "화면설계서" },
   ]);
+});
+
+test("sanitizeActionStatusResponse clears unused top-level result_json", () => {
+  const response = sanitizeActionStatusResponse({
+    status: "EXECUTED",
+    result_json: { artifact: { huge: true } },
+    pending_action: {
+      result_json: { action_id: "ACT-001", result: { job_id: "JOB-001" } },
+    },
+  });
+
+  assert.deepEqual(response.result_json, {});
+  assert.deepEqual(response.pending_action.result_json, {
+    action_id: "ACT-001",
+    result: { job_id: "JOB-001" },
+  });
+});
+
+test("sanitizeCompletedActionStatusResponse clears terminal nested result_json", () => {
+  const response = sanitizeCompletedActionStatusResponse({
+    status: "EXECUTED",
+    result_json: { artifact: { huge: true } },
+    pending_action: {
+      action_id: "ACT-001",
+      result_json: { artifact: { huge: true } },
+    },
+  });
+
+  assert.deepEqual(response.result_json, {});
+  assert.deepEqual(response.pending_action.result_json, {});
+  assert.equal(response.pending_action.action_id, "ACT-001");
 });
 
 test("downloadArtifactFile decodes Korean content-disposition filenames", async () => {
