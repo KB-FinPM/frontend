@@ -1907,6 +1907,8 @@ p {
 }
 
 .file-manager-modal {
+  display: flex;
+  flex-direction: column;
   width: min(820px, 100%);
   height: min(760px, calc(100vh - 40px));
   overflow: hidden;
@@ -1989,9 +1991,10 @@ p {
 }
 
 .file-manager-content {
-  display: grid;
-  min-height: 180px;
+  flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding-right: 2px;
 }
@@ -2331,7 +2334,7 @@ p {
 
 .todo-item-main {
   display: grid;
-  grid-template-columns: minmax(180px, 1.3fr) minmax(240px, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
 }
@@ -2365,6 +2368,44 @@ p {
   width: 120px;
 }
 
+.todo-detail-disclosure {
+  border-top: 1px solid rgba(47, 44, 38, 0.08);
+  padding-top: 8px;
+}
+
+.todo-detail-disclosure summary {
+  width: fit-content;
+  color: var(--kb-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.todo-detail-disclosure summary:hover {
+  color: var(--kb-text);
+}
+
+.todo-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.todo-detail-meta dt {
+  color: var(--kb-text-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.todo-detail-meta dd {
+  margin: 3px 0 0;
+  color: var(--kb-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .todo-edit-panel {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 12px;
@@ -2383,8 +2424,9 @@ p {
 }
 
 .file-manager-sections {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: hidden;
@@ -2437,8 +2479,9 @@ p {
 }
 
 .file-manager-section {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 10px;
   min-height: 0;
   overflow: hidden;
@@ -2480,11 +2523,50 @@ p {
   animation: spin 900ms linear infinite;
 }
 
+.file-list-table {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-list-table-header,
+.uploaded-file-item {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.65fr)
+    minmax(130px, 0.9fr)
+    minmax(92px, 0.65fr)
+    minmax(96px, 0.65fr)
+    minmax(150px, auto);
+  column-gap: 12px;
+  align-items: center;
+}
+
+.file-list-table-header {
+  flex: 0 0 44px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(47, 44, 38, 0.12);
+  border-radius: 8px;
+  color: var(--kb-text-muted);
+  background: var(--kb-surface-soft);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.file-list-table-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 8px;
+  scrollbar-gutter: stable;
+}
+
 .uploaded-file-list {
   display: grid;
-  gap: 10px;
-  min-height: 0;
-  overflow: auto;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2492,7 +2574,6 @@ p {
 }
 
 .uploaded-file-item {
-  display: grid;
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--kb-border);
@@ -2503,7 +2584,7 @@ p {
 .uploaded-file-main {
   display: flex;
   min-width: 0;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 
@@ -2575,6 +2656,23 @@ p {
   font-weight: 800;
 }
 
+.uploaded-file-cell {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.uploaded-file-cell-label {
+  display: none;
+}
+
+.uploaded-file-cell strong {
+  color: var(--kb-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .uploaded-file-meta {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
@@ -2609,10 +2707,12 @@ p {
 }
 
 .uploaded-file-actions {
+  align-items: center;
   justify-content: flex-end;
 }
 
 .file-delete-confirm {
+  grid-column: 1 / -1;
   align-items: center;
   justify-content: flex-end;
   padding: 10px;
@@ -4454,7 +4554,42 @@ textarea {
 
 .todo-item-main {
   grid-template-columns:
-    auto minmax(180px, 1.25fr) minmax(220px, 1fr) auto;
+    auto minmax(0, 1fr) auto;
+}
+
+.todo-item .todo-title-block {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.todo-summary-deadline {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  padding: 0 10px;
+  border: 1px solid rgba(96, 88, 76, 0.16);
+  border-radius: 999px;
+  color: var(--kb-text-muted);
+  background: var(--kb-surface-soft);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.todo-summary-deadline.is-deadline-soon {
+  border-color: rgba(255, 188, 0, 0.44);
+  color: #6b4b00;
+  background: #fff4c7;
+}
+
+.todo-summary-deadline.is-overdue {
+  border-color: rgba(180, 60, 40, 0.24);
+  color: #8a2f21;
+  background: #fff1ed;
 }
 
 .todo-row-actions {
@@ -4466,6 +4601,29 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .file-list-table-header {
+    display: none;
+  }
+
+  .file-list-table-body {
+    padding-top: 0;
+  }
+
+  .uploaded-file-item {
+    grid-template-columns: 1fr;
+  }
+
+  .uploaded-file-cell-label {
+    display: block;
+    color: var(--kb-text-muted);
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .uploaded-file-actions {
+    justify-content: flex-start;
+  }
+
   .todo-list-header {
     align-items: flex-start;
     flex-direction: column;
@@ -4502,8 +4660,13 @@ textarea {
   }
 
   .todo-meta,
+  .todo-detail-disclosure,
   .todo-row-actions {
     grid-column: 2;
+  }
+
+  .todo-detail-meta {
+    grid-template-columns: 1fr;
   }
 
   .todo-row-actions {

@@ -1324,12 +1324,21 @@ const getTodoDeadlineDiffDays = (todo = {}) => {
   return Math.round((parseIsoDate(deadline) - parseIsoDate(getTodayIsoDate())) / 86400000);
 };
 
+const getTodoDeadlineSortGroup = (todo = {}) => {
+  const diffDays = getTodoDeadlineDiffDays(todo);
+  if (diffDays === null) return 1;
+  return diffDays < 0 ? 2 : 0;
+};
+
 const getTodoDdayLabel = (todo = {}) => {
   const diffDays = getTodoDeadlineDiffDays(todo);
   if (diffDays === null) return "";
   if (diffDays === 0) return "D-Day";
-  return diffDays > 0 ? `D-${diffDays}` : `D+${Math.abs(diffDays)}`;
+  return diffDays > 0 ? `D-${diffDays}` : "마감 지남";
 };
+
+const getTodoSummaryDeadlineLabel = (todo = {}) =>
+  getTodoDdayLabel(todo) || "마감 미정";
 
 const isTodoDeadlineSoon = (todo = {}) => {
   const diffDays = getTodoDeadlineDiffDays(todo);
@@ -1357,17 +1366,28 @@ const formatTodoDeadlineWithDday = (todo = {}) => {
 };
 
 const compareTodosForSchedule = (left = {}, right = {}) => {
+  const leftSortGroup = getTodoDeadlineSortGroup(left);
+  const rightSortGroup = getTodoDeadlineSortGroup(right);
+  if (leftSortGroup !== rightSortGroup) return leftSortGroup - rightSortGroup;
+
   const leftDeadline = getTodoDeadlineDate(left);
   const rightDeadline = getTodoDeadlineDate(right);
+
+  if (
+    leftSortGroup === 0 &&
+    leftDeadline &&
+    rightDeadline &&
+    leftDeadline !== rightDeadline
+  ) {
+    return leftDeadline.localeCompare(rightDeadline);
+  }
+
+  const sourceDiff = getTodoSourcePriority(left) - getTodoSourcePriority(right);
+  if (sourceDiff !== 0) return sourceDiff;
 
   if (leftDeadline && rightDeadline && leftDeadline !== rightDeadline) {
     return leftDeadline.localeCompare(rightDeadline);
   }
-  if (leftDeadline && !rightDeadline) return -1;
-  if (!leftDeadline && rightDeadline) return 1;
-
-  const sourceDiff = getTodoSourcePriority(left) - getTodoSourcePriority(right);
-  if (sourceDiff !== 0) return sourceDiff;
 
   return String(left.title || "").localeCompare(String(right.title || ""), "ko");
 };
@@ -8701,22 +8721,18 @@ function TodoManagerModal({
           </label>
           <div className="todo-title-block">
             <strong>{todo.title || "제목 없음"}</strong>
-            <TodoScheduleBadges todo={todo} />
+            <span
+              className={[
+                "todo-summary-deadline",
+                isTodoDeadlineSoon(todo) ? "is-deadline-soon" : "",
+                isTodoOverdue(todo) ? "is-overdue" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              {getTodoSummaryDeadlineLabel(todo)}
+            </span>
           </div>
-          <dl className="todo-meta">
-            <div>
-              <dt>담당자</dt>
-              <dd>{todo.assignee || "미정"}</dd>
-            </div>
-            <div>
-              <dt>기간</dt>
-              <dd>{formatTodoDeadlineWithDday(todo)}</dd>
-            </div>
-            <div>
-              <dt>출처</dt>
-              <dd><TodoSourceBadge todo={todo} /></dd>
-            </div>
-          </dl>
           <div className="todo-row-actions">
             <select
               value={todo.status || "NOT_STARTED"}
@@ -8752,8 +8768,27 @@ function TodoManagerModal({
             </button>
           </div>
         </div>
-        {todo.description && !isEditing && (
-          <p className="todo-description">{todo.description}</p>
+        {!isEditing && (
+          <details className="todo-detail-disclosure">
+            <summary>상세정보</summary>
+            <dl className="todo-detail-meta">
+              <div>
+                <dt>담당자</dt>
+                <dd>{todo.assignee || "미정"}</dd>
+              </div>
+              <div>
+                <dt>기간</dt>
+                <dd>{formatTodoDeadlineWithDday(todo)}</dd>
+              </div>
+              <div>
+                <dt>출처</dt>
+                <dd><TodoSourceBadge todo={todo} /></dd>
+              </div>
+            </dl>
+            {todo.description && (
+              <p className="todo-description">{todo.description}</p>
+            )}
+          </details>
         )}
         {isEditing && (
           <div className="todo-edit-panel">
@@ -9087,166 +9122,178 @@ function FileManagerModal({
     const emptyText = isGenerated
       ? "생성한 파일이 없습니다."
       : "업로드한 파일이 없습니다.";
-    if (!files.length) {
-      return <p className="file-manager-section-empty">{emptyText}</p>;
-    }
+    const timeHeader = isGenerated ? "생성 시간" : "업로드 시간";
 
     return (
-      <ul className="uploaded-file-list">
-        {files.map((file) => {
-          const fileKey = getFileActionKey(file, fileKind);
-          const isPendingDelete =
-            pendingDeleteFile?.fileKind === fileKind &&
-            pendingDeleteFile?.fileId === file.fileId;
-          const isDeleting = deletingFileId === fileKey;
-          const isDownloading = downloadingFileId === fileKey;
-          const isEditing =
-            editingFileTarget?.fileKind === fileKind &&
-            editingFileTarget?.fileId === file.fileId;
-          const isRenaming = renamingFileKey === fileKey;
-          const documentLabel = isGenerated
-            ? file.documentLabel || getArtifactDisplayLabel(file.artifactType)
-            : file.documentLabel || getDocumentDisplayLabel(file.documentType);
-          const timeLabel = isGenerated ? "생성 시간" : "업로드 시간";
-          const timeValue = isGenerated ? file.createdAt : file.uploadedAt;
-          const handleDownload = isGenerated ? onDownloadGenerated : onDownloadUploaded;
-          const handleDelete = isGenerated
-            ? onRequestGeneratedDelete
-            : onRequestDelete;
+      <div className="file-list-table">
+        <div className="file-list-table-header" role="row">
+          <span>파일명</span>
+          <span>{timeHeader}</span>
+          <span>파일크기</span>
+          <span>파일유형</span>
+          <span>관리</span>
+        </div>
+        <div className="file-list-table-body">
+          {!files.length ? (
+            <p className="file-manager-section-empty">{emptyText}</p>
+          ) : (
+            <ul className="uploaded-file-list">
+              {files.map((file) => {
+                const fileKey = getFileActionKey(file, fileKind);
+                const isPendingDelete =
+                  pendingDeleteFile?.fileKind === fileKind &&
+                  pendingDeleteFile?.fileId === file.fileId;
+                const isDeleting = deletingFileId === fileKey;
+                const isDownloading = downloadingFileId === fileKey;
+                const isEditing =
+                  editingFileTarget?.fileKind === fileKind &&
+                  editingFileTarget?.fileId === file.fileId;
+                const isRenaming = renamingFileKey === fileKey;
+                const documentLabel = isGenerated
+                  ? file.documentLabel || getArtifactDisplayLabel(file.artifactType)
+                  : file.documentLabel || getDocumentDisplayLabel(file.documentType);
+                const timeValue = isGenerated ? file.createdAt : file.uploadedAt;
+                const handleDownload = isGenerated
+                  ? onDownloadGenerated
+                  : onDownloadUploaded;
+                const handleDelete = isGenerated
+                  ? onRequestGeneratedDelete
+                  : onRequestDelete;
 
-          return (
-            <li className="uploaded-file-item" key={`${fileKind}-${file.fileId}`}>
-              <div className="uploaded-file-main">
-                <FileText size={18} aria-hidden="true" />
-                <div>
-                  <div className="file-name-row">
-                    {isEditing ? (
-                      <>
-                        <input
-                          className="generated-file-name-input"
-                          value={fileNameDraft}
-                          disabled={isRenaming}
-                          onChange={(event) =>
-                            onFileNameDraftChange(event.target.value)
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              onSaveRename(file, fileKind);
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              onCancelRename();
-                            }
-                          }}
-                          aria-label="파일명"
-                        />
+                return (
+                  <li className="uploaded-file-item" key={`${fileKind}-${file.fileId}`}>
+                    <div className="uploaded-file-main">
+                      <FileText size={18} aria-hidden="true" />
+                      <div>
+                        <div className="file-name-row">
+                          {isEditing ? (
+                            <>
+                              <input
+                                className="generated-file-name-input"
+                                value={fileNameDraft}
+                                disabled={isRenaming}
+                                onChange={(event) =>
+                                  onFileNameDraftChange(event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    onSaveRename(file, fileKind);
+                                  }
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    onCancelRename();
+                                  }
+                                }}
+                                aria-label="파일명"
+                              />
+                              <button
+                                className="inline-icon-button"
+                                type="button"
+                                disabled={isRenaming}
+                                onClick={() => onSaveRename(file, fileKind)}
+                                aria-label="파일명 저장"
+                              >
+                                <Save size={14} aria-hidden="true" />
+                              </button>
+                              <button
+                                className="inline-icon-button"
+                                type="button"
+                                disabled={isRenaming}
+                                onClick={onCancelRename}
+                                aria-label="파일명 수정 취소"
+                              >
+                                <X size={14} aria-hidden="true" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <strong>{file.fileName}</strong>
+                              <button
+                                className="inline-icon-button"
+                                type="button"
+                                disabled={isDeleting || isDownloading}
+                                onClick={() => onStartRename(file, fileKind)}
+                                aria-label={`${file.fileName} 파일명 수정`}
+                                title="파일명 수정"
+                              >
+                                <Pencil size={14} aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <span>{documentLabel}</span>
+                      </div>
+                    </div>
+                    <div className="uploaded-file-cell">
+                      <span className="uploaded-file-cell-label">{timeHeader}</span>
+                      <strong>{formatFileUploadedAt(timeValue, timeHeader)}</strong>
+                    </div>
+                    <div className="uploaded-file-cell">
+                      <span className="uploaded-file-cell-label">파일크기</span>
+                      <strong>{formatFileSize(file.fileSize)}</strong>
+                    </div>
+                    <div className="uploaded-file-cell">
+                      <span className="uploaded-file-cell-label">파일유형</span>
+                      <strong>{file.fileType}</strong>
+                    </div>
+                    <div className="uploaded-file-actions">
+                      <button
+                        className="mini-action-button"
+                        type="button"
+                        disabled={isDeleting || isDownloading || isRenaming}
+                        onClick={() => handleDownload(file)}
+                      >
+                        {isDownloading ? (
+                          <>
+                            <LoaderCircle size={14} aria-hidden="true" />
+                            다운로드 중
+                          </>
+                        ) : (
+                          <>
+                            <Download size={14} aria-hidden="true" />
+                            다운로드
+                          </>
+                        )}
+                      </button>
+                      <button
+                        className="mini-action-button danger"
+                        type="button"
+                        disabled={isDeleting || isDownloading || isRenaming}
+                        onClick={() => handleDelete(file)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        삭제
+                      </button>
+                    </div>
+                    {isPendingDelete && (
+                      <div className="file-delete-confirm">
+                        <span>{file.fileName} 파일을 삭제할까요?</span>
                         <button
-                          className="inline-icon-button"
+                          className="mini-action-button"
                           type="button"
-                          disabled={isRenaming}
-                          onClick={() => onSaveRename(file, fileKind)}
-                          aria-label="파일명 저장"
+                          disabled={isDeleting}
+                          onClick={onCancelDelete}
                         >
-                          <Save size={14} aria-hidden="true" />
+                          취소
                         </button>
                         <button
-                          className="inline-icon-button"
+                          className="mini-action-button danger"
                           type="button"
-                          disabled={isRenaming}
-                          onClick={onCancelRename}
-                          aria-label="파일명 수정 취소"
+                          disabled={isDeleting}
+                          onClick={onConfirmDelete}
                         >
-                          <X size={14} aria-hidden="true" />
+                          {isDeleting ? "삭제 중" : "확인"}
                         </button>
-                      </>
-                    ) : (
-                      <>
-                        <strong>{file.fileName}</strong>
-                        <button
-                          className="inline-icon-button"
-                          type="button"
-                          disabled={isDeleting || isDownloading}
-                          onClick={() => onStartRename(file, fileKind)}
-                          aria-label={`${file.fileName} 파일명 수정`}
-                          title="파일명 수정"
-                        >
-                          <Pencil size={14} aria-hidden="true" />
-                        </button>
-                      </>
+                      </div>
                     )}
-                  </div>
-                  <span>{documentLabel}</span>
-                </div>
-              </div>
-              <dl className="uploaded-file-meta">
-                <div>
-                  <dt>{timeLabel}</dt>
-                  <dd>{formatFileUploadedAt(timeValue, timeLabel)}</dd>
-                </div>
-                <div>
-                  <dt>파일크기</dt>
-                  <dd>{formatFileSize(file.fileSize)}</dd>
-                </div>
-                <div>
-                  <dt>파일유형</dt>
-                  <dd>{file.fileType}</dd>
-                </div>
-              </dl>
-              <div className="uploaded-file-actions">
-                <button
-                  className="mini-action-button"
-                  type="button"
-                  disabled={isDeleting || isDownloading || isRenaming}
-                  onClick={() => handleDownload(file)}
-                >
-                  {isDownloading ? (
-                    <>
-                      <LoaderCircle size={14} aria-hidden="true" />
-                      다운로드 중
-                    </>
-                  ) : (
-                    <>
-                      <Download size={14} aria-hidden="true" />
-                      다운로드
-                    </>
-                  )}
-                </button>
-                <button
-                  className="mini-action-button danger"
-                  type="button"
-                  disabled={isDeleting || isDownloading || isRenaming}
-                  onClick={() => handleDelete(file)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  삭제
-                </button>
-              </div>
-              {isPendingDelete && (
-                <div className="file-delete-confirm">
-                  <span>{file.fileName} 파일을 삭제할까요?</span>
-                  <button
-                    className="mini-action-button"
-                    type="button"
-                    disabled={isDeleting}
-                    onClick={onCancelDelete}
-                  >
-                    취소
-                  </button>
-                  <button
-                    className="mini-action-button danger"
-                    type="button"
-                    disabled={isDeleting}
-                    onClick={onConfirmDelete}
-                  >
-                    {isDeleting ? "삭제 중" : "확인"}
-                  </button>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     );
   };
 
