@@ -1284,7 +1284,7 @@ p {
 
 .schedule-todo-result table {
   width: 100%;
-  min-width: 760px;
+  min-width: 840px;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -1307,6 +1307,71 @@ p {
 
 .schedule-todo-result tr:last-child td {
   border-bottom: 0;
+}
+
+.schedule-todo-result tr.is-deadline-soon td {
+  background: rgba(255, 188, 0, 0.08);
+}
+
+.schedule-todo-result tr.is-overdue td {
+  background: rgba(214, 69, 69, 0.07);
+}
+
+.todo-schedule-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.todo-source-badge,
+.todo-dday-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(96, 88, 76, 0.14);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.todo-source-badge.is-source-wbs {
+  border-color: rgba(255, 188, 0, 0.55);
+  color: #5b4200;
+  background: #ffe08a;
+}
+
+.todo-source-badge.is-source-meeting {
+  border-color: rgba(96, 88, 76, 0.22);
+  color: #4d3928;
+  background: #ede2d2;
+}
+
+.todo-source-badge.is-source-manual,
+.todo-source-badge.is-source-unknown {
+  border-color: rgba(96, 88, 76, 0.16);
+  color: #5f584e;
+  background: #ece8e1;
+}
+
+.todo-dday-chip {
+  border-color: rgba(255, 188, 0, 0.38);
+  color: #5b4200;
+  background: #fff3c4;
+}
+
+.todo-dday-chip.is-overdue {
+  border-color: rgba(214, 69, 69, 0.26);
+  color: #9d2f20;
+  background: #fff1ed;
 }
 
 .suggested-action-button {
@@ -1962,7 +2027,7 @@ p {
 }
 
 .todo-filter-grid {
-  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }
 
 .todo-filter-grid label,
@@ -2273,7 +2338,7 @@ p {
 
 .todo-meta {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
 }
@@ -4985,6 +5050,35 @@ textarea {
   background: #fbfdf9;
 }
 
+.today-task-card.is-source-wbs {
+  border-left-color: var(--kb-yellow-positive);
+}
+
+.today-task-card.is-source-meeting {
+  border-left-color: #b48a5f;
+}
+
+.today-task-card.is-source-manual,
+.today-task-card.is-source-unknown {
+  border-left-color: rgba(96, 88, 76, 0.46);
+}
+
+.today-task-card.is-deadline-soon,
+.schedule-day-item.is-deadline-soon,
+.todo-item.is-deadline-soon,
+.todo-preview-item.is-deadline-soon,
+.schedule-preview-list li.is-deadline-soon {
+  box-shadow: 0 0 0 2px rgba(255, 188, 0, 0.22);
+}
+
+.today-task-card.is-overdue,
+.schedule-day-item.is-overdue,
+.todo-item.is-overdue,
+.todo-preview-item.is-overdue,
+.schedule-preview-list li.is-overdue {
+  box-shadow: 0 0 0 2px rgba(180, 60, 40, 0.18);
+}
+
 .today-task-card__content {
   display: grid;
   gap: 10px;
@@ -5098,12 +5192,30 @@ textarea {
   pointer-events: auto;
 }
 
-.calendar-event-bar span {
+.calendar-event-status {
   flex: 0 0 auto;
   margin-right: 6px;
   font-size: 10px;
   font-weight: 900;
   opacity: 0.82;
+}
+
+.calendar-event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-event-dday {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 7px;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.calendar-event-dday:empty {
+  display: none;
 }
 
 .calendar-event-bar--not-started {
@@ -5119,6 +5231,37 @@ textarea {
 .calendar-event-bar--done {
   color: #176c37;
   background: #ddf4e4;
+}
+
+.calendar-event-bar.is-source-wbs {
+  border: 1px solid rgba(255, 188, 0, 0.55);
+  color: #5b4200;
+  background: #ffe08a;
+}
+
+.calendar-event-bar.is-source-meeting {
+  border: 1px solid rgba(96, 88, 76, 0.22);
+  color: #4d3928;
+  background: #ede2d2;
+}
+
+.calendar-event-bar.is-source-manual,
+.calendar-event-bar.is-source-unknown {
+  border: 1px solid rgba(96, 88, 76, 0.16);
+  color: #5f584e;
+  background: #ece8e1;
+}
+
+.calendar-event-bar.is-deadline-soon {
+  box-shadow:
+    0 0 0 2px rgba(255, 188, 0, 0.3),
+    0 5px 12px rgba(33, 29, 24, 0.08);
+}
+
+.calendar-event-bar.is-overdue {
+  box-shadow:
+    0 0 0 2px rgba(180, 60, 40, 0.22),
+    0 5px 12px rgba(33, 29, 24, 0.08);
 }
 
 .schedule-event-more {
@@ -5200,6 +5343,33 @@ textarea {
   border: 1px solid var(--kb-border);
   border-radius: var(--kb-radius-sm);
   background: var(--kb-surface-soft);
+}
+
+.schedule-day-item.is-source-wbs,
+.todo-item.is-source-wbs,
+.todo-preview-item.is-source-wbs,
+.schedule-preview-list li.is-source-wbs {
+  border-color: rgba(255, 188, 0, 0.44);
+  background: rgba(255, 248, 223, 0.76);
+}
+
+.schedule-day-item.is-source-meeting,
+.todo-item.is-source-meeting,
+.todo-preview-item.is-source-meeting,
+.schedule-preview-list li.is-source-meeting {
+  border-color: rgba(180, 138, 95, 0.32);
+  background: rgba(246, 240, 231, 0.82);
+}
+
+.schedule-day-item.is-source-manual,
+.schedule-day-item.is-source-unknown,
+.todo-item.is-source-manual,
+.todo-item.is-source-unknown,
+.todo-preview-item.is-source-manual,
+.todo-preview-item.is-source-unknown,
+.schedule-preview-list li.is-source-manual,
+.schedule-preview-list li.is-source-unknown {
+  border-color: rgba(96, 88, 76, 0.18);
 }
 
 .schedule-day-item__main {

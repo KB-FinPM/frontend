@@ -484,7 +484,7 @@ test("default command recommendations use real Korean PM commands", async () => 
   );
 
   assert(commandTexts.includes("요구사항 명세서 생성해줘"));
-  assert(commandTexts.includes("회의록에서 할일 뽑아줘"));
+  assert(commandTexts.includes("오늘 할일 알려줘"));
   assert(commandTexts.every((commandText) => !commandText.includes("?")));
 });
 

@@ -159,6 +159,12 @@ const TODO_STATUS_FILTERS = Object.freeze([
   { value: "DONE", label: "완료" },
 ]);
 const TODO_STATUS_OPTIONS = TODO_STATUS_FILTERS.filter((option) => option.value);
+const TODO_SOURCE_FILTERS = Object.freeze([
+  { value: "", label: "전체" },
+  { value: "WBS", label: "WBS" },
+  { value: "MEETING_NOTES", label: "회의록" },
+  { value: "MANUAL", label: "직접 등록" },
+]);
 const TODO_IMPORT_DOCUMENT_TYPES = Object.freeze([
   { value: "MEETING_NOTES", label: "회의록" },
   { value: "WBS", label: "WBS" },
@@ -1243,6 +1249,129 @@ const normalizeTodoDueDate = (value, { defaultToday = false } = {}) => {
   return defaultToday ? getTodayIsoDate() : "";
 };
 
+const getTodoDeadlineDate = (todo = {}) =>
+  normalizeTodoDueDate(
+    todo.due_date ??
+      todo.dueDate ??
+      todo.due_date_text ??
+      todo.dueDateText ??
+      todo.end_date ??
+      todo.endDate ??
+      todo.planned_end ??
+      todo.plannedEnd ??
+      todo.planned_end_date ??
+      todo.plannedEndDate,
+    { defaultToday: false },
+  );
+
+const getTodoSourceValue = (todo = {}) =>
+  String(
+    todo.source_type ??
+      todo.sourceType ??
+      todo.origin ??
+      todo.related_document_type ??
+      todo.relatedDocumentType ??
+      todo.document_type ??
+      todo.documentType ??
+      todo.source_document_type ??
+      todo.sourceDocumentType ??
+      todo.raw?.source_type ??
+      todo.raw?.sourceType ??
+      "",
+  ).toUpperCase();
+
+const getTodoSourceKind = (todo = {}) => {
+  const source = getTodoSourceValue(todo);
+  if (source.includes("WBS")) return "wbs";
+  if (
+    source.includes("MEETING") ||
+    source.includes("MINUTES") ||
+    source.includes("NEGOTIATION")
+  ) {
+    return "meeting";
+  }
+  if (source.includes("MANUAL") || source.includes("DIRECT")) return "manual";
+  return "unknown";
+};
+
+const getTodoSourcePriority = (todo = {}) => {
+  const sourceKind = getTodoSourceKind(todo);
+  if (sourceKind === "wbs") return 1;
+  if (sourceKind === "meeting") return 2;
+  if (sourceKind === "manual") return 3;
+  return 4;
+};
+
+const getTodoSourceFilterValue = (todo = {}) => {
+  const sourceKind = getTodoSourceKind(todo);
+  if (sourceKind === "wbs") return "WBS";
+  if (sourceKind === "meeting") return "MEETING_NOTES";
+  if (sourceKind === "manual") return "MANUAL";
+  return "UNKNOWN";
+};
+
+const getTodoSourceLabel = (todo = {}) => {
+  const sourceKind = getTodoSourceKind(todo);
+  if (sourceKind === "wbs") return "WBS";
+  if (sourceKind === "meeting") return "회의록";
+  if (sourceKind === "manual") return "직접";
+  return "기타";
+};
+
+const getTodoDeadlineDiffDays = (todo = {}) => {
+  const deadline = getTodoDeadlineDate(todo);
+  if (!deadline) return null;
+  return Math.round((parseIsoDate(deadline) - parseIsoDate(getTodayIsoDate())) / 86400000);
+};
+
+const getTodoDdayLabel = (todo = {}) => {
+  const diffDays = getTodoDeadlineDiffDays(todo);
+  if (diffDays === null) return "";
+  if (diffDays === 0) return "D-Day";
+  return diffDays > 0 ? `D-${diffDays}` : `D+${Math.abs(diffDays)}`;
+};
+
+const isTodoDeadlineSoon = (todo = {}) => {
+  const diffDays = getTodoDeadlineDiffDays(todo);
+  return diffDays !== null && diffDays >= 0 && diffDays <= 14;
+};
+
+const isTodoOverdue = (todo = {}) => {
+  const diffDays = getTodoDeadlineDiffDays(todo);
+  return diffDays !== null && diffDays < 0;
+};
+
+const getTodoScheduleClassNames = (todo = {}) =>
+  [
+    `is-source-${getTodoSourceKind(todo)}`,
+    isTodoDeadlineSoon(todo) ? "is-deadline-soon" : "",
+    isTodoOverdue(todo) ? "is-overdue" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+const formatTodoDeadlineWithDday = (todo = {}) => {
+  const deadline = getTodoDeadlineDate(todo) || formatScheduleRangeLabel(todo);
+  const ddayLabel = getTodoDdayLabel(todo);
+  return ddayLabel ? `${deadline} · ${ddayLabel}` : deadline;
+};
+
+const compareTodosForSchedule = (left = {}, right = {}) => {
+  const leftDeadline = getTodoDeadlineDate(left);
+  const rightDeadline = getTodoDeadlineDate(right);
+
+  if (leftDeadline && rightDeadline && leftDeadline !== rightDeadline) {
+    return leftDeadline.localeCompare(rightDeadline);
+  }
+  if (leftDeadline && !rightDeadline) return -1;
+  if (!leftDeadline && rightDeadline) return 1;
+
+  const sourceDiff = getTodoSourcePriority(left) - getTodoSourcePriority(right);
+  if (sourceDiff !== 0) return sourceDiff;
+
+  return String(left.title || "").localeCompare(String(right.title || ""), "ko");
+};
+
 const getMonthKeyFromDate = (dateValue = new Date()) =>
   `${dateValue.getFullYear()}-${padDatePart(dateValue.getMonth() + 1)}`;
 
@@ -1332,16 +1461,18 @@ const getCalendarWeek = (dateText = getTodayIsoDate()) => {
 };
 
 const getTodoScheduleRange = (todo = {}) => {
-  const dueDate = normalizeTodoDueDate(todo.dueDate || todo.dueDateText);
+  const dueDate = getTodoDeadlineDate(todo);
   let startDate = normalizeTodoDueDate(
     todo.startDate ||
       todo.start_date ||
+      todo.planned_start ||
       todo.plannedStartDate ||
       todo.planned_start_date,
   );
   let endDate = normalizeTodoDueDate(
     todo.endDate ||
       todo.end_date ||
+      todo.planned_end ||
       todo.plannedEndDate ||
       todo.planned_end_date,
   );
@@ -1404,6 +1535,7 @@ const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
     .sort(
       (left, right) =>
         left.startCol - right.startCol ||
+        compareTodosForSchedule(left.todo, right.todo) ||
         right.duration - left.duration ||
         String(left.todo.title || "").localeCompare(String(right.todo.title || "")),
     );
@@ -1435,11 +1567,17 @@ const normalizeTodo = (item = {}) => {
     item.clientImportId ??
     "";
   const sourceType =
-    item.source_type ?? item.sourceType ?? item.document_type ?? item.documentType ?? "";
-  const dueDate = normalizeTodoDueDate(
-    item.due_date ?? item.dueDate ?? item.due_date_text ?? item.dueDateText,
-    { defaultToday: false },
-  );
+    item.source_type ??
+    item.sourceType ??
+    item.origin ??
+    item.related_document_type ??
+    item.relatedDocumentType ??
+    item.document_type ??
+    item.documentType ??
+    item.source_document_type ??
+    item.sourceDocumentType ??
+    "";
+  const dueDate = getTodoDeadlineDate(item);
   const normalizedRange = getTodoScheduleRange({
     startDate:
       item.start_date ??
@@ -1486,8 +1624,218 @@ const normalizeTodoListResponse = (response) => {
     [];
   return (Array.isArray(items) ? items : [])
     .map(normalizeTodo)
-    .filter((item) => item.todoId || item.title);
+    .filter((item) => item.todoId || item.title)
+    .sort(compareTodosForSchedule);
 };
+
+const hasScheduleTodoTarget = (normalized = "") =>
+  normalized.includes("할일") ||
+  normalized.includes("해야할일") ||
+  normalized.includes("액션아이템") ||
+  normalized.includes("후속작업") ||
+  normalized.includes("업무") ||
+  normalized.includes("일정") ||
+  normalized.includes("마감") ||
+  normalized.includes("기한") ||
+  normalized.includes("todo") ||
+  normalized.includes("schedule");
+
+const hasScheduleReadOnlySignal = (normalized = "") =>
+  normalized.includes("알려") ||
+  normalized.includes("보여") ||
+  normalized.includes("조회") ||
+  normalized.includes("확인") ||
+  normalized.includes("목록") ||
+  normalized.includes("뭐") ||
+  normalized.includes("어떤") ||
+  normalized.includes("있") ||
+  normalized.includes("오늘") ||
+  normalized.includes("내일") ||
+  normalized.includes("이번주") ||
+  normalized.includes("다음주") ||
+  normalized.includes("차주") ||
+  normalized.includes("마감임박") ||
+  normalized.includes("임박") ||
+  normalized.includes("미완료") ||
+  normalized.includes("완료안") ||
+  normalized.includes("wbs") ||
+  normalized.includes("회의록") ||
+  normalized.includes("미팅");
+
+const isScheduleTodoMutationRequest = (value = "") => {
+  const normalized = normalizeCommandText(value);
+  if (!hasScheduleTodoTarget(normalized)) return false;
+
+  return (
+    normalized.includes("추출") ||
+    normalized.includes("뽑") ||
+    normalized.includes("등록") ||
+    normalized.includes("추가") ||
+    normalized.includes("생성") ||
+    normalized.includes("만들") ||
+    normalized.includes("수정") ||
+    normalized.includes("변경") ||
+    normalized.includes("바꿔") ||
+    normalized.includes("삭제") ||
+    normalized.includes("지워") ||
+    normalized.includes("제거") ||
+    normalized.includes("완료처리") ||
+    normalized.includes("완료해") ||
+    normalized.includes("완료로") ||
+    normalized.includes("체크해") ||
+    normalized.includes("체크")
+  );
+};
+
+const isScheduleTodoReadOnlyQuery = (value = "") => {
+  const normalized = normalizeCommandText(value);
+  return (
+    hasScheduleTodoTarget(normalized) &&
+    hasScheduleReadOnlySignal(normalized) &&
+    !isScheduleTodoMutationRequest(value)
+  );
+};
+
+const getWeekRangeFromIsoDate = (dateText = getTodayIsoDate(), weekOffset = 0) => {
+  const dateValue = parseIsoDate(dateText);
+  const mondayOffset = (dateValue.getDay() + 6) % 7;
+  dateValue.setDate(dateValue.getDate() - mondayOffset + weekOffset * 7);
+  const startDate = formatIsoDate(dateValue);
+  dateValue.setDate(dateValue.getDate() + 6);
+  return { startDate, endDate: formatIsoDate(dateValue) };
+};
+
+const isTodoCompleted = (todo = {}) =>
+  ["DONE", "COMPLETED"].includes(String(todo.status || "").toUpperCase());
+
+const getTodoQueryRange = (todo = {}) => {
+  const range = getTodoScheduleRange(todo);
+  const deadline = getTodoDeadlineDate(todo);
+  const startDate = range?.startDate || deadline || "";
+  const endDate = range?.endDate || deadline || startDate;
+  return startDate ? { startDate, endDate } : null;
+};
+
+const isTodoInDateRange = (todo = {}, startDate = "", endDate = "") => {
+  const todoRange = getTodoQueryRange(todo);
+  if (!todoRange) return false;
+  return todoRange.startDate <= endDate && todoRange.endDate >= startDate;
+};
+
+const getScheduleChatAssignee = (messageText = "", todos = []) => {
+  const normalized = normalizeCommandText(messageText);
+  const assignees = Array.from(
+    new Set(
+      todos
+        .map((todo) => sanitizeTodoText(todo.assignee))
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => right.length - left.length);
+  return assignees.find((assignee) =>
+    normalized.includes(normalizeCommandText(assignee)),
+  ) || "";
+};
+
+const getScheduleChatQuery = (messageText = "", todos = []) => {
+  const normalized = normalizeCommandText(messageText);
+  const today = getTodayIsoDate();
+  const query = {
+    dateRange: null,
+    deadlineSoon: false,
+    overdueOnly: false,
+    incompleteOnly: false,
+    completedOnly: false,
+    sourceKind: "",
+    assignee: getScheduleChatAssignee(messageText, todos),
+    label: "일정/할일",
+  };
+
+  if (normalized.includes("오늘")) {
+    query.dateRange = { startDate: today, endDate: today };
+    query.label = "오늘 할일";
+  } else if (normalized.includes("내일")) {
+    const tomorrow = addDaysToIsoDate(today, 1);
+    query.dateRange = { startDate: tomorrow, endDate: tomorrow };
+    query.label = "내일 할일";
+  } else if (normalized.includes("다음주") || normalized.includes("차주")) {
+    query.dateRange = getWeekRangeFromIsoDate(today, 1);
+    query.label = "다음 주 일정";
+  } else if (normalized.includes("이번주")) {
+    query.dateRange = getWeekRangeFromIsoDate(today, 0);
+    query.label = "이번 주 일정";
+  }
+
+  if (normalized.includes("마감임박") || normalized.includes("임박")) {
+    query.deadlineSoon = true;
+    query.label = "마감 임박 할일";
+  }
+  if (normalized.includes("기한지난") || normalized.includes("지난할일") || normalized.includes("overdue")) {
+    query.overdueOnly = true;
+    query.label = "기한 지난 할일";
+  }
+  if (
+    normalized.includes("미완료") ||
+    normalized.includes("완료안") ||
+    normalized.includes("남은") ||
+    normalized.includes("진행중")
+  ) {
+    query.incompleteOnly = true;
+  }
+  if (
+    !query.incompleteOnly &&
+    (normalized.includes("완료된") || normalized.includes("완료한"))
+  ) {
+    query.completedOnly = true;
+  }
+  if (normalized.includes("wbs")) {
+    query.sourceKind = "wbs";
+  } else if (normalized.includes("회의록") || normalized.includes("미팅")) {
+    query.sourceKind = "meeting";
+  }
+
+  const prefixes = [];
+  if (query.assignee) prefixes.push(`${query.assignee} 담당`);
+  if (query.sourceKind === "wbs") prefixes.push("WBS 기반");
+  if (query.sourceKind === "meeting") prefixes.push("회의록 기반");
+  if (prefixes.length) {
+    query.label = `${prefixes.join(" ")} ${query.label}`;
+  }
+
+  return query;
+};
+
+const filterScheduleChatTodos = (todos = [], query = {}) =>
+  todos
+    .filter((todo) => {
+      if (query.dateRange && !isTodoInDateRange(todo, query.dateRange.startDate, query.dateRange.endDate)) {
+        return false;
+      }
+      if (query.deadlineSoon && !isTodoDeadlineSoon(todo)) return false;
+      if (query.overdueOnly && !isTodoOverdue(todo)) return false;
+      if (query.incompleteOnly && isTodoCompleted(todo)) return false;
+      if (query.completedOnly && !isTodoCompleted(todo)) return false;
+      if (query.sourceKind && getTodoSourceKind(todo) !== query.sourceKind) {
+        return false;
+      }
+      if (
+        query.assignee &&
+        normalizeCommandText(todo.assignee) !== normalizeCommandText(query.assignee)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .sort(compareTodosForSchedule);
+
+const buildScheduleChatResponseContent = (query = {}, todos = []) => {
+  if (!todos.length) {
+    return `${query.label || "일정/할일"}이 없습니다. 등록이나 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
+  }
+  return `${query.label || "일정/할일"}은 ${todos.length}건입니다. 아래 목록에서 마감일, D-Day, 출처를 확인해 주세요. 상세 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
+};
+
+const TODO_MUTATION_BLOCK_MESSAGE =
+  "할일 등록/수정/삭제/완료 처리와 회의록/WBS 기반 할일 추출은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요. 챗봇에서는 일정 조회만 지원합니다.";
 
 const normalizeTodoImportPreview = (response) => {
   const newItems = Array.isArray(response?.new_items)
@@ -2056,7 +2404,7 @@ function App() {
   const [entryError, setEntryError] = useState("");
   const [pendingNewProjectId, setPendingNewProjectId] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectStartDate, setNewProjectStartDate] = useState("");
+  const [newProjectStartDate, setNewProjectStartDate] = useState(getTodayIsoDate());
   const [newProjectDescription, setNewProjectDescription] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
   const [project, setProject] = useState(null);
@@ -2139,6 +2487,7 @@ function App() {
   const [isTodoManagerOpen, setIsTodoManagerOpen] = useState(false);
   const [todoItems, setTodoItems] = useState([]);
   const [todoStatusFilter, setTodoStatusFilter] = useState("");
+  const [todoSourceFilter, setTodoSourceFilter] = useState("");
   const [todoTitleFilter, setTodoTitleFilter] = useState("");
   const [todoAssigneeFilter, setTodoAssigneeFilter] = useState("");
   const [todoDateFilter, setTodoDateFilter] = useState("");
@@ -2230,7 +2579,7 @@ function App() {
     () =>
       todoItems.filter((todo) =>
         isDateInTodoScheduleRange(todo, selectedScheduleDate),
-      ),
+      ).sort(compareTodosForSchedule),
     [selectedScheduleDate, todoItems],
   );
 
@@ -2651,7 +3000,7 @@ function App() {
       setEntryProjectId(loadedProject.projectId);
       setPendingNewProjectId("");
       setNewProjectName("");
-      setNewProjectStartDate("");
+      setNewProjectStartDate(getTodayIsoDate());
       setNewProjectDescription("");
       setNewProjectError("");
       setConversationActionError("");
@@ -2703,7 +3052,7 @@ function App() {
 
         setPendingNewProjectId(nextProjectId);
         setNewProjectName("");
-        setNewProjectStartDate("");
+        setNewProjectStartDate(getTodayIsoDate());
         setNewProjectDescription("");
       } catch (error) {
         reportUiError("lookupProject", error, { projectId: nextProjectId });
@@ -2801,7 +3150,7 @@ function App() {
     if (pendingNewProjectId && value.trim() !== pendingNewProjectId) {
       setPendingNewProjectId("");
       setNewProjectName("");
-      setNewProjectStartDate("");
+      setNewProjectStartDate(getTodayIsoDate());
       setNewProjectDescription("");
       setNewProjectError("");
     }
@@ -3214,6 +3563,7 @@ function App() {
     setBulkTodoStatus("IN_PROGRESS");
     setIsBulkTodoActionRunning(false);
     setTodoStatusFilter("");
+    setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
     setTodoDateFilter("");
@@ -3236,6 +3586,7 @@ function App() {
     setBulkTodoStatus("IN_PROGRESS");
     setIsBulkTodoActionRunning(false);
     setTodoStatusFilter("");
+    setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
     setTodoDateFilter("");
@@ -3249,8 +3600,14 @@ function App() {
     setSelectedTodoIds([]);
   };
 
+  const handleTodoSourceFilterChange = (value) => {
+    setTodoSourceFilter(value);
+    setSelectedTodoIds([]);
+  };
+
   const handleTodoFilterReset = () => {
     setTodoStatusFilter("");
+    setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
     setTodoDateFilter("");
@@ -3917,7 +4274,7 @@ function App() {
             end_date: endDate,
             due_date: endDate,
             status: scheduleDraft.status || "NOT_STARTED",
-            source_type: "MEETING_NOTES",
+            source_type: "MANUAL",
             description: scheduleDraft.description.trim() || null,
           },
         ],
@@ -4129,6 +4486,78 @@ function App() {
     };
   };
 
+  const sendLocalChatMessage = async ({
+    targetProject,
+    targetConversationId,
+    userMessage,
+    content,
+    metadata = {},
+  }) => {
+    const localConversationId =
+      targetConversationId || createChatId("conversation");
+    const assistantMessage = {
+      id: createChatId("assistant"),
+      role: "assistant",
+      content,
+      createdAt: formatDateTime(),
+      metadata: {
+        conversationId: localConversationId,
+        state: CHAT_STATES.IDLE,
+        suggestedActions: [],
+        commandActions: [],
+        ...metadata,
+      },
+    };
+    const messageResult = await addMessagesToConversation(
+      targetProject.projectId,
+      localConversationId,
+      userMessage ? [userMessage, assistantMessage] : [assistantMessage],
+    );
+
+    setProject(messageResult.project);
+    setActiveConversationIdState(localConversationId);
+    setActiveConversationId(targetProject.projectId, localConversationId);
+    if (userMessage) {
+      await saveCommandUsage(targetProject.projectId, userMessage.content);
+      setLastCommandInfo({ commandText: userMessage.content });
+      const nextRecommendations = await getCommandRecommendations(
+        targetProject.projectId,
+        localConversationId,
+        { commandText: userMessage.content },
+      );
+      setCommandRecommendations(nextRecommendations);
+    }
+    setSelectedDocumentIds([]);
+    setDocumentStatusMessage("");
+    setIsChatPopupOpen(true);
+
+    return {
+      project: messageResult.project,
+      conversationId: localConversationId,
+    };
+  };
+
+  const getLatestTodosForScheduleChat = async (targetProject) => {
+    try {
+      const response = await listProjectTodos(targetProject.projectId, {
+        status: "",
+      });
+      const nextItems = normalizeTodoListResponse(response);
+      const nextTodoIdSet = new Set(
+        nextItems.map((item) => item.todoId).filter(Boolean),
+      );
+      setTodoItems(nextItems);
+      setSelectedTodoIds((currentIds) =>
+        currentIds.filter((todoId) => nextTodoIdSet.has(todoId)),
+      );
+      setTodoError("");
+      return nextItems;
+    } catch (error) {
+      if (todoItems.length) return todoItems;
+      throw error;
+    }
+  };
+
   const sendBackendConversationMessage = async ({
     targetProject,
     targetConversationId,
@@ -4275,6 +4704,36 @@ function App() {
         content: trimmedValue,
         createdAt: formatDateTime(),
       };
+
+      if (isScheduleTodoMutationRequest(trimmedValue)) {
+        await sendLocalChatMessage({
+          targetProject,
+          targetConversationId,
+          userMessage,
+          content: TODO_MUTATION_BLOCK_MESSAGE,
+        });
+        return;
+      }
+
+      if (isScheduleTodoReadOnlyQuery(trimmedValue)) {
+        const latestTodos = await getLatestTodosForScheduleChat(targetProject);
+        const query = getScheduleChatQuery(trimmedValue, latestTodos);
+        const scheduleTodos = filterScheduleChatTodos(latestTodos, query);
+        await sendLocalChatMessage({
+          targetProject,
+          targetConversationId,
+          userMessage,
+          content: buildScheduleChatResponseContent(query, scheduleTodos),
+          metadata: {
+            result: {
+              type: "schedule_query",
+              query,
+              items: scheduleTodos,
+            },
+          },
+        });
+        return;
+      }
 
       const preparedRequest = await prepareMessageRequest({
         messageText: trimmedValue,
@@ -5101,7 +5560,7 @@ function App() {
     setEntryError("");
     setPendingNewProjectId("");
     setNewProjectName("");
-    setNewProjectStartDate("");
+    setNewProjectStartDate(getTodayIsoDate());
     setNewProjectDescription("");
     setNewProjectError("");
     setIsSettingsOpen(false);
@@ -5121,7 +5580,7 @@ function App() {
   const openSettings = () => {
     if (!project) return;
     setSettingsName(project.projectName ?? "");
-    setSettingsStartDate(getProjectStartDate(project));
+    setSettingsStartDate(getProjectStartDate(project) || getTodayIsoDate());
     setSettingsDescription(project.projectDescription ?? "");
     setSettingsError("");
     setIsSettingsOpen(true);
@@ -5432,6 +5891,7 @@ function App() {
           project={project}
           todoItems={todoItems}
           statusFilter={todoStatusFilter}
+          sourceFilter={todoSourceFilter}
           titleFilter={todoTitleFilter}
           assigneeFilter={todoAssigneeFilter}
           dateFilter={todoDateFilter}
@@ -5459,6 +5919,7 @@ function App() {
           isCommittingImport={isCommittingTodoImport}
           onClose={closeTodoManager}
           onStatusFilterChange={handleTodoStatusFilterChange}
+          onSourceFilterChange={handleTodoSourceFilterChange}
           onTitleFilterChange={setTodoTitleFilter}
           onAssigneeFilterChange={setTodoAssigneeFilter}
           onDateFilterChange={setTodoDateFilter}
@@ -5629,6 +6090,42 @@ const getTodoStatusTone = (status = "") => {
 
 const getTodoStatusLabel = (status = "") =>
   TODO_STATUS_OPTIONS.find((option) => option.value === status)?.label || "진행전";
+
+function TodoSourceBadge({ todo }) {
+  return (
+    <span className={`todo-source-badge is-source-${getTodoSourceKind(todo)}`}>
+      {getTodoSourceLabel(todo)}
+    </span>
+  );
+}
+
+function TodoDdayChip({ todo }) {
+  const label = getTodoDdayLabel(todo);
+  if (!label) return null;
+  return (
+    <span
+      className={[
+        "todo-dday-chip",
+        isTodoDeadlineSoon(todo) ? "is-deadline-soon" : "",
+        isTodoOverdue(todo) ? "is-overdue" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TodoScheduleBadges({ todo }) {
+  return (
+    <div className="todo-schedule-badges">
+      <TodoSourceBadge todo={todo} />
+      <span>{formatScheduleRangeLabel(todo)}</span>
+      <TodoDdayChip todo={todo} />
+    </div>
+  );
+}
 
 function ScheduleStatusPicker({
   status,
@@ -5854,26 +6351,9 @@ function TodayTasksView({
 }) {
   const today = getTodayIsoDate();
   const todayTasks = useMemo(() => {
-    const statusRank = {
-      IN_PROGRESS: 0,
-      NOT_STARTED: 1,
-      DONE: 2,
-      COMPLETED: 2,
-    };
-
     return todos
       .filter((todo) => isDateInTodoScheduleRange(todo, today))
-      .sort((left, right) => {
-        const leftStatusRank = statusRank[String(left.status || "").toUpperCase()] ?? 1;
-        const rightStatusRank = statusRank[String(right.status || "").toUpperCase()] ?? 1;
-        const leftRange = getTodoScheduleRange(left);
-        const rightRange = getTodoScheduleRange(right);
-        return (
-          leftStatusRank - rightStatusRank ||
-          String(leftRange?.startDate || "").localeCompare(String(rightRange?.startDate || "")) ||
-          String(left.title || "").localeCompare(String(right.title || ""))
-        );
-      });
+      .sort(compareTodosForSchedule);
   }, [todos, today]);
   const doneCount = todayTasks.filter(
     (todo) => getTodoStatusTone(todo.status) === "done",
@@ -5930,14 +6410,20 @@ function TodayTasksView({
               const isSaving = savingTodoId === todo.todoId;
               return (
                 <li
-                  className={`today-task-card is-${getTodoStatusTone(todo.status)}`}
+                  className={[
+                    "today-task-card",
+                    `is-${getTodoStatusTone(todo.status)}`,
+                    getTodoScheduleClassNames(todo),
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   key={todo.todoId || todo.title}
                 >
                   <div className="today-task-card__content">
                     <div className="today-task-card__title">
                       <div>
                         <strong>{todo.title || "제목 없음"}</strong>
-                        <small>{formatScheduleRangeLabel(todo)}</small>
+                        <TodoScheduleBadges todo={todo} />
                       </div>
                       <ScheduleStatusPicker
                         status={todo.status}
@@ -6040,7 +6526,11 @@ function TodayTasksView({
                           </div>
                           <div>
                             <dt>기한</dt>
-                            <dd>{formatScheduleRangeLabel(todo)}</dd>
+                            <dd>{formatTodoDeadlineWithDday(todo)}</dd>
+                          </div>
+                          <div>
+                            <dt>출처</dt>
+                            <dd><TodoSourceBadge todo={todo} /></dd>
                           </div>
                         </dl>
                         <p>{todo.description || "상세내용이 없습니다."}</p>
@@ -6130,22 +6620,33 @@ function ScheduleWeekRow({
       <div className="schedule-event-layer">
         {visibleSegments.map((segment) => (
           <button
-            className={`calendar-event-bar calendar-event-bar--${getTodoStatusTone(
-              segment.todo.status,
-            )}`}
+            className={[
+              "calendar-event-bar",
+              `calendar-event-bar--${getTodoStatusTone(segment.todo.status)}`,
+              getTodoScheduleClassNames(segment.todo),
+            ]
+              .filter(Boolean)
+              .join(" ")}
             key={`${segment.todo.todoId || segment.todo.title}-${segment.segmentStart}`}
             style={{
               gridColumn: `${segment.startCol} / ${segment.endCol + 1}`,
               gridRow: segment.lane + 1,
             }}
-            title={`${formatScheduleRangeLabel(segment.todo)} · ${
+            title={`${formatTodoDeadlineWithDday(segment.todo)} · ${
               segment.todo.title || "제목 없음"
             }`}
             type="button"
             onClick={() => onDateSelect(segment.segmentStart)}
           >
-            <span>{getTodoStatusLabel(segment.todo.status)}</span>
-            {segment.todo.title || "제목 없음"}
+            <span className="calendar-event-status">
+              {getTodoStatusLabel(segment.todo.status)}
+            </span>
+            <span className="calendar-event-title">
+              {segment.todo.title || "제목 없음"}
+            </span>
+            <span className="calendar-event-dday">
+              {getTodoDdayLabel(segment.todo)}
+            </span>
           </button>
         ))}
         {hiddenCount > 0 && (
@@ -6204,12 +6705,15 @@ function ScheduleDayModal({
                 const isEditing = editingTodoId === todo.todoId;
                 const isSaving = savingTodoId === todo.todoId;
                 return (
-                  <li className="schedule-day-item" key={todo.todoId || todo.title}>
+                  <li
+                    className={`schedule-day-item ${getTodoScheduleClassNames(todo)}`}
+                    key={todo.todoId || todo.title}
+                  >
                     <div className="schedule-day-item__main">
                       <div className="schedule-day-item__title">
                         <div>
                           <strong>{todo.title || "제목 없음"}</strong>
-                          <small>{formatScheduleRangeLabel(todo)}</small>
+                          <TodoScheduleBadges todo={todo} />
                         </div>
                         <ScheduleStatusPicker
                           status={todo.status}
@@ -6227,7 +6731,11 @@ function ScheduleDayModal({
                             </div>
                             <div>
                               <dt>기간</dt>
-                              <dd>{formatScheduleRangeLabel(todo)}</dd>
+                              <dd>{formatTodoDeadlineWithDday(todo)}</dd>
+                            </div>
+                            <div>
+                              <dt>출처</dt>
+                              <dd><TodoSourceBadge todo={todo} /></dd>
                             </div>
                           </dl>
                           {todo.description && <p>{todo.description}</p>}
@@ -6628,7 +7136,7 @@ function ScheduleImportPreviewList({ preview, selectedIds, onToggleItem }) {
       item: duplicate.candidate,
       duplicate,
     })),
-  ];
+  ].sort((left, right) => compareTodosForSchedule(left.item, right.item));
   if (!rows.length) {
     return <p className="empty-state">문서에서 불러올 할일이 없습니다.</p>;
   }
@@ -6638,7 +7146,15 @@ function ScheduleImportPreviewList({ preview, selectedIds, onToggleItem }) {
       {rows.map(({ item, duplicate }) => {
         const itemId = item.clientImportId || item.todoId;
         return (
-          <li className={duplicate ? "is-duplicate" : ""} key={itemId || item.title}>
+          <li
+            className={[
+              duplicate ? "is-duplicate" : "",
+              getTodoScheduleClassNames(item),
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            key={itemId || item.title}
+          >
             <label>
               <input
                 type="checkbox"
@@ -6647,9 +7163,10 @@ function ScheduleImportPreviewList({ preview, selectedIds, onToggleItem }) {
               />
               <span>
                 <strong>{item.title || "제목 없음"}</strong>
+                <TodoScheduleBadges todo={item} />
                 <small>
                   담당자: {item.assignee || "미정"} · 기간:{" "}
-                  {formatScheduleRangeLabel(item)} · 상태:{" "}
+                  {formatTodoDeadlineWithDday(item)} · 상태:{" "}
                   {getTodoStatusLabel(item.status)}
                 </small>
                 {duplicate && (
@@ -7963,6 +8480,7 @@ function TodoManagerModal({
   project,
   todoItems,
   statusFilter,
+  sourceFilter,
   titleFilter,
   assigneeFilter,
   dateFilter,
@@ -7990,6 +8508,7 @@ function TodoManagerModal({
   isCommittingImport,
   onClose,
   onStatusFilterChange,
+  onSourceFilterChange,
   onTitleFilterChange,
   onAssigneeFilterChange,
   onDateFilterChange,
@@ -8051,12 +8570,15 @@ function TodoManagerModal({
       if (statusFilter && (todo.status || "NOT_STARTED") !== statusFilter) {
         return false;
       }
+      if (sourceFilter && getTodoSourceFilterValue(todo) !== sourceFilter) {
+        return false;
+      }
       if (normalizedDate && !isDateInTodoScheduleRange(todo, normalizedDate)) {
         return false;
       }
       return true;
-    });
-  }, [assigneeFilter, dateFilter, statusFilter, titleFilter, todoItems]);
+    }).sort(compareTodosForSchedule);
+  }, [assigneeFilter, dateFilter, sourceFilter, statusFilter, titleFilter, todoItems]);
   const visibleTodoIds = useMemo(
     () => filteredTodoItems.map((todo) => todo.todoId).filter(Boolean),
     [filteredTodoItems],
@@ -8117,7 +8639,10 @@ function TodoManagerModal({
     const itemId = item.clientImportId || item.todoId || item.title;
     const isSelected = selectedImportIds.includes(itemId);
     return (
-      <li className="todo-preview-item" key={`${duplicateLevel}-${itemId}`}>
+      <li
+        className={`todo-preview-item ${getTodoScheduleClassNames(item)}`}
+        key={`${duplicateLevel}-${itemId}`}
+      >
         <label>
           <input
             type="checkbox"
@@ -8128,9 +8653,10 @@ function TodoManagerModal({
         </label>
         <div className="todo-preview-body">
           <strong>{item.title || "제목 없음"}</strong>
+          <TodoScheduleBadges todo={item} />
           <p>
             {item.assignee || "담당자 미정"} ·{" "}
-            {formatScheduleRangeLabel(item)}
+            {formatTodoDeadlineWithDday(item)}
           </p>
           {matchedExisting?.title && (
             <div className="todo-duplicate-match">
@@ -8154,7 +8680,13 @@ function TodoManagerModal({
     const isBusy = isSaving || isBulkActionRunning;
     return (
       <li
-        className={`todo-item${isSelected ? " is-selected" : ""}`}
+        className={[
+          "todo-item",
+          isSelected ? "is-selected" : "",
+          getTodoScheduleClassNames(todo),
+        ]
+          .filter(Boolean)
+          .join(" ")}
         key={todo.todoId || todo.title}
       >
         <div className="todo-item-main">
@@ -8169,6 +8701,7 @@ function TodoManagerModal({
           </label>
           <div className="todo-title-block">
             <strong>{todo.title || "제목 없음"}</strong>
+            <TodoScheduleBadges todo={todo} />
           </div>
           <dl className="todo-meta">
             <div>
@@ -8177,7 +8710,11 @@ function TodoManagerModal({
             </div>
             <div>
               <dt>기간</dt>
-              <dd>{formatScheduleRangeLabel(todo)}</dd>
+              <dd>{formatTodoDeadlineWithDday(todo)}</dd>
+            </div>
+            <div>
+              <dt>출처</dt>
+              <dd><TodoSourceBadge todo={todo} /></dd>
             </div>
           </dl>
           <div className="todo-row-actions">
@@ -8373,6 +8910,21 @@ function TodoManagerModal({
                       }
                     >
                       {TODO_STATUS_FILTERS.map((option) => (
+                        <option key={option.value || "ALL"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    출처
+                    <select
+                      value={sourceFilter}
+                      onChange={(event) =>
+                        onSourceFilterChange(event.target.value)
+                      }
+                    >
+                      {TODO_SOURCE_FILTERS.map((option) => (
                         <option key={option.value || "ALL"} value={option.value}>
                           {option.label}
                         </option>
@@ -8877,8 +9429,10 @@ function ChatMessage({
     uploadRequest?.outputFormats ??
     uploadRequest?.documentConfig?.outputFormats ??
     [];
+  const shouldUseUploadOutputFormat =
+    uploadOutputFormats.length > 0 || Boolean(uploadRequest?.outputFormat);
   const shouldShowUploadOutputFormat =
-    !uploadRequest?.hideOutputFormat && uploadOutputFormats.length > 0;
+    false;
   const uploadDefaultOutputFormat =
     uploadRequest?.outputFormat ||
     uploadOutputFormats[0]?.value ||
@@ -8898,7 +9452,7 @@ function ChatMessage({
       uploadRequest: uploadRequest
         ? {
             ...uploadRequest,
-            ...(shouldShowUploadOutputFormat
+            ...(shouldUseUploadOutputFormat
               ? { outputFormat: selectedUploadOutputFormat }
               : {}),
           }
@@ -9115,8 +9669,10 @@ function DefaultDocumentChoicePanel({
     request?.outputFormats ??
     documentConfig.outputFormats ??
     (relation ? getOutputFormats(relation) : []);
+  const shouldUseOutputFormat =
+    outputFormats.length > 0 || Boolean(request?.outputFormat);
   const shouldShowOutputFormat =
-    !documentConfig.hideOutputFormat && outputFormats.length > 0;
+    false;
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
@@ -9178,7 +9734,7 @@ function DefaultDocumentChoicePanel({
   );
   const canGenerate =
     hasSelectedPrimaryDocument &&
-    (!shouldShowOutputFormat || Boolean(selectedOutputFormat));
+    (!shouldUseOutputFormat || Boolean(selectedOutputFormat));
   const generateDisabledTitle = !hasSelectedPrimaryDocument
     ? `${primaryLabel}를 선택하거나 업로드해 주세요.`
     : undefined;
@@ -9531,7 +10087,9 @@ function MessageResult({ downloadFiles, onDownloadFile }) {
 }
 
 function ScheduleTodoResult({ items }) {
-  const todos = Array.isArray(items) ? items : [];
+  const todos = Array.isArray(items)
+    ? [...items].sort(compareTodosForSchedule)
+    : [];
   if (!todos.length) return null;
 
   return (
@@ -9542,6 +10100,7 @@ function ScheduleTodoResult({ items }) {
             <th>할일</th>
             <th>담당자</th>
             <th>기한</th>
+            <th>출처</th>
             <th>상태</th>
           </tr>
         </thead>
@@ -9550,10 +10109,14 @@ function ScheduleTodoResult({ items }) {
             const title = sanitizeTodoText(todo.title || "제목 없음");
             const evidence = sanitizeTodoText(todo.evidence || title);
             return (
-              <tr key={todo.todo_id || todo.id || `${todo.title}-${index}`}>
+              <tr
+                className={getTodoScheduleClassNames(todo)}
+                key={todo.todo_id || todo.todoId || todo.id || `${todo.title}-${index}`}
+              >
                 <td title={evidence}>{truncateTodoText(title)}</td>
                 <td>{sanitizeTodoText(todo.assignee) || "담당자 미정"}</td>
-                <td>{sanitizeTodoText(todo.due_date) || "기한 미정"}</td>
+                <td>{sanitizeTodoText(formatTodoDeadlineWithDday(todo))}</td>
+                <td><TodoSourceBadge todo={todo} /></td>
                 <td>{sanitizeTodoText(todo.status) || "확인 필요"}</td>
               </tr>
             );
