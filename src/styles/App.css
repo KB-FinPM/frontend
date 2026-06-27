@@ -1202,6 +1202,67 @@ p {
   max-width: 100%;
 }
 
+.document-choice-multi-list {
+  display: grid;
+  gap: 6px;
+  width: min(100%, 520px);
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--kb-border);
+  border-radius: 8px;
+  background: var(--kb-surface);
+}
+
+.document-choice-helper,
+.document-choice-selected-count,
+.document-choice-material-summary {
+  margin: 0;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.document-choice-multi-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  color: var(--kb-text);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.document-choice-multi-item input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: var(--kb-yellow-positive);
+}
+
+.document-choice-multi-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.document-choice-multi-item:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.document-choice-selected-count {
+  color: var(--kb-dark-gray);
+}
+
+.document-choice-material-summary {
+  flex: 1 1 280px;
+}
+
 .document-source-control:disabled,
 .document-choice-source-select:disabled {
   color: var(--kb-text-muted);

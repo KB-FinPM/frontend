@@ -175,6 +175,15 @@ const normalizeProject = (project, source = "db") => {
     projectDescription:
       project.projectDescription ?? project.description ?? project.summary ?? "",
     conversations: sortConversations(normalizedConversations),
+    author: project.author ?? project.document_author ?? project.documentAuthor ?? "",
+    documentAuthor:
+      project.documentAuthor ?? project.document_author ?? project.author ?? "",
+    writer: project.writer ?? "",
+    createdBy: project.createdBy ?? project.created_by ?? "",
+    created_by: project.created_by ?? project.createdBy ?? "",
+    userName: project.userName ?? project.user_name ?? "",
+    userId: project.userId ?? project.user_id ?? "",
+    user_id: project.user_id ?? project.userId ?? "",
     createdAt: project.createdAt ?? project.created_at ?? formatDateTime(),
     updatedAt: project.updatedAt ?? project.updated_at ?? formatDateTime(),
     source,

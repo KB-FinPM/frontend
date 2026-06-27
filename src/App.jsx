@@ -1970,6 +1970,9 @@ const uniqueDocumentsById = (documents = []) => {
   });
 };
 
+const normalizeDocumentIds = (documentIds = []) =>
+  Array.from(new Set(documentIds.filter(Boolean)));
+
 const getUploadResumeDocuments = (uploadRequest, uploadedDocument) => {
   const beforeDocuments = Array.isArray(uploadRequest?.resumeDocumentsBefore)
     ? uploadRequest.resumeDocumentsBefore
@@ -2072,6 +2075,20 @@ const getGenerationDownloadFiles = (statusResponse = {}) => {
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
+const getProjectAuthor = (project) =>
+  String(
+    project?.author ||
+      project?.documentAuthor ||
+      project?.document_author ||
+      project?.writer ||
+      project?.createdBy ||
+      project?.created_by ||
+      project?.userName ||
+      project?.userId ||
+      project?.user_id ||
+      "",
+  ).trim();
+
 const sanitizeProjectStartDateInput = (value = "") => {
   const text = String(value ?? "");
   const [year = "", month = "", day = ""] = text.split("-");
@@ -2110,17 +2127,35 @@ const buildProjectContext = (
   const selectedDocumentIds = selectedDocuments
     .map((document) => document.documentId)
     .filter(Boolean);
+  const author = getProjectAuthor(targetProject);
+  const writer = String(targetProject?.writer || author || "").trim();
+  const createdBy = String(
+    targetProject?.createdBy ?? targetProject?.created_by ?? "",
+  ).trim();
+  const userId = String(
+    targetProject?.userId ?? targetProject?.user_id ?? "",
+  ).trim();
+  const createdByValue = createdBy || author;
+  const userIdValue = userId || createdByValue;
 
   const context = {
     selected_document_ids: selectedDocumentIds,
     selected_documents: selectedDocuments.map(toDocumentContext),
     source_document_type: selectedDocuments[0]?.documentType,
     project_name: targetProject.projectName || "",
+    author,
+    writer,
+    created_by: createdByValue,
+    user_id: userIdValue,
     project: {
       project_id: targetProject.projectId,
       name: targetProject.projectName || "",
       start_date: getProjectStartDate(targetProject),
       end_date: targetProject.projectEndDate || "",
+      author,
+      writer,
+      created_by: createdByValue,
+      user_id: userIdValue,
     },
   };
 
@@ -2128,16 +2163,22 @@ const buildProjectContext = (
     const requirementDefinitionDocument = selectedDocuments.find(
       (document) => document.documentType === DEFAULT_DOCUMENT_TYPE,
     );
-    const technicalNegotiationMinutesDocument = selectedDocuments.find(
+    const technicalNegotiationMinutesDocuments = selectedDocuments.filter(
       (document) => document.documentType === DOCUMENT_TYPES.MEETING_NOTES,
     );
+    const technicalNegotiationMinutesDocumentIds =
+      technicalNegotiationMinutesDocuments
+        .map((document) => document.documentId)
+        .filter(Boolean);
 
     context.source_document_ids = selectedDocumentIds;
     context.document_ids = selectedDocumentIds;
     context.requirement_definition_document_id =
       requirementDefinitionDocument?.documentId ?? null;
+    context.technical_negotiation_minutes_document_ids =
+      technicalNegotiationMinutesDocumentIds;
     context.technical_negotiation_minutes_document_id =
-      technicalNegotiationMinutesDocument?.documentId ?? null;
+      technicalNegotiationMinutesDocumentIds[0] ?? null;
   }
 
   return {
@@ -4338,27 +4379,49 @@ function App() {
     const uploadFiles = Array.from(files ?? []).filter(Boolean);
     if (!uploadFiles.length) return;
 
-    const [file] = uploadFiles;
     const requestedDocumentType =
       uploadRequest.documentType || DEFAULT_DOCUMENT_TYPE;
+    const canUploadMultiple =
+      Boolean(uploadRequest.allowMultiple) ||
+      (uploadRequest.documentChoiceSlot === "optional" &&
+        requestedDocumentType === DOCUMENT_TYPES.MEETING_NOTES);
+    const filesToUpload = canUploadMultiple
+      ? uploadFiles
+      : uploadFiles.slice(0, 1);
+    const uploadLabel =
+      filesToUpload.length > 1
+        ? `${uploadRequest.displayLabel || getDocumentDisplayLabel(requestedDocumentType)} ${filesToUpload.length}개`
+        : filesToUpload[0].name;
     setIsUploadingDocument(true);
     setDocumentError("");
-    setDocumentStatusMessage(`${file.name} 업로드 중입니다.`);
+    setDocumentStatusMessage(`${uploadLabel} 업로드 중입니다.`);
 
     try {
-      const response = await uploadDocument({
-        projectId: project.projectId,
-        documentType: requestedDocumentType,
-        file,
-      });
-      const document = response?.document ?? {};
-      const uploadedDocumentId = document.document_id ?? document.documentId ?? "";
-      if (!uploadedDocumentId) {
-        throw new Error("업로드된 문서 정보를 확인하지 못했습니다.");
+      for (const file of filesToUpload) {
+        let response;
+        try {
+          response = await uploadDocument({
+            projectId: project.projectId,
+            documentType: requestedDocumentType,
+            file,
+          });
+        } catch (uploadError) {
+          const message =
+            uploadError instanceof Error
+              ? uploadError.message
+              : "문서를 업로드하지 못했습니다.";
+          throw new Error(`${file.name}: ${message}`);
+        }
+        const document = response?.document ?? {};
+        const uploadedDocumentId =
+          document.document_id ?? document.documentId ?? "";
+        if (!uploadedDocumentId) {
+          throw new Error(`${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`);
+        }
       }
       await loadUploadedFiles(project);
       setDocumentStatusMessage(
-        `${file.name} 업로드가 완료되었습니다. 기준 문서를 확인한 뒤 생성해 주세요.`,
+        `${uploadLabel} 업로드가 완료되었습니다. 기준 문서를 확인한 뒤 생성해 주세요.`,
       );
     } catch (error) {
       setDocumentError(
@@ -4929,9 +4992,9 @@ function App() {
     setIsUploadingDocument(true);
     setDocumentError("");
     setDocumentStatusMessage("");
+    let requestedDocumentTypeForError = uploadRequestOverride?.documentType;
 
     try {
-      const [file] = uploadFiles;
       const documentChoiceRequest =
         message.metadata?.documentChoiceRequest ?? null;
       const documentChoiceConfig =
@@ -4960,29 +5023,61 @@ function App() {
           : {});
       const requestedDocumentType =
         uploadRequest.documentType || DEFAULT_DOCUMENT_TYPE;
-      const response = await uploadDocument({
-        projectId: project.projectId,
-        documentType: requestedDocumentType,
-        file,
-      });
-      const document = response?.document;
+      requestedDocumentTypeForError = requestedDocumentType;
+      const canUploadMultipleChoiceDocuments =
+        Boolean(uploadRequest.allowMultiple) ||
+        (uploadRequest.documentChoiceSlot === "optional" &&
+          requestedDocumentType === DOCUMENT_TYPES.MEETING_NOTES);
+      const filesToUpload = canUploadMultipleChoiceDocuments
+        ? uploadFiles
+        : uploadFiles.slice(0, 1);
+      const uploadLabel =
+        filesToUpload.length > 1
+          ? `${uploadRequest.displayLabel || getDocumentDisplayLabel(requestedDocumentType)} ${filesToUpload.length}개`
+          : filesToUpload[0].name;
+      const uploadedDocuments = [];
+      setDocumentStatusMessage(`${uploadLabel} 업로드 중입니다.`);
 
-      if (!document?.document_id) {
+      for (const file of filesToUpload) {
+        let response;
+        try {
+          response = await uploadDocument({
+            projectId: project.projectId,
+            documentType: requestedDocumentType,
+            file,
+          });
+        } catch (uploadError) {
+          const message =
+            uploadError instanceof Error
+              ? uploadError.message
+              : "문서를 업로드하지 못했습니다.";
+          throw new Error(`${file.name}: ${message}`);
+        }
+        const document = response?.document;
+
+        if (!document?.document_id) {
+          throw new Error(`${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`);
+        }
+
+        uploadedDocuments.push({
+          ...toAttachmentDocument(document),
+          documentType:
+            document.document_type ??
+            document.documentType ??
+            requestedDocumentType,
+          displayLabel:
+            uploadRequest.displayLabel ??
+            document.display_label ??
+            document.displayLabel ??
+            getDocumentDisplayLabel(requestedDocumentType),
+        });
+      }
+
+      const uploadedDocument = uploadedDocuments[0];
+      if (!uploadedDocument?.documentId) {
         throw new Error("업로드된 문서 정보를 확인하지 못했습니다.");
       }
 
-      const uploadedDocument = {
-        ...toAttachmentDocument(document),
-        documentType:
-          document.document_type ??
-          document.documentType ??
-          requestedDocumentType,
-        displayLabel:
-          uploadRequest.displayLabel ??
-          document.display_label ??
-          document.displayLabel ??
-          getDocumentDisplayLabel(requestedDocumentType),
-      };
       if (uploadRequest.documentChoiceSlot) {
         const targetConversationId =
           message.metadata?.conversationId || activeConversationId;
@@ -5003,18 +5098,29 @@ function App() {
                 uploadRequest.outputFormat ?? currentChoiceRequest.outputFormat,
             };
             if (uploadRequest.documentChoiceSlot === "optional") {
+              const currentOptionalDocuments =
+                currentChoiceRequest.optionalDocuments ?? [];
+              const currentDefaultOptionalIds =
+                currentChoiceRequest.defaultOptionalDocumentIds ?? [];
+              const selectedOptionalIdsFromRequest = Array.isArray(
+                uploadRequest.selectedOptionalDocumentIds,
+              )
+                ? uploadRequest.selectedOptionalDocumentIds
+                : currentDefaultOptionalIds;
+              const currentSelectedOptionalDocuments =
+                currentOptionalDocuments.filter((item) =>
+                  selectedOptionalIdsFromRequest.includes(item.documentId),
+                );
               nextChoiceRequest.optionalDocuments = uniqueDocumentsById([
-                uploadedDocument,
-                ...(currentChoiceRequest.optionalDocuments ?? []),
+                ...uploadedDocuments,
+                ...currentOptionalDocuments,
               ]);
               nextChoiceRequest.defaultOptionalDocumentIds = uniqueDocumentsById([
-                uploadedDocument,
-                ...((currentChoiceRequest.optionalDocuments ?? []).filter((item) =>
-                  (currentChoiceRequest.defaultOptionalDocumentIds ?? []).includes(
-                    item.documentId,
-                  ),
-                )),
-              ]).map((item) => item.documentId);
+                ...uploadedDocuments,
+                ...currentSelectedOptionalDocuments,
+              ])
+                .map((item) => item.documentId)
+                .filter(Boolean);
             } else {
               nextChoiceRequest.documents = uniqueDocumentsById([
                 uploadedDocument,
@@ -5050,7 +5156,7 @@ function App() {
         );
         setProject(result.project);
         setDocumentStatusMessage(
-          `${uploadedDocument.fileName} 업로드가 완료되었습니다. 생성 버튼을 눌러 진행해주세요.`,
+          `${uploadLabel} 업로드가 완료되었습니다. 생성 버튼을 눌러 진행해주세요.`,
         );
         await loadUploadedFiles(project);
         return;
@@ -5108,7 +5214,7 @@ function App() {
     } catch (error) {
       reportUiError("handleAgentUploadFiles", error, {
         projectId: project?.projectId,
-        documentType: uploadRequestOverride?.documentType,
+        documentType: requestedDocumentTypeForError,
       });
       setDocumentError(
         error instanceof Error
@@ -9753,14 +9859,14 @@ function DefaultDocumentChoicePanel({
   const defaultOptionalDocumentIds = Array.isArray(request?.defaultOptionalDocumentIds)
     ? request.defaultOptionalDocumentIds
     : optionalDocuments.map((document) => document.documentId).filter(Boolean);
-  const selectedOptionalDocumentId =
-    selectedOptionalDocumentIds[0] || defaultOptionalDocumentIds[0] || "";
-  const selectedOptionalDocument =
-    optionalDocuments.find(
-      (document) => document.documentId === selectedOptionalDocumentId,
-    ) ?? optionalDocuments[0];
+  const selectedOptionalDocuments = optionalDocuments.filter((document) =>
+    selectedOptionalDocumentIds.includes(document.documentId),
+  );
+  const selectedOptionalDocumentIdsForChoice = selectedOptionalDocuments.map(
+    (document) => document.documentId,
+  );
   const documentSelectId = `${panelId}-primary-source-document`;
-  const optionalDocumentSelectId = `${panelId}-optional-source-document`;
+  const optionalDocumentListId = `${panelId}-optional-source-documents`;
   const primaryUseName = `${panelId}-primary-use-existing`;
   const optionalUseName = `${panelId}-optional-use-existing`;
   const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
@@ -9771,14 +9877,22 @@ function DefaultDocumentChoicePanel({
   const hasSelectedPrimaryDocument = Boolean(
     usePrimaryDocument && selectedDocument?.documentId,
   );
-  const hasSelectedOptionalDocument = Boolean(
-    includeOptionalDocument && selectedOptionalDocument?.documentId,
-  );
   const shouldShowPrimaryUpload = !hasSelectedPrimaryDocument;
   const shouldShowOptionalUpload = Boolean(
-    optionalSource &&
-      (!includeOptionalDocument || !selectedOptionalDocument?.documentId),
+    optionalSource && !includeOptionalDocument,
   );
+  const canUploadMultipleOptional =
+    optionalSource?.documentType === DOCUMENT_TYPES.MEETING_NOTES;
+  const optionalSelectionCount = includeOptionalDocument
+    ? selectedOptionalDocuments.length
+    : 0;
+  const materialSummary = !hasSelectedPrimaryDocument
+    ? `${primaryLabel}를 선택하거나 업로드하면 ${targetLabel}를 생성할 수 있습니다.`
+    : optionalSource
+      ? optionalSelectionCount > 0
+        ? `${primaryLabel} 1개, ${optionalLabel} ${optionalSelectionCount}개를 반영합니다.`
+        : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다. ${optionalLabel}은 반영하지 않습니다.`
+      : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다.`;
   const canGenerate =
     hasSelectedPrimaryDocument &&
     (!shouldUseOutputFormat || Boolean(selectedOutputFormat));
@@ -9795,7 +9909,7 @@ function DefaultDocumentChoicePanel({
     const nextOptionalIds = Array.isArray(request?.defaultOptionalDocumentIds)
       ? request.defaultOptionalDocumentIds
       : optionalDocuments.map((document) => document.documentId).filter(Boolean);
-    setSelectedOptionalDocumentIds(nextOptionalIds);
+    setSelectedOptionalDocumentIds(normalizeDocumentIds(nextOptionalIds));
     setIncludeOptionalDocument(nextOptionalIds.length > 0);
   }, [request?.defaultOptionalDocumentIds, optionalDocuments.length]);
 
@@ -9806,6 +9920,29 @@ function DefaultDocumentChoicePanel({
         (relation ? getDefaultOutputFormat(relation) : ""),
     );
   }, [request?.outputFormat, documentConfig.defaultOutputFormat, relation]);
+
+  const handleIncludeOptionalDocuments = () => {
+    const nextOptionalIds = selectedOptionalDocumentIdsForChoice.length
+      ? selectedOptionalDocumentIdsForChoice
+      : defaultOptionalDocumentIds;
+    setIncludeOptionalDocument(true);
+    setSelectedOptionalDocumentIds(normalizeDocumentIds(nextOptionalIds));
+  };
+
+  const handleExcludeOptionalDocuments = () => {
+    setIncludeOptionalDocument(false);
+    setSelectedOptionalDocumentIds([]);
+  };
+
+  const toggleOptionalDocumentId = (documentId) => {
+    setSelectedOptionalDocumentIds((currentIds) => {
+      const nextIds = currentIds.includes(documentId)
+        ? currentIds.filter((currentId) => currentId !== documentId)
+        : [...currentIds, documentId];
+      return normalizeDocumentIds(nextIds);
+    });
+    setIncludeOptionalDocument(true);
+  };
 
   const buildUploadRequest = (source, slot) => ({
     label: `${source?.label || "기준 문서"} 업로드`,
@@ -9818,6 +9955,10 @@ function DefaultDocumentChoicePanel({
     outputFormat: selectedOutputFormat,
     documentChoiceSlot: slot,
     displayLabel: `업로드한 ${source?.label || "문서"}`,
+    allowMultiple:
+      slot === "optional" && source?.documentType === DOCUMENT_TYPES.MEETING_NOTES,
+    selectedOptionalDocumentIds:
+      slot === "optional" ? selectedOptionalDocumentIdsForChoice : [],
   });
 
   const handleUploadChange = (event, source, slot) => {
@@ -9966,7 +10107,7 @@ function DefaultDocumentChoicePanel({
           <div className="document-choice-file-row">
             <label
               className="document-choice-file-label"
-              htmlFor={shouldShowOptionalUpload ? undefined : optionalDocumentSelectId}
+              htmlFor={shouldShowOptionalUpload ? undefined : optionalDocumentListId}
             >
               {optionalLabel}
             </label>
@@ -9996,22 +10137,36 @@ function DefaultDocumentChoicePanel({
                 )}
               </button>
             ) : (
-              <select
-                id={optionalDocumentSelectId}
-                className="document-choice-source-select document-source-control"
-                value={selectedOptionalDocumentId}
-                disabled={isDisabled}
+              <div
+                id={optionalDocumentListId}
+                className="document-choice-multi-list"
+                role="group"
+                aria-label={`${optionalLabel} 선택`}
                 onClick={(event) => event.stopPropagation()}
-                onChange={(event) =>
-                  setSelectedOptionalDocumentIds([event.target.value])
-                }
               >
+                <p className="document-choice-helper">
+                  {optionalLabel}을 여러 개 선택할 수 있습니다.
+                </p>
                 {optionalDocuments.map((document) => (
-                  <option key={document.documentId} value={document.documentId}>
-                    {document.fileName || document.documentId}
-                  </option>
+                  <label
+                    className="document-choice-multi-item"
+                    key={document.documentId}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedOptionalDocumentIdsForChoice.includes(
+                        document.documentId,
+                      )}
+                      disabled={isDisabled}
+                      onChange={() => toggleOptionalDocumentId(document.documentId)}
+                    />
+                    <span>{document.fileName || document.documentId}</span>
+                  </label>
                 ))}
-              </select>
+                <p className="document-choice-selected-count">
+                  {optionalLabel} {optionalSelectionCount}개 선택됨
+                </p>
+              </div>
             )}
           </div>
           {optionalDocuments.length > 0 && (
@@ -10021,12 +10176,7 @@ function DefaultDocumentChoicePanel({
               <label
                 className="document-choice-check"
                 onClick={(event) =>
-                  handleChoiceLabelClick(event, () => {
-                    setIncludeOptionalDocument(true);
-                    setSelectedOptionalDocumentIds([
-                      selectedOptionalDocument?.documentId,
-                    ].filter(Boolean));
-                  })
+                  handleChoiceLabelClick(event, handleIncludeOptionalDocuments)
                 }
               >
                 <input
@@ -10035,21 +10185,14 @@ function DefaultDocumentChoicePanel({
                   checked={includeOptionalDocument}
                   disabled={isDisabled}
                   onClick={(event) => event.stopPropagation()}
-                  onChange={() => {
-                    setIncludeOptionalDocument(true);
-                    setSelectedOptionalDocumentIds([
-                      selectedOptionalDocument?.documentId,
-                    ].filter(Boolean));
-                  }}
+                  onChange={handleIncludeOptionalDocuments}
                 />
                 <span>예</span>
               </label>
               <label
                 className="document-choice-check"
                 onClick={(event) =>
-                  handleChoiceLabelClick(event, () =>
-                    setIncludeOptionalDocument(false),
-                  )
+                  handleChoiceLabelClick(event, handleExcludeOptionalDocuments)
                 }
               >
                 <input
@@ -10058,16 +10201,22 @@ function DefaultDocumentChoicePanel({
                   checked={!includeOptionalDocument}
                   disabled={isDisabled}
                   onClick={(event) => event.stopPropagation()}
-                  onChange={() => setIncludeOptionalDocument(false)}
+                  onChange={handleExcludeOptionalDocuments}
                 />
                 <span>아니오</span>
               </label>
             </fieldset>
           )}
+          {shouldShowOptionalUpload && (
+            <p className="document-choice-helper">
+              회의록 파일을 업로드하거나, 업로드 없이 생성할 수 있습니다.
+            </p>
+          )}
           <input
             ref={optionalFileInputRef}
             className="message-file-input"
             type="file"
+            multiple={canUploadMultipleOptional}
             accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
             disabled={isDisabled || isUploading}
             onChange={(event) =>
@@ -10086,6 +10235,7 @@ function DefaultDocumentChoicePanel({
         />
       )}
       <div className="document-choice-actions">
+        <p className="document-choice-material-summary">{materialSummary}</p>
         <button
           className="message-upload-button"
           type="button"
@@ -10096,8 +10246,8 @@ function DefaultDocumentChoicePanel({
                 choice: "generate",
                 documentId: selectedDocument?.documentId,
                 optionalDocumentIds:
-                  includeOptionalDocument && selectedOptionalDocument?.documentId
-                    ? [selectedOptionalDocument.documentId]
+                  includeOptionalDocument
+                    ? selectedOptionalDocumentIdsForChoice
                     : [],
                 outputFormat: selectedOutputFormat,
               }),
