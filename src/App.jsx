@@ -1159,6 +1159,7 @@ const buildDocumentHubChoiceRequest = ({ requestType, documents }) => {
     optionalDocuments: uniqueDocumentsById(optionalDocuments),
     defaultDocumentId: matchingDocuments[0]?.documentId || "",
     defaultOptionalDocumentIds: uniqueDocumentsById(optionalDocuments)
+      .slice(0, 1)
       .map((document) => document.documentId)
       .filter(Boolean),
     outputFormats: documentConfig.outputFormats,
@@ -4413,6 +4414,7 @@ function App() {
     setDocumentStatusMessage(`${uploadLabel} 업로드 중입니다.`);
 
     try {
+      const uploadedDocuments = [];
       for (const file of filesToUpload) {
         let response;
         try {
@@ -4434,16 +4436,30 @@ function App() {
         if (!uploadedDocumentId) {
           throw new Error(`${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`);
         }
+        uploadedDocuments.push({
+          ...toAttachmentDocument(document),
+          documentType:
+            document.document_type ??
+            document.documentType ??
+            requestedDocumentType,
+          displayLabel:
+            uploadRequest.displayLabel ??
+            document.display_label ??
+            document.displayLabel ??
+            getDocumentDisplayLabel(requestedDocumentType),
+        });
       }
       await loadUploadedFiles(project);
       setDocumentStatusMessage(
         `${uploadLabel} 업로드가 완료되었습니다. 기준 문서를 확인한 뒤 생성해 주세요.`,
       );
+      return uploadedDocuments;
     } catch (error) {
       setDocumentError(
         error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
       );
       setDocumentStatusMessage("");
+      return [];
     } finally {
       setIsUploadingDocument(false);
     }
@@ -5175,7 +5191,7 @@ function App() {
           `${uploadLabel} 업로드가 완료되었습니다. 생성 버튼을 눌러 진행해주세요.`,
         );
         await loadUploadedFiles(project);
-        return;
+        return uploadedDocuments;
       }
       await loadUploadedFiles(project);
       await clearMessageActions({
@@ -5227,6 +5243,7 @@ function App() {
           `${uploadedDocument.fileName} 업로드가 완료되었습니다.`,
         );
       }
+      return uploadedDocuments;
     } catch (error) {
       reportUiError("handleAgentUploadFiles", error, {
         projectId: project?.projectId,
@@ -5237,6 +5254,7 @@ function App() {
           ? error.message
           : "문서를 업로드하지 못했습니다.",
       );
+      return [];
     } finally {
       setIsUploadingDocument(false);
     }
@@ -9872,8 +9890,10 @@ function DefaultDocumentChoicePanel({
   onUploadFiles,
 }) {
   const panelId = useId().replace(/:/g, "");
-  const documents = Array.isArray(request?.documents) ? request.documents : [];
-  const optionalDocuments = Array.isArray(request?.optionalDocuments)
+  const requestDocuments = Array.isArray(request?.documents)
+    ? request.documents
+    : [];
+  const requestOptionalDocuments = Array.isArray(request?.optionalDocuments)
     ? request.optionalDocuments
     : [];
   const documentConfig = request?.documentConfig ?? {};
@@ -9889,22 +9909,31 @@ function DefaultDocumentChoicePanel({
     outputFormats.length > 0 || Boolean(request?.outputFormat);
   const shouldShowOutputFormat =
     false;
+  const [localPrimaryDocuments, setLocalPrimaryDocuments] = useState([]);
+  const [localOptionalDocuments, setLocalOptionalDocuments] = useState([]);
+  const documents = uniqueDocumentsById([
+    ...localPrimaryDocuments,
+    ...requestDocuments,
+  ]);
+  const optionalDocuments = uniqueDocumentsById([
+    ...localOptionalDocuments,
+    ...requestOptionalDocuments,
+  ]);
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
   const [selectedDocumentId, setSelectedDocumentId] =
     useState(defaultDocumentId);
-  const [usePrimaryDocument, setUsePrimaryDocument] = useState(
-    Boolean(defaultDocumentId),
+  const defaultOptionalDocumentIds = Array.isArray(request?.defaultOptionalDocumentIds)
+    ? request.defaultOptionalDocumentIds
+    : optionalDocuments
+        .slice(0, 1)
+        .map((document) => document.documentId)
+        .filter(Boolean);
+  const [selectedOptionalDocumentIds, setSelectedOptionalDocumentIds] = useState(
+    defaultOptionalDocumentIds,
   );
-  const [selectedOptionalDocumentIds, setSelectedOptionalDocumentIds] =
-    useState(
-      Array.isArray(request?.defaultOptionalDocumentIds)
-        ? request.defaultOptionalDocumentIds
-        : optionalDocuments.map((document) => document.documentId).filter(Boolean),
-    );
-  const [includeOptionalDocument, setIncludeOptionalDocument] = useState(
-    optionalDocuments.length > 0,
-  );
+  const [hasTouchedOptionalSelection, setHasTouchedOptionalSelection] =
+    useState(false);
   const [selectedOutputFormat, setSelectedOutputFormat] = useState(
     request?.outputFormat ||
       documentConfig.defaultOutputFormat ||
@@ -9913,47 +9942,33 @@ function DefaultDocumentChoicePanel({
   const [draggingUploadSlot, setDraggingUploadSlot] = useState("");
   const primaryFileInputRef = useRef(null);
   const optionalFileInputRef = useRef(null);
-  const defaultDocument =
-    documents.find((document) => document.documentId === defaultDocumentId) ??
-    documents[0];
   const selectedDocument =
     documents.find((document) => document.documentId === selectedDocumentId) ??
-    defaultDocument;
-  const defaultOptionalDocumentIds = Array.isArray(request?.defaultOptionalDocumentIds)
-    ? request.defaultOptionalDocumentIds
-    : optionalDocuments.map((document) => document.documentId).filter(Boolean);
+    null;
   const selectedOptionalDocuments = optionalDocuments.filter((document) =>
     selectedOptionalDocumentIds.includes(document.documentId),
   );
   const selectedOptionalDocumentIdsForChoice = selectedOptionalDocuments.map(
     (document) => document.documentId,
   );
-  const documentSelectId = `${panelId}-primary-source-document`;
-  const optionalDocumentListId = `${panelId}-optional-source-documents`;
-  const primaryUseName = `${panelId}-primary-use-existing`;
-  const optionalUseName = `${panelId}-optional-use-existing`;
+  const primaryListId = `${panelId}-primary-source-documents`;
+  const optionalListId = `${panelId}-optional-source-documents`;
+  const primaryInputName = `${panelId}-primary-source-document`;
+  const optionalInputName = `${panelId}-optional-source-document`;
   const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
   const actionLabel =
     documentConfig.actionLabel || DOCUMENT_GENERATION_COPY.generate;
   const primaryLabel = primarySource?.label || "기준 문서";
   const optionalLabel = optionalSource?.label || "추가 자료";
-  const hasSelectedPrimaryDocument = Boolean(
-    usePrimaryDocument && selectedDocument?.documentId,
-  );
-  const shouldShowPrimaryUpload = !hasSelectedPrimaryDocument;
-  const shouldShowOptionalUpload = Boolean(
-    optionalSource && !includeOptionalDocument,
-  );
+  const hasSelectedPrimaryDocument = Boolean(selectedDocument?.documentId);
   const canUploadMultipleOptional =
     optionalSource?.documentType === DOCUMENT_TYPES.MEETING_NOTES;
-  const optionalSelectionCount = includeOptionalDocument
-    ? selectedOptionalDocuments.length
-    : 0;
+  const optionalSelectionCount = selectedOptionalDocuments.length;
   const materialSummary = !hasSelectedPrimaryDocument
     ? `${primaryLabel}를 선택하거나 업로드하면 ${targetLabel}를 생성할 수 있습니다.`
     : optionalSource
       ? optionalSelectionCount > 0
-        ? `${primaryLabel} 1개, ${optionalLabel} ${optionalSelectionCount}개를 반영합니다.`
+        ? `${primaryLabel} 1개, ${optionalLabel} ${optionalSelectionCount}개를 반영해 ${targetLabel}를 생성합니다.`
         : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다. ${optionalLabel}은 반영하지 않습니다.`
       : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다.`;
   const canGenerate =
@@ -9965,16 +9980,31 @@ function DefaultDocumentChoicePanel({
 
   useEffect(() => {
     setSelectedDocumentId(defaultDocumentId);
-    setUsePrimaryDocument(Boolean(defaultDocumentId));
   }, [defaultDocumentId]);
 
   useEffect(() => {
     const nextOptionalIds = Array.isArray(request?.defaultOptionalDocumentIds)
       ? request.defaultOptionalDocumentIds
-      : optionalDocuments.map((document) => document.documentId).filter(Boolean);
-    setSelectedOptionalDocumentIds(normalizeDocumentIds(nextOptionalIds));
-    setIncludeOptionalDocument(nextOptionalIds.length > 0);
-  }, [request?.defaultOptionalDocumentIds, optionalDocuments.length]);
+      : optionalDocuments
+          .slice(0, 1)
+          .map((document) => document.documentId)
+          .filter(Boolean);
+    const availableIds = new Set(
+      optionalDocuments.map((document) => document.documentId).filter(Boolean),
+    );
+    setSelectedOptionalDocumentIds((currentIds) => {
+      if (hasTouchedOptionalSelection) {
+        return normalizeDocumentIds(
+          currentIds.filter((documentId) => availableIds.has(documentId)),
+        );
+      }
+      return normalizeDocumentIds(nextOptionalIds);
+    });
+  }, [
+    hasTouchedOptionalSelection,
+    request?.defaultOptionalDocumentIds,
+    requestOptionalDocuments.length,
+  ]);
 
   useEffect(() => {
     setSelectedOutputFormat(
@@ -9984,27 +10014,24 @@ function DefaultDocumentChoicePanel({
     );
   }, [request?.outputFormat, documentConfig.defaultOutputFormat, relation]);
 
-  const handleIncludeOptionalDocuments = () => {
-    const nextOptionalIds = selectedOptionalDocumentIdsForChoice.length
-      ? selectedOptionalDocumentIdsForChoice
-      : defaultOptionalDocumentIds;
-    setIncludeOptionalDocument(true);
-    setSelectedOptionalDocumentIds(normalizeDocumentIds(nextOptionalIds));
-  };
+  useEffect(() => {
+    setLocalPrimaryDocuments([]);
+    setLocalOptionalDocuments([]);
+    setHasTouchedOptionalSelection(false);
+  }, [documentConfig.requestType]);
 
-  const handleExcludeOptionalDocuments = () => {
-    setIncludeOptionalDocument(false);
-    setSelectedOptionalDocumentIds([]);
-  };
-
-  const toggleOptionalDocumentId = (documentId) => {
+  const selectOptionalDocumentId = (documentId) => {
+    setHasTouchedOptionalSelection(true);
+    if (!canUploadMultipleOptional) {
+      setSelectedOptionalDocumentIds(documentId ? [documentId] : []);
+      return;
+    }
     setSelectedOptionalDocumentIds((currentIds) => {
       const nextIds = currentIds.includes(documentId)
         ? currentIds.filter((currentId) => currentId !== documentId)
         : [...currentIds, documentId];
       return normalizeDocumentIds(nextIds);
     });
-    setIncludeOptionalDocument(true);
   };
 
   const buildUploadRequest = (source, slot) => ({
@@ -10024,8 +10051,46 @@ function DefaultDocumentChoicePanel({
       slot === "optional" ? selectedOptionalDocumentIdsForChoice : [],
   });
 
-  const handleUploadChange = (event, source, slot) => {
-    onUploadFiles?.(event.target.files, buildUploadRequest(source, slot));
+  const normalizeUploadedDocuments = (result) => {
+    if (Array.isArray(result)) return result.filter(Boolean);
+    if (Array.isArray(result?.uploadedDocuments)) {
+      return result.uploadedDocuments.filter(Boolean);
+    }
+    return [];
+  };
+
+  const applyUploadedDocuments = (slot, uploadedDocuments = []) => {
+    const uploadedIds = uploadedDocuments
+      .map((document) => document?.documentId)
+      .filter(Boolean);
+    if (!uploadedIds.length) return;
+
+    if (slot === "optional") {
+      setHasTouchedOptionalSelection(true);
+      setLocalOptionalDocuments((currentDocuments) =>
+        uniqueDocumentsById([...uploadedDocuments, ...currentDocuments]),
+      );
+      setSelectedOptionalDocumentIds((currentIds) =>
+        canUploadMultipleOptional
+          ? normalizeDocumentIds([...currentIds, ...uploadedIds])
+          : uploadedIds.slice(0, 1),
+      );
+      return;
+    }
+
+    setLocalPrimaryDocuments((currentDocuments) =>
+      uniqueDocumentsById([...uploadedDocuments, ...currentDocuments]),
+    );
+    setSelectedDocumentId(uploadedIds[0]);
+  };
+
+  const handleSlotUpload = async (files, source, slot) => {
+    const result = await onUploadFiles?.(files, buildUploadRequest(source, slot));
+    applyUploadedDocuments(slot, normalizeUploadedDocuments(result));
+  };
+
+  const handleUploadChange = async (event, source, slot) => {
+    await handleSlotUpload(event.target.files, source, slot);
     event.target.value = "";
   };
 
@@ -10051,7 +10116,7 @@ function DefaultDocumentChoicePanel({
     event.stopPropagation();
     setDraggingUploadSlot("");
     if (isDisabled || isUploading) return;
-    onUploadFiles?.(event.dataTransfer.files, buildUploadRequest(source, slot));
+    handleSlotUpload(event.dataTransfer.files, source, slot);
   };
 
   const handlePanelAction = (event, callback) => {
@@ -10061,99 +10126,73 @@ function DefaultDocumentChoicePanel({
     callback();
   };
 
-  const handleChoiceLabelClick = (event, callback) => {
-    event.stopPropagation();
-    if (isDisabled) return;
-    callback();
-  };
-
   return (
     <div className="message-document-choice-panel">
       <section className="document-choice-section document-choice-slot">
-        <div className="document-choice-file-row">
-          <label
-            className="document-choice-file-label"
-            htmlFor={shouldShowPrimaryUpload ? undefined : documentSelectId}
+        <div className="document-choice-slot-header">
+          <div>
+            <label className="document-choice-file-label" htmlFor={primaryListId}>
+              {primaryLabel}
+            </label>
+            <p className="document-choice-helper">필수 문서입니다. 1개를 선택해 주세요.</p>
+          </div>
+          <button
+            className={`document-source-control document-upload-control ${
+              draggingUploadSlot === "primary" ? "is-drag-over" : ""
+            }`}
+            type="button"
+            disabled={isDisabled || isUploading}
+            onClick={(event) =>
+              handlePanelAction(event, () => primaryFileInputRef.current?.click())
+            }
+            onDragOver={(event) => handleUploadDragOver(event, "primary")}
+            onDragLeave={(event) => handleUploadDragLeave(event, "primary")}
+            onDrop={(event) => handleUploadDrop(event, primarySource, "primary")}
           >
-            {primaryLabel}
-          </label>
-          {shouldShowPrimaryUpload ? (
-            <button
-              className={`document-source-control document-upload-control ${
-                draggingUploadSlot === "primary" ? "is-drag-over" : ""
-              }`}
-              type="button"
-              disabled={isDisabled || isUploading}
-              onClick={(event) =>
-                handlePanelAction(event, () => primaryFileInputRef.current?.click())
-              }
-              onDragOver={(event) => handleUploadDragOver(event, "primary")}
-              onDragLeave={(event) => handleUploadDragLeave(event, "primary")}
-              onDrop={(event) => handleUploadDrop(event, primarySource, "primary")}
-            >
-              {isUploading ? (
-                <>
-                  <LoaderCircle size={16} aria-hidden="true" />
-                  업로드 중
-                </>
-              ) : (
-                `${primaryLabel} 업로드`
-              )}
-            </button>
-          ) : (
-            <select
-              id={documentSelectId}
-              className="document-choice-source-select document-source-control"
-              value={selectedDocument?.documentId || ""}
-              disabled={isDisabled}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => setSelectedDocumentId(event.target.value)}
-            >
-              {documents.map((document) => (
-                <option key={document.documentId} value={document.documentId}>
-                  {document.fileName || document.documentId}
-                </option>
-              ))}
-            </select>
-          )}
+            {isUploading ? (
+              <>
+                <LoaderCircle size={16} aria-hidden="true" />
+                업로드 중
+              </>
+            ) : (
+              `${primaryLabel} 업로드`
+            )}
+          </button>
         </div>
-        {documents.length > 0 && (
-          <fieldset className="document-choice-radio-row">
-            <legend className="sr-only">{primaryLabel} 사용 여부</legend>
-            <span className="document-choice-radio-label">기존 문서 사용</span>
-            <label
-              className="document-choice-check"
-              onClick={(event) =>
-                handleChoiceLabelClick(event, () => setUsePrimaryDocument(true))
-              }
-            >
-              <input
-                type="radio"
-                name={primaryUseName}
-                checked={usePrimaryDocument}
-                disabled={isDisabled}
-                onClick={(event) => event.stopPropagation()}
-                onChange={() => setUsePrimaryDocument(true)}
-              />
-              <span>예</span>
-            </label>
-            <label
-              className="document-choice-check"
-              onClick={(event) =>
-                handleChoiceLabelClick(event, () => setUsePrimaryDocument(false))
-              }
-            >
-              <input
-                type="radio"
-                name={primaryUseName}
-                checked={!usePrimaryDocument}
-                disabled={isDisabled}
-                onClick={(event) => event.stopPropagation()}
-                onChange={() => setUsePrimaryDocument(false)}
-              />
-              <span>아니오</span>
-            </label>
-          </fieldset>
+        {documents.length ? (
+          <div
+            id={primaryListId}
+            className="document-choice-list"
+            role="radiogroup"
+            aria-label={`${primaryLabel} 선택`}
+          >
+            {documents.map((document) => {
+              const isSelected = selectedDocument?.documentId === document.documentId;
+              return (
+                <label
+                  className={`document-choice-list-item ${
+                    isSelected ? "is-selected" : ""
+                  }`}
+                  key={document.documentId}
+                >
+                  <input
+                    type="radio"
+                    name={primaryInputName}
+                    checked={isSelected}
+                    disabled={isDisabled}
+                    onChange={() => setSelectedDocumentId(document.documentId)}
+                  />
+                  <span className="document-choice-item-text">
+                    {document.fileName || document.documentId}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="document-choice-empty">
+            등록된 {primaryLabel}가 없습니다. 파일을 업로드해 주세요.
+          </p>
         )}
         <input
           ref={primaryFileInputRef}
@@ -10167,112 +10206,81 @@ function DefaultDocumentChoicePanel({
       </section>
       {optionalSource && (
         <section className="document-choice-section document-choice-slot">
-          <div className="document-choice-file-row">
-            <label
-              className="document-choice-file-label"
-              htmlFor={shouldShowOptionalUpload ? undefined : optionalDocumentListId}
+          <div className="document-choice-slot-header">
+            <div>
+              <label className="document-choice-file-label" htmlFor={optionalListId}>
+                {optionalLabel}
+              </label>
+              <p className="document-choice-helper">
+                선택사항입니다.{" "}
+                {canUploadMultipleOptional
+                  ? "여러 개 선택할 수 있습니다."
+                  : "1개를 선택할 수 있습니다."}
+              </p>
+            </div>
+            <button
+              className={`document-source-control document-upload-control ${
+                draggingUploadSlot === "optional" ? "is-drag-over" : ""
+              }`}
+              type="button"
+              disabled={isDisabled || isUploading}
+              onClick={(event) =>
+                handlePanelAction(event, () =>
+                  optionalFileInputRef.current?.click(),
+                )
+              }
+              onDragOver={(event) => handleUploadDragOver(event, "optional")}
+              onDragLeave={(event) => handleUploadDragLeave(event, "optional")}
+              onDrop={(event) => handleUploadDrop(event, optionalSource, "optional")}
             >
-              {optionalLabel}
-            </label>
-            {shouldShowOptionalUpload ? (
-              <button
-                className={`document-source-control document-upload-control ${
-                  draggingUploadSlot === "optional" ? "is-drag-over" : ""
-                }`}
-                type="button"
-                disabled={isDisabled || isUploading}
-                onClick={(event) =>
-                  handlePanelAction(event, () =>
-                    optionalFileInputRef.current?.click(),
-                  )
-                }
-                onDragOver={(event) => handleUploadDragOver(event, "optional")}
-                onDragLeave={(event) => handleUploadDragLeave(event, "optional")}
-                onDrop={(event) => handleUploadDrop(event, optionalSource, "optional")}
-              >
-                {isUploading ? (
-                  <>
-                    <LoaderCircle size={16} aria-hidden="true" />
-                    업로드 중
-                  </>
-                ) : (
-                  `${optionalLabel} 업로드`
-                )}
-              </button>
-            ) : (
-              <div
-                id={optionalDocumentListId}
-                className="document-choice-multi-list"
-                role="group"
-                aria-label={`${optionalLabel} 선택`}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <p className="document-choice-helper">
-                  {optionalLabel}을 여러 개 선택할 수 있습니다.
-                </p>
-                {optionalDocuments.map((document) => (
+              {isUploading ? (
+                <>
+                  <LoaderCircle size={16} aria-hidden="true" />
+                  업로드 중
+                </>
+              ) : (
+                `${optionalLabel} 업로드`
+              )}
+            </button>
+          </div>
+          {optionalDocuments.length ? (
+            <div
+              id={optionalListId}
+              className="document-choice-list"
+              role={canUploadMultipleOptional ? "group" : "radiogroup"}
+              aria-label={`${optionalLabel} 선택`}
+            >
+              {optionalDocuments.map((document) => {
+                const isSelected = selectedOptionalDocumentIdsForChoice.includes(
+                  document.documentId,
+                );
+                return (
                   <label
-                    className="document-choice-multi-item"
+                    className={`document-choice-list-item ${
+                      isSelected ? "is-selected" : ""
+                    }`}
                     key={document.documentId}
                   >
                     <input
-                      type="checkbox"
-                      checked={selectedOptionalDocumentIdsForChoice.includes(
-                        document.documentId,
-                      )}
+                      type={canUploadMultipleOptional ? "checkbox" : "radio"}
+                      name={optionalInputName}
+                      checked={isSelected}
                       disabled={isDisabled}
-                      onChange={() => toggleOptionalDocumentId(document.documentId)}
+                      onChange={() => selectOptionalDocumentId(document.documentId)}
                     />
-                    <span>{document.fileName || document.documentId}</span>
+                    <span className="document-choice-item-text">
+                      {document.fileName || document.documentId}
+                    </span>
                   </label>
-                ))}
-                <p className="document-choice-selected-count">
-                  {optionalLabel} {optionalSelectionCount}개 선택됨
-                </p>
-              </div>
-            )}
-          </div>
-          {optionalDocuments.length > 0 && (
-            <fieldset className="document-choice-radio-row">
-              <legend className="sr-only">{optionalLabel} 사용 여부</legend>
-              <span className="document-choice-radio-label">기존 문서 사용</span>
-              <label
-                className="document-choice-check"
-                onClick={(event) =>
-                  handleChoiceLabelClick(event, handleIncludeOptionalDocuments)
-                }
-              >
-                <input
-                  type="radio"
-                  name={optionalUseName}
-                  checked={includeOptionalDocument}
-                  disabled={isDisabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={handleIncludeOptionalDocuments}
-                />
-                <span>예</span>
-              </label>
-              <label
-                className="document-choice-check"
-                onClick={(event) =>
-                  handleChoiceLabelClick(event, handleExcludeOptionalDocuments)
-                }
-              >
-                <input
-                  type="radio"
-                  name={optionalUseName}
-                  checked={!includeOptionalDocument}
-                  disabled={isDisabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={handleExcludeOptionalDocuments}
-                />
-                <span>아니오</span>
-              </label>
-            </fieldset>
-          )}
-          {shouldShowOptionalUpload && (
-            <p className="document-choice-helper">
-              회의록 파일을 업로드하거나, 업로드 없이 생성할 수 있습니다.
+                );
+              })}
+              <p className="document-choice-selected-count">
+                {optionalLabel} {optionalSelectionCount}개 선택됨
+              </p>
+            </div>
+          ) : (
+            <p className="document-choice-empty">
+              등록된 {optionalLabel}이 없습니다. 회의록 없이도 생성할 수 있습니다.
             </p>
           )}
           <input
@@ -10308,10 +10316,7 @@ function DefaultDocumentChoicePanel({
               onChoice({
                 choice: "generate",
                 documentId: selectedDocument?.documentId,
-                optionalDocumentIds:
-                  includeOptionalDocument
-                    ? selectedOptionalDocumentIdsForChoice
-                    : [],
+                optionalDocumentIds: selectedOptionalDocumentIdsForChoice,
                 outputFormat: selectedOutputFormat,
               }),
             )
