@@ -7084,10 +7084,11 @@ function ScheduleDayModal({
         aria-labelledby="schedule-day-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="modal-header">
-          <div>
-            <span>프로젝트 일정</span>
+        <header className="modal-header schedule-day-modal__header">
+          <div className="modal-header__copy">
+            <span className="modal-header__eyebrow">프로젝트 일정</span>
             <h2 id="schedule-day-title">{formatDateLabel(dateText)} 일정</h2>
+            <p>해당 날짜에 진행해야 하는 일정을 확인하고 관리합니다.</p>
           </div>
           <button
             className="icon-button"
@@ -7116,7 +7117,6 @@ function ScheduleDayModal({
                       <div className="schedule-day-item__title">
                         <div>
                           <strong>{todo.title || "제목 없음"}</strong>
-                          <TodoScheduleBadges todo={todo} />
                         </div>
                         <ScheduleStatusPicker
                           status={todo.status}
@@ -7134,7 +7134,10 @@ function ScheduleDayModal({
                             </div>
                             <div>
                               <dt>기간</dt>
-                              <dd>{formatTodoDeadlineWithDday(todo)}</dd>
+                              <dd className="schedule-day-meta__deadline">
+                                <span>{formatScheduleRangeLabel(todo)}</span>
+                                <TodoDdayChip todo={todo} />
+                              </dd>
                             </div>
                             <div>
                               <dt>출처</dt>
@@ -7679,48 +7682,44 @@ function DocumentRelationMap({
         <div className="document-map__canvas">
           <svg
             className="document-map__edges"
-            viewBox="0 0 1320 540"
+            viewBox="0 0 1400 580"
             aria-hidden="true"
           >
             <defs>
               <marker
                 id="document-map-arrow"
-                markerWidth="12"
-                markerHeight="12"
-                refX="10"
-                refY="6"
+                markerWidth="14"
+                markerHeight="14"
+                refX="12"
+                refY="7"
                 orient="auto"
                 markerUnits="strokeWidth"
               >
                 <path
-                  d="M2 2L10 6L2 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2.4"
+                  d="M2 2L12 7L2 12Z"
+                  fill="currentColor"
                 />
               </marker>
             </defs>
             <path
               className="document-map__edge is-required"
-              d="M262 202 C310 202 330 230 382 230"
+              d="M296 182H350V266H395"
             />
             <path
               className="document-map__edge is-optional"
-              d="M262 418 C318 418 328 280 382 260"
+              d="M296 436H350V316H395"
             />
             <path
               className="document-map__edge is-required"
-              d="M682 230 C742 230 756 180 800 180"
+              d="M735 258H790V166H840"
             />
             <path
               className="document-map__edge is-required"
-              d="M682 258 C742 292 756 406 800 406"
+              d="M735 334H790V426H840"
             />
             <path
               className="document-map__edge is-required"
-              d="M1022 180 C1062 180 1082 180 1120 180"
+              d="M1110 166H1150"
             />
           </svg>
           {nodes.map((node) => (
@@ -9517,33 +9516,8 @@ function TodoManagerModal({
                       ))}
                     </select>
                   </label>
-                  <label>
-                    출처
-                    <select
-                      value={sourceFilter}
-                      onChange={(event) =>
-                        onSourceFilterChange(event.target.value)
-                      }
-                    >
-                      {TODO_SOURCE_FILTERS.map((option) => (
-                        <option
-                          key={option.value || "ALL"}
-                          value={option.value}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
                 <div className="todo-filter-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => onStatusFilterChange(statusFilter)}
-                  >
-                    검색
-                  </button>
                   <button
                     className="secondary-button"
                     type="button"
@@ -9605,47 +9579,51 @@ function TodoManagerModal({
                   aria-label="선택한 할일 일괄 작업"
                   aria-hidden={!hasSelectedVisibleTodos}
                 >
-                  <strong>선택 {selectedVisibleCount}개</strong>
-                  <label className="todo-bulk-status">
-                    진행상태
-                    <select
-                      value={bulkStatus}
+                  <div className="todo-selection-bar__group">
+                    <strong>선택 {selectedVisibleCount}개</strong>
+                    <button
+                      className="mini-action-button"
+                      type="button"
                       disabled={isSelectionBarDisabled}
-                      onChange={(event) =>
-                        onBulkStatusChange(event.target.value)
-                      }
+                      onClick={onClearTodoSelection}
                     >
-                      {TODO_STATUS_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    className="mini-action-button primary"
-                    type="button"
-                    disabled={isSelectionBarDisabled}
-                    onClick={onApplyBulkStatus}
-                  >
-                    {isBulkActionRunning ? "변경 중" : "상태 변경"}
-                  </button>
-                  <button
-                    className="mini-action-button danger"
-                    type="button"
-                    disabled={isSelectionBarDisabled}
-                    onClick={onBulkDelete}
-                  >
-                    삭제
-                  </button>
-                  <button
-                    className="mini-action-button"
-                    type="button"
-                    disabled={isSelectionBarDisabled}
-                    onClick={onClearTodoSelection}
-                  >
-                    선택 해제
-                  </button>
+                      선택 해제
+                    </button>
+                  </div>
+                  <div className="todo-selection-bar__group">
+                    <label className="todo-bulk-status">
+                      진행상태
+                      <select
+                        value={bulkStatus}
+                        disabled={isSelectionBarDisabled}
+                        onChange={(event) =>
+                          onBulkStatusChange(event.target.value)
+                        }
+                      >
+                        {TODO_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="mini-action-button primary"
+                      type="button"
+                      disabled={isSelectionBarDisabled}
+                      onClick={onApplyBulkStatus}
+                    >
+                      {isBulkActionRunning ? "변경 중" : "상태 변경"}
+                    </button>
+                    <button
+                      className="mini-action-button danger"
+                      type="button"
+                      disabled={isSelectionBarDisabled}
+                      onClick={onBulkDelete}
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
               </section>
             </>
