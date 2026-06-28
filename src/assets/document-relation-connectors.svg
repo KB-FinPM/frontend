@@ -1,0 +1,16 @@
+<svg width="1440" height="620" viewBox="0 0 1440 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="document-flow-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M2 2L10 6L2 10Z" fill="#B68A00"/>
+    </marker>
+    <marker id="document-flow-arrow-muted" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M2 2L10 6L2 10Z" fill="#6F6A62"/>
+    </marker>
+  </defs>
+
+  <path d="M320 250 H365 V345 H388" stroke="#B68A00" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" marker-end="url(#document-flow-arrow)"/>
+  <path d="M320 470 H365 V370 H388" stroke="#6F6A62" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter" stroke-dasharray="8 8" marker-end="url(#document-flow-arrow-muted)"/>
+  <path d="M740 345 H805 V220 H858" stroke="#B68A00" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" marker-end="url(#document-flow-arrow)"/>
+  <path d="M740 345 H805 V485 H858" stroke="#B68A00" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" marker-end="url(#document-flow-arrow)"/>
+  <path d="M1135 220 H1178" stroke="#B68A00" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" marker-end="url(#document-flow-arrow)"/>
+</svg>

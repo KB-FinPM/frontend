@@ -6297,7 +6297,7 @@ textarea {
 
 .document-map__body {
   position: relative;
-  min-height: 620px;
+  min-height: 650px;
   overflow-x: auto;
   overflow-y: hidden;
   border-radius: 18px;
@@ -6308,33 +6308,20 @@ textarea {
 
 .document-map__canvas {
   position: relative;
+  width: 1440px;
   min-width: 1440px;
-  height: 620px;
+  height: 650px;
+  margin: 0 auto;
 }
 
-.document-map__edges {
+.document-map__connector-asset {
   position: absolute;
   inset: 0;
   z-index: 1;
   width: 1440px;
   height: 620px;
-  color: #b68a00;
   pointer-events: none;
-}
-
-.document-map__edge {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: butt;
-  stroke-linejoin: miter;
-  stroke-width: 4;
-  marker-end: url("#document-map-arrow");
-}
-
-.document-map__edge.is-optional {
-  color: #6f6a62;
-  stroke-dasharray: 8 7;
-  stroke-width: 3;
+  user-select: none;
 }
 
 .document-map__node-layer {
@@ -6350,38 +6337,40 @@ textarea {
 }
 
 .document-map__node--requirement-definition {
-  top: 110px;
-  left: 70px;
+  top: 155px;
+  left: 60px;
+  width: 260px;
 }
 
 .document-map__node--meeting-notes {
-  top: 365px;
-  left: 70px;
+  top: 390px;
+  left: 60px;
+  width: 260px;
 }
 
 .document-map__node--requirement-spec {
-  top: 210px;
-  left: 420px;
-  width: 330px;
-  min-height: 214px;
+  top: 235px;
+  left: 395px;
+  width: 345px;
+  min-height: 220px;
 }
 
 .document-map__node--screen-design {
-  top: 92px;
-  left: 905px;
-  width: 260px;
+  top: 130px;
+  left: 860px;
+  width: 275px;
 }
 
 .document-map__node--wbs {
-  top: 360px;
-  left: 905px;
-  width: 260px;
+  top: 390px;
+  left: 860px;
+  width: 275px;
 }
 
 .document-map__node--unit-test {
-  top: 104px;
-  left: 1205px;
-  width: 230px;
+  top: 140px;
+  left: 1180px;
+  width: 245px;
 }
 
 .document-node {

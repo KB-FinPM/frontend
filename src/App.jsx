@@ -66,6 +66,7 @@ import {
   getGenerationProgressPayload,
   normalizeGenerationProgressPayload,
 } from "./services/generationProgressService.js";
+import documentRelationConnectors from "./assets/document-relation-connectors.svg";
 import {
   commitProjectTodoImport,
   deleteArtifactFile,
@@ -7932,46 +7933,12 @@ function DocumentRelationMap({
       </div>
       <div className="document-map__body">
         <div className="document-map__canvas">
-          <svg
-            className="document-map__edges"
-            viewBox="0 0 1440 620"
-            preserveAspectRatio="none"
+          <img
+            className="document-map__connector-asset"
+            src={documentRelationConnectors}
+            alt=""
             aria-hidden="true"
-          >
-            <defs>
-              <marker
-                id="document-map-arrow"
-                markerWidth="14"
-                markerHeight="14"
-                refX="12"
-                refY="7"
-                orient="auto"
-                markerUnits="strokeWidth"
-              >
-                <path d="M2 2L12 7L2 12Z" fill="currentColor" />
-              </marker>
-            </defs>
-            <path
-              className="document-map__edge is-required"
-              d="M290 205H350V312H415"
-            />
-            <path
-              className="document-map__edge is-optional"
-              d="M290 460H350V350H415"
-            />
-            <path
-              className="document-map__edge is-required"
-              d="M735 312H805V190H900"
-            />
-            <path
-              className="document-map__edge is-required"
-              d="M735 312H805V455H900"
-            />
-            <path
-              className="document-map__edge is-required"
-              d="M1115 190H1200"
-            />
-          </svg>
+          />
           <div className="document-map__node-layer">
             {nodes.map((node) => (
               <DocumentNodeCard
