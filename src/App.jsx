@@ -34,7 +34,6 @@ import {
 import {
   addMessageToConversation,
   addMessagesToConversation,
-  clearProjectStorage,
   clearRecentProjectId,
   createProject,
   deleteConversation,
@@ -47,12 +46,7 @@ import {
   updateConversationTitle,
   updateProject,
 } from "./services/projectService.js";
-import {
-  createChatId,
-  sanitizeActionStatusResponse,
-  sanitizeCompletedActionStatusResponse,
-  sendProjectMessage,
-} from "./services/chatService.js";
+import { createChatId, sendProjectMessage } from "./services/chatService.js";
 import {
   getCommandRecommendations,
   saveCommandUsage,
@@ -133,18 +127,6 @@ const PROJECT_START_DATE_ERROR =
   "프로젝트 시작일은 YYYY-MM-DD 형식으로 입력해주세요.";
 const PROJECT_CREATE_RESPONSE_ERROR_MESSAGE =
   "프로젝트 생성 응답에서 프로젝트 ID를 확인하지 못했습니다. 다시 시도해주세요.";
-const STORAGE_CLEAR_FLAG_KEY = "pm-agent.v2.storageClearedOnce";
-
-if (typeof window !== "undefined") {
-  try {
-    if (window.sessionStorage?.getItem(STORAGE_CLEAR_FLAG_KEY) !== "1") {
-      clearProjectStorage();
-      window.sessionStorage?.setItem(STORAGE_CLEAR_FLAG_KEY, "1");
-    }
-  } catch {
-    // Storage may be unavailable in some environments; ignore and continue.
-  }
-}
 const GENERATION_REQUEST_TYPES = Object.freeze({
   REQUIREMENT_SPEC: "REQUIREMENT_SPEC",
   WBS_CREATE: "WBS_CREATE",
@@ -444,9 +426,9 @@ const getAssistantActionId = (assistantMessage) =>
   assistantMessage?.metadata?.result?.action_id ??
   assistantMessage?.metadata?.result?.job_id ??
   assistantMessage?.metadata?.pendingAction?.action_id ??
-  assistantMessage?.metadata?.pendingAction?.result_json?.action_id ??
-  assistantMessage?.metadata?.pendingAction?.result_json?.result?.action_id ??
-  assistantMessage?.metadata?.pendingAction?.result_json?.result?.job_id ??
+  assistantMessage?.metadata?.rawResponse?.action_id ??
+  assistantMessage?.metadata?.rawResponse?.result?.action_id ??
+  assistantMessage?.metadata?.rawResponse?.result?.job_id ??
   "";
 
 const isGenerationPendingAction = (pendingAction) =>
@@ -2471,88 +2453,6 @@ const getGenerationFriendlyErrorMessage = (error) => {
   return "요구사항명세서 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
 };
 
-const formatGenerationFailureValue = (value) => {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => formatGenerationFailureValue(item))
-      .filter(Boolean)
-      .join(", ");
-  }
-  if (typeof value !== "object") return "";
-
-  const preferredKeys = [
-    "message",
-    "reason",
-    "error",
-    "error_message",
-    "detail",
-    "summary",
-    "description",
-    "hint",
-    "missing_documents",
-    "missing_fields",
-    "validation_errors",
-    "errors",
-  ];
-  const preferredValues = preferredKeys
-    .map((key) => formatGenerationFailureValue(value[key]))
-    .filter(Boolean);
-  if (preferredValues.length) {
-    return [...new Set(preferredValues)].join(" / ");
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-};
-
-const getGenerationFailureDetails = (statusResponse = null) => {
-  if (!statusResponse || typeof statusResponse !== "object") return [];
-
-  const detailSources = [
-    statusResponse.message,
-    statusResponse.detail,
-    statusResponse.details,
-    statusResponse.error,
-    statusResponse.error_message,
-    statusResponse.reason,
-    statusResponse.errors,
-    statusResponse.result?.message,
-    statusResponse.result?.detail,
-    statusResponse.result?.details,
-    statusResponse.result?.error,
-    statusResponse.result?.error_message,
-    statusResponse.result?.reason,
-    statusResponse.result?.errors,
-  ];
-
-  return [
-    ...new Set(detailSources.map(formatGenerationFailureValue).filter(Boolean)),
-  ];
-};
-
-const getGenerationFailureMessage = (
-  statusResponse = null,
-  fallbackMessage = "문서 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
-) => {
-  const primaryMessage =
-    String(statusResponse?.message ?? "").trim() || fallbackMessage;
-  const details = getGenerationFailureDetails(statusResponse).filter(
-    (detail) => detail !== primaryMessage,
-  );
-  if (!details.length) return primaryMessage;
-  return [primaryMessage, ...details.map((detail) => `상세: ${detail}`)].join(
-    "\n",
-  );
-};
-
 const buildGenerationFailureProgress = (failedIndex, sourceProgress = null) => {
   const boundedFailedIndex = Math.max(
     0,
@@ -3029,7 +2929,9 @@ function App() {
       status: GENERATION_JOB_STATUS.FAILED,
       progressState: failedProgress,
       downloadFiles: [],
-      errorMessage: getGenerationFailureMessage(statusResponse),
+      errorMessage:
+        statusResponse?.message ||
+        "문서 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
     }));
     setIsProgressModalOpen(true);
     setProgressMinimizedState(false);
@@ -3101,28 +3003,19 @@ function App() {
             projectId,
             actionId,
           });
-          const sanitizedStatusResponse = sanitizeActionStatusResponse(
-            statusResponse,
-          );
 
           if (pollingRunIdRef.current !== runId) return;
 
-          if (
-            sanitizedStatusResponse?.status ===
-            GENERATION_ACTION_STATUS.EXECUTING
-          ) {
-            updateGenerationProgressFromStatus(sanitizedStatusResponse);
+          if (statusResponse?.status === GENERATION_ACTION_STATUS.EXECUTING) {
+            updateGenerationProgressFromStatus(statusResponse);
           }
 
           if (
-            sanitizedStatusResponse?.status ===
-              GENERATION_ACTION_STATUS.EXECUTED ||
-            sanitizedStatusResponse?.status ===
-              GENERATION_ACTION_STATUS.FAILED ||
-            sanitizedStatusResponse?.status ===
-              GENERATION_ACTION_STATUS.CANCELLED
+            statusResponse?.status === GENERATION_ACTION_STATUS.EXECUTED ||
+            statusResponse?.status === GENERATION_ACTION_STATUS.FAILED ||
+            statusResponse?.status === GENERATION_ACTION_STATUS.CANCELLED
           ) {
-            resolvePolling(sanitizedStatusResponse);
+            resolvePolling(statusResponse);
             return;
           }
 
@@ -3204,53 +3097,48 @@ function App() {
       statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
       statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
     ) {
-      const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
-        statusResponse,
-      );
       const failedProgress = failGenerationProgress(
-        sanitizedStatusResponse,
+        statusResponse,
         requestType,
       );
       return {
         ...assistantMessage,
-        content: getGenerationFailureMessage(
-          sanitizedStatusResponse,
+        content:
+          statusResponse.message ||
           "문서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
-        ),
         metadata: {
           ...assistantMessage.metadata,
           state: CHAT_STATES.FAILED,
           actionId: pollingActionId,
           generationProgress: failedProgress,
-          result: sanitizedStatusResponse.result ?? {},
+          result: statusResponse.result ?? {},
           downloadFiles: [],
           pendingAction: null,
           suggestedActions: [],
+          rawResponse: statusResponse,
         },
       };
     }
 
-    const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
-      statusResponse,
-    );
     const completedProgress = completeGenerationProgress(
-      sanitizedStatusResponse,
+      statusResponse,
       requestType,
     );
     return {
       ...assistantMessage,
-      content: sanitizedStatusResponse.message || assistantMessage.content,
+      content: statusResponse.message || assistantMessage.content,
       metadata: {
         ...assistantMessage.metadata,
-        state: sanitizedStatusResponse.state ?? CHAT_STATES.COMPLETED,
+        state: statusResponse.state ?? CHAT_STATES.COMPLETED,
         actionId: pollingActionId,
         generationProgress: completedProgress,
-        result: sanitizedStatusResponse.result ?? {},
-        downloadFiles: Array.isArray(sanitizedStatusResponse.download_files)
-          ? sanitizedStatusResponse.download_files
+        result: statusResponse.result ?? {},
+        downloadFiles: Array.isArray(statusResponse.download_files)
+          ? statusResponse.download_files
           : [],
         pendingAction: null,
         suggestedActions: [],
+        rawResponse: statusResponse,
       },
     };
   };
@@ -5713,65 +5601,234 @@ function App() {
             statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
             statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
           ) {
-            const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
-              statusResponse,
-            );
-            const failedProgress = failGenerationProgress(
-              sanitizedStatusResponse,
-            );
+            const failedProgress = failGenerationProgress(statusResponse);
             assistantMessage = {
               ...assistantMessage,
-              content: getGenerationFailureMessage(
-                sanitizedStatusResponse,
+              content:
+                statusResponse.message ||
                 "요구사항명세서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
-              ),
               metadata: {
                 ...assistantMessage.metadata,
                 state: CHAT_STATES.FAILED,
                 actionId: pollingActionId,
                 generationProgress: failedProgress,
-                result: sanitizedStatusResponse.result ?? {},
+                result: statusResponse.result ?? {},
                 downloadFiles: [],
                 pendingAction: null,
                 suggestedActions: [],
+                rawResponse: statusResponse,
               },
             };
           } else {
-            const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
-              statusResponse,
-            );
             const completedProgress = completeGenerationProgress(
-              sanitizedStatusResponse,
+              statusResponse,
             );
             assistantMessage = {
               ...assistantMessage,
-              content:
-                sanitizedStatusResponse.message || assistantMessage.content,
+              content: statusResponse.message || assistantMessage.content,
               metadata: {
                 ...assistantMessage.metadata,
-                state: sanitizedStatusResponse.state ?? CHAT_STATES.COMPLETED,
+                state: statusResponse.state ?? CHAT_STATES.COMPLETED,
                 actionId: pollingActionId,
                 generationProgress: completedProgress,
-                result: sanitizedStatusResponse.result ?? {},
-                downloadFiles: Array.isArray(
-                  sanitizedStatusResponse.download_files,
-                )
-                  ? sanitizedStatusResponse.download_files
+                result: statusResponse.result ?? {},
+                downloadFiles: Array.isArray(statusResponse.download_files)
+                  ? statusResponse.download_files
                   : [],
                 pendingAction: null,
                 suggestedActions: [],
+                rawResponse: statusResponse,
               },
-              error: error.message
-                ? error.message
-                : "대화 제목을 저장하지 못했습니다.",
             };
           }
         }
       }
+      const messageResult = await addMessagesToConversation(
+        project.projectId,
+        backendConversationId,
+        [userMessage, assistantMessage],
+      );
+
+      setProject(messageResult.project);
+      setActiveConversationIdState(backendConversationId);
+      setActiveConversationId(project.projectId, backendConversationId);
+      setLastCommandInfo({ commandText: actionMessage });
+      if (isConfirmGenerationAction) {
+        await loadUploadedFiles(project);
+      }
     } catch (error) {
-      reportUiError("handleSaveConversationTitle", error, {
+      if (
+        isConfirmGenerationAction &&
+        isGenerationPollingCancelledError(error)
+      ) {
+        return;
+      }
+      reportUiError("handleSuggestedActionClick", error, {
         projectId: project?.projectId,
-        conversationId,
+        actionId,
+        isConfirmGenerationAction,
+      });
+      const failedProgress = isConfirmGenerationAction
+        ? failGenerationProgress()
+        : null;
+      if (isConfirmGenerationAction) {
+        await wait(400);
+      }
+      const fallbackContent = isConfirmGenerationAction
+        ? getGenerationFriendlyErrorMessage(error)
+        : error instanceof Error
+        ? error.message
+        : "대기 작업을 처리하지 못했습니다.";
+      const fallbackMessage = {
+        id: createChatId("assistant"),
+        role: "assistant",
+        content: fallbackContent,
+        createdAt: formatDateTime(),
+        metadata: failedProgress
+          ? {
+              state: CHAT_STATES.FAILED,
+              generationProgress: failedProgress,
+              suggestedActions: [],
+              pendingAction: null,
+            }
+          : {},
+      };
+      const fallbackResult = await addMessageToConversation(
+        project.projectId,
+        targetConversationId,
+        fallbackMessage,
+      );
+      setProject(fallbackResult.project);
+    } finally {
+      setIsResponding(false);
+      if (shouldResetGenerationState) {
+        clearGenerationPolling({ rejectPending: true });
+        if (action.type === CHAT_ACTION_COMMAND_TYPES.CANCEL_PENDING_ACTION) {
+          setGenerationProgress(null);
+          setGenerationJob(null);
+          setIsProgressModalOpen(false);
+          setProgressMinimizedState(false);
+        }
+        setSelectedDocumentIds([]);
+        setDocumentStatusMessage("");
+      }
+    }
+  };
+
+  const handleCommandActionClick = async (message, action) => {
+    if (!project || isResponding) return;
+
+    const commandText = String(
+      action?.message || action?.command || action?.label || "",
+    ).trim();
+    if (!commandText) return;
+
+    const targetConversationId =
+      message.metadata?.conversationId || activeConversationId;
+    if (targetConversationId) {
+      await clearMessageActions({
+        conversationId: targetConversationId,
+        message,
+      });
+    }
+    sendMessage(commandText);
+  };
+
+  const handleDownloadFile = async (file) => {
+    if (!project || !file?.artifact_id) {
+      setDocumentError("다운로드할 파일 정보를 확인하지 못했습니다.");
+      return;
+    }
+
+    setDocumentError("");
+    try {
+      await downloadArtifactFile({
+        projectId: project.projectId,
+        artifactId: file.artifact_id,
+        fileName: file.file_name || "요구사항명세서.xlsx",
+      });
+    } catch (error) {
+      reportUiError("handleDownloadGeneratedFile", error, {
+        projectId: project?.projectId,
+        artifactId: file.artifact_id,
+      });
+      setDocumentError(
+        error instanceof Error
+          ? error.message
+          : "파일을 다운로드하지 못했습니다.",
+      );
+    }
+  };
+
+  const handleDownloadGenerationJob = async () => {
+    const downloadFile = generationJob?.downloadFiles?.[0];
+    if (downloadFile?.artifact_id) {
+      await handleDownloadFile(downloadFile);
+      return;
+    }
+
+    const latestArtifact = generationJob?.targetArtifactType
+      ? getLatestGeneratedArtifact(
+          fileBuckets,
+          generationJob.targetArtifactType,
+        )
+      : null;
+    if (latestArtifact?.fileId) {
+      await handleDownloadDocumentNodeArtifact({ latestArtifact });
+      return;
+    }
+
+    setDocumentError(
+      "다운로드할 생성 파일을 찾을 수 없습니다. 파일 목록에서 다시 확인해 주세요.",
+    );
+  };
+
+  const handleMinimizeProgressModal = () => {
+    if (!generationJob) return;
+    setIsProgressModalOpen(false);
+    setProgressMinimizedState(true);
+  };
+
+  const handleRestoreProgressModal = () => {
+    if (!generationJob) return;
+    setIsProgressModalOpen(true);
+    setProgressMinimizedState(false);
+  };
+
+  const handleCloseProgressModal = () => {
+    if (generationJob?.status === GENERATION_JOB_STATUS.RUNNING) {
+      handleMinimizeProgressModal();
+      return;
+    }
+    setIsProgressModalOpen(false);
+    setProgressMinimizedState(false);
+  };
+
+  const handleConversationTitleEditStart = (conversation) => {
+    setEditingConversationId(conversation.conversationId);
+    setEditingConversationTitle(conversation.title);
+    setDeletingConversationId("");
+    setConversationActionError("");
+  };
+
+  const handleConversationTitleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!project || !editingConversationId) return;
+
+    try {
+      const { project: updatedProject } = await updateConversationTitle(
+        project.projectId,
+        editingConversationId,
+        editingConversationTitle,
+      );
+      setProject(updatedProject);
+      setEditingConversationId("");
+      setEditingConversationTitle("");
+    } catch (error) {
+      reportUiError("handleConversationTitleSubmit", error, {
+        projectId: project?.projectId,
+        conversationId: editingConversationId,
       });
       setConversationActionError(
         error instanceof Error
