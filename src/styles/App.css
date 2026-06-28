@@ -5602,37 +5602,78 @@ textarea {
 }
 
 .calendar-event-bar--not-started {
+  border: 1px solid rgba(96, 88, 76, 0.16);
   color: #5f584e;
   background: #ece8e1;
 }
 
 .calendar-event-bar--in-progress {
+  border: 1px solid rgba(255, 188, 0, 0.45);
   color: #5b4200;
   background: #ffe08a;
 }
 
 .calendar-event-bar--done {
+  border: 1px solid rgba(76, 110, 76, 0.22);
   color: #176c37;
   background: #ddf4e4;
 }
 
-.calendar-event-bar.is-source-wbs {
-  border: 1px solid rgba(255, 188, 0, 0.55);
+.calendar-event-bar.is-source-wbs.calendar-event-bar--not-started {
+  border: 1px solid rgba(255, 188, 0, 0.35);
   color: #5b4200;
-  background: #ffe08a;
+  background: #fff3c4;
 }
 
-.calendar-event-bar.is-source-meeting {
-  border: 1px solid rgba(96, 88, 76, 0.22);
+.calendar-event-bar.is-source-wbs.calendar-event-bar--in-progress {
+  border: 1px solid rgba(255, 188, 0, 0.72);
+  color: #3f2e00;
+  background: #ffcf4d;
+}
+
+.calendar-event-bar.is-source-wbs.calendar-event-bar--done {
+  border: 1px solid rgba(100, 140, 40, 0.32);
+  color: #3f5c1f;
+  background: #e8f2d3;
+}
+
+.calendar-event-bar.is-source-meeting.calendar-event-bar--not-started {
+  border: 1px solid rgba(96, 88, 76, 0.18);
   color: #4d3928;
-  background: #ede2d2;
+  background: #f3eadf;
 }
 
-.calendar-event-bar.is-source-manual,
-.calendar-event-bar.is-source-unknown {
+.calendar-event-bar.is-source-meeting.calendar-event-bar--in-progress {
+  border: 1px solid rgba(143, 97, 49, 0.32);
+  color: #3e2c1d;
+  background: #e6caa8;
+}
+
+.calendar-event-bar.is-source-meeting.calendar-event-bar--done {
+  border: 1px solid rgba(76, 110, 76, 0.26);
+  color: #375437;
+  background: #e2eadc;
+}
+
+.calendar-event-bar.is-source-manual.calendar-event-bar--not-started,
+.calendar-event-bar.is-source-unknown.calendar-event-bar--not-started {
   border: 1px solid rgba(96, 88, 76, 0.16);
   color: #5f584e;
   background: #ece8e1;
+}
+
+.calendar-event-bar.is-source-manual.calendar-event-bar--in-progress,
+.calendar-event-bar.is-source-unknown.calendar-event-bar--in-progress {
+  border: 1px solid rgba(172, 126, 45, 0.28);
+  color: #5b4200;
+  background: #f1dfbb;
+}
+
+.calendar-event-bar.is-source-manual.calendar-event-bar--done,
+.calendar-event-bar.is-source-unknown.calendar-event-bar--done {
+  border: 1px solid rgba(76, 130, 82, 0.24);
+  color: #176c37;
+  background: #ddf4e4;
 }
 
 .calendar-event-bar.is-deadline-soon {
@@ -5649,9 +5690,18 @@ textarea {
 
 .schedule-event-more {
   justify-content: center;
+  border: 1px solid rgba(96, 88, 76, 0.22);
   color: var(--kb-text-muted);
-  background: rgba(255, 253, 248, 0.9);
-  box-shadow: none;
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 4px 10px rgba(31, 29, 25, 0.08);
+}
+
+.schedule-event-more:hover,
+.schedule-event-more:focus-visible {
+  border-color: rgba(255, 188, 0, 0.48);
+  color: var(--kb-text);
+  background: #fff8df;
+  outline: 0;
 }
 
 .schedule-day-modal,

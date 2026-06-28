@@ -2202,15 +2202,10 @@ const getStoredProjectDocumentAuthor = (project) =>
 
 const getProjectDocumentAuthor = (project) =>
   String(
-    project?.documentAuthor ||
-      project?.document_author ||
-      project?.author ||
-      project?.writer ||
-      project?.createdBy ||
-      project?.created_by ||
-      project?.userName ||
-      project?.userId ||
-      project?.user_id ||
+    project?.documentAuthor ??
+      project?.document_author ??
+      project?.author ??
+      project?.writer ??
       "",
   ).trim();
 
@@ -2254,15 +2249,13 @@ const buildProjectContext = (
     .filter(Boolean);
   const documentAuthor = getStoredProjectDocumentAuthor(targetProject);
   const author = getProjectDocumentAuthor(targetProject);
-  const writer = String(targetProject?.writer || author || "").trim();
+  const writer = String(targetProject?.writer ?? author ?? "").trim();
   const createdBy = String(
     targetProject?.createdBy ?? targetProject?.created_by ?? "",
   ).trim();
   const userId = String(
     targetProject?.userId ?? targetProject?.user_id ?? "",
   ).trim();
-  const createdByValue = createdBy || author;
-  const userIdValue = userId || createdByValue;
 
   const context = {
     selected_document_ids: selectedDocumentIds,
@@ -2271,9 +2264,9 @@ const buildProjectContext = (
     project_name: targetProject.projectName || "",
     author,
     writer,
-    created_by: createdByValue,
+    created_by: createdBy,
     document_author: documentAuthor,
-    user_id: userIdValue,
+    user_id: userId,
     project: {
       project_id: targetProject.projectId,
       name: targetProject.projectName || "",
@@ -2282,8 +2275,8 @@ const buildProjectContext = (
       document_author: documentAuthor,
       author,
       writer,
-      created_by: createdByValue,
-      user_id: userIdValue,
+      created_by: createdBy,
+      user_id: userId,
     },
   };
 
@@ -2712,6 +2705,7 @@ function App() {
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(null);
   const [generationJob, setGenerationJob] = useState(null);
+  const [generationResetNonce, setGenerationResetNonce] = useState(0);
   const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
   const [isProgressMinimized, setIsProgressMinimized] = useState(false);
   const isProgressMinimizedRef = useRef(false);
@@ -2951,12 +2945,18 @@ function App() {
 
   const resetGenerationState = () => {
     clearGenerationPolling({ rejectPending: true });
+    progressStepIndexRef.current = 0;
     setGenerationProgress(null);
     setGenerationJob(null);
     setIsProgressModalOpen(false);
     setProgressMinimizedState(false);
+    setIsDocumentGenerationModalOpen(false);
+    setIsResponding(false);
+    setIsUploadingDocument(false);
     setSelectedDocumentIds([]);
+    setDocumentError("");
     setDocumentStatusMessage("");
+    setGenerationResetNonce((value) => value + 1);
   };
 
   const startGenerationProgress = (requestType = "") => {
@@ -4805,6 +4805,9 @@ function App() {
       await loadUploadedFiles(backendResult.project ?? project);
       setIsDocumentGenerationModalOpen(false);
     } catch (error) {
+      if (isGenerationPollingCancelledError(error)) {
+        return;
+      }
       reportUiError("handleHubDocumentChoice", error, {
         projectId: project?.projectId,
         requestType,
@@ -6226,6 +6229,7 @@ function App() {
 
       {isDocumentGenerationModalOpen && (
         <DocumentGenerationModal
+          key={`${selectedDocumentHubNode?.id || "none"}-${generationResetNonce}`}
           selectedNode={selectedDocumentHubNode}
           selectedRequest={selectedDocumentHubRequest}
           isResponding={isResponding}
@@ -7118,6 +7122,11 @@ function TodayTasksView({
   );
 }
 
+const SCHEDULE_MONTH_MAX_EVENT_ROWS = 3;
+const SCHEDULE_WEEK_MIN_EVENT_ROWS = 8;
+const SCHEDULE_EVENT_ROW_HEIGHT = 27;
+const SCHEDULE_EVENT_ROW_GAP = 7;
+
 function ScheduleWeekRow({
   week,
   todos,
@@ -7126,7 +7135,48 @@ function ScheduleWeekRow({
   isWeekView = false,
   onDateSelect,
 }) {
-  const maxRows = isWeekView ? 8 : 3;
+  const eventLayerRef = useRef(null);
+  const [weekMaxRows, setWeekMaxRows] = useState(
+    SCHEDULE_WEEK_MIN_EVENT_ROWS,
+  );
+  useEffect(() => {
+    if (!isWeekView) return undefined;
+    const eventLayer = eventLayerRef.current;
+    if (!eventLayer) return undefined;
+
+    const updateWeekMaxRows = () => {
+      const style = window.getComputedStyle(eventLayer);
+      const rowHeight =
+        Number.parseFloat(style.gridAutoRows) || SCHEDULE_EVENT_ROW_HEIGHT;
+      const rowGap =
+        Number.parseFloat(style.rowGap) || SCHEDULE_EVENT_ROW_GAP;
+      const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+      const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+      const usableHeight = Math.max(
+        0,
+        eventLayer.getBoundingClientRect().height - paddingTop - paddingBottom,
+      );
+      const availableRows = Math.floor(
+        (usableHeight + rowGap) / (rowHeight + rowGap),
+      );
+      const nextMaxRows = Math.max(
+        SCHEDULE_WEEK_MIN_EVENT_ROWS,
+        availableRows - 1,
+      );
+      setWeekMaxRows(nextMaxRows);
+    };
+
+    updateWeekMaxRows();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWeekMaxRows);
+      return () => window.removeEventListener("resize", updateWeekMaxRows);
+    }
+    const observer = new ResizeObserver(updateWeekMaxRows);
+    observer.observe(eventLayer);
+    return () => observer.disconnect();
+  }, [isWeekView]);
+
+  const maxRows = isWeekView ? weekMaxRows : SCHEDULE_MONTH_MAX_EVENT_ROWS;
   const { visibleSegments, hiddenCount } = getWeekScheduleSegments(
     week,
     todos,
@@ -7157,7 +7207,7 @@ function ScheduleWeekRow({
           </button>
         ))}
       </div>
-      <div className="schedule-event-layer">
+      <div className="schedule-event-layer" ref={eventLayerRef}>
         {visibleSegments.map((segment) => (
           <button
             className={[
