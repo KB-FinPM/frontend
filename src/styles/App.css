@@ -6297,7 +6297,7 @@ textarea {
 
 .document-map__body {
   position: relative;
-  min-height: 580px;
+  min-height: 620px;
   overflow-x: auto;
   overflow-y: hidden;
   border-radius: 18px;
@@ -6308,16 +6308,16 @@ textarea {
 
 .document-map__canvas {
   position: relative;
-  min-width: 1400px;
-  height: 580px;
+  min-width: 1440px;
+  height: 620px;
 }
 
 .document-map__edges {
   position: absolute;
   inset: 0;
   z-index: 1;
-  width: 1400px;
-  height: 580px;
+  width: 1440px;
+  height: 620px;
   color: #b68a00;
   pointer-events: none;
 }
@@ -6337,45 +6337,50 @@ textarea {
   stroke-width: 3;
 }
 
+.document-map__node-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
 .document-map__node {
   position: absolute;
-  z-index: 2;
   width: 250px;
   min-height: 178px;
 }
 
 .document-map__node--requirement-definition {
-  top: 86px;
-  left: 46px;
+  top: 110px;
+  left: 70px;
 }
 
 .document-map__node--meeting-notes {
-  top: 340px;
-  left: 46px;
+  top: 365px;
+  left: 70px;
 }
 
 .document-map__node--requirement-spec {
-  top: 188px;
-  left: 405px;
+  top: 210px;
+  left: 420px;
   width: 330px;
   min-height: 214px;
 }
 
 .document-map__node--screen-design {
-  top: 68px;
-  left: 850px;
+  top: 92px;
+  left: 905px;
   width: 260px;
 }
 
 .document-map__node--wbs {
-  top: 332px;
-  left: 850px;
+  top: 360px;
+  left: 905px;
   width: 260px;
 }
 
 .document-map__node--unit-test {
-  top: 80px;
-  left: 1160px;
+  top: 104px;
+  left: 1205px;
   width: 230px;
 }
 

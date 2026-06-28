@@ -1391,6 +1391,7 @@ const getTodoDeadlineDiffDays = (todo = {}) => {
 };
 
 const getTodoDeadlineSortGroup = (todo = {}) => {
+  if (isTodoCompleted(todo)) return 3;
   const diffDays = getTodoDeadlineDiffDays(todo);
   if (diffDays === null) return 1;
   return diffDays < 0 ? 2 : 0;
@@ -1432,6 +1433,10 @@ const formatTodoDeadlineWithDday = (todo = {}) => {
 };
 
 const compareTodosForSchedule = (left = {}, right = {}) => {
+  const leftCompleted = isTodoCompleted(left);
+  const rightCompleted = isTodoCompleted(right);
+  if (leftCompleted !== rightCompleted) return leftCompleted ? 1 : -1;
+
   const leftSortGroup = getTodoDeadlineSortGroup(left);
   const rightSortGroup = getTodoDeadlineSortGroup(right);
   if (leftSortGroup !== rightSortGroup) return leftSortGroup - rightSortGroup;
@@ -1632,8 +1637,8 @@ const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
     .filter(Boolean)
     .sort(
       (left, right) =>
-        left.startCol - right.startCol ||
         compareTodosForSchedule(left.todo, right.todo) ||
+        left.startCol - right.startCol ||
         right.duration - left.duration ||
         String(left.todo.title || "").localeCompare(
           String(right.todo.title || ""),
@@ -1813,8 +1818,13 @@ const getWeekRangeFromIsoDate = (
   return { startDate, endDate: formatIsoDate(dateValue) };
 };
 
-const isTodoCompleted = (todo = {}) =>
-  ["DONE", "COMPLETED"].includes(String(todo.status || "").toUpperCase());
+const isTodoCompleted = (todo = {}) => {
+  const status = String(todo.status || todo.progressStatus || "").toUpperCase();
+  return (
+    ["DONE", "COMPLETED", "COMPLETE"].includes(status) ||
+    status === "\uC644\uB8CC"
+  );
+};
 
 const getTodoQueryRange = (todo = {}) => {
   const range = getTodoScheduleRange(todo);
@@ -7924,7 +7934,8 @@ function DocumentRelationMap({
         <div className="document-map__canvas">
           <svg
             className="document-map__edges"
-            viewBox="0 0 1400 580"
+            viewBox="0 0 1440 620"
+            preserveAspectRatio="none"
             aria-hidden="true"
           >
             <defs>
@@ -7942,34 +7953,36 @@ function DocumentRelationMap({
             </defs>
             <path
               className="document-map__edge is-required"
-              d="M296 182H350V266H395"
+              d="M290 205H350V312H415"
             />
             <path
               className="document-map__edge is-optional"
-              d="M296 436H350V316H395"
+              d="M290 460H350V350H415"
             />
             <path
               className="document-map__edge is-required"
-              d="M735 258H790V166H840"
+              d="M735 312H805V190H900"
             />
             <path
               className="document-map__edge is-required"
-              d="M735 334H790V426H840"
+              d="M735 312H805V455H900"
             />
             <path
               className="document-map__edge is-required"
-              d="M1110 166H1150"
+              d="M1115 190H1200"
             />
           </svg>
-          {nodes.map((node) => (
-            <DocumentNodeCard
-              key={node.id}
-              node={node}
-              isSelected={node.id === selectedNodeId}
-              onSelectNode={onSelectNode}
-              onDownloadNodeArtifact={onDownloadNodeArtifact}
-            />
-          ))}
+          <div className="document-map__node-layer">
+            {nodes.map((node) => (
+              <DocumentNodeCard
+                key={node.id}
+                node={node}
+                isSelected={node.id === selectedNodeId}
+                onSelectNode={onSelectNode}
+                onDownloadNodeArtifact={onDownloadNodeArtifact}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </section>
