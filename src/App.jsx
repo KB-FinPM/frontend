@@ -24,6 +24,7 @@ import {
   Minimize2,
   Pencil,
   PlusCircle,
+  RotateCcw,
   Save,
   Settings,
   Sparkles,
@@ -134,6 +135,13 @@ const PROJECT_START_DATE_ERROR =
 const PROJECT_CREATE_RESPONSE_ERROR_MESSAGE =
   "프로젝트 생성 응답에서 프로젝트 ID를 확인하지 못했습니다. 다시 시도해주세요.";
 const STORAGE_CLEAR_FLAG_KEY = "pm-agent.v2.storageClearedOnce";
+const DOCUMENT_AUTHOR_PLACEHOLDER_VALUES = new Set([
+  "작성자",
+  "author",
+  "unknown",
+  "local_dev_user",
+  "local-dev-user",
+]);
 
 if (typeof window !== "undefined") {
   try {
@@ -2193,21 +2201,34 @@ const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
 const getStoredProjectDocumentAuthor = (project) =>
-  String(
-    project?.documentAuthor ??
-      project?.document_author ??
-      project?.author ??
-      "",
-  ).trim();
+  getFirstProjectDocumentAuthor(
+    project?.documentAuthor,
+    project?.document_author,
+    project?.author,
+  );
 
 const getProjectDocumentAuthor = (project) =>
-  String(
-    project?.documentAuthor ??
-      project?.document_author ??
-      project?.author ??
-      project?.writer ??
-      "",
-  ).trim();
+  getFirstProjectDocumentAuthor(
+    project?.documentAuthor,
+    project?.document_author,
+    project?.author,
+    project?.writer,
+  );
+
+const normalizeProjectDocumentAuthor = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (DOCUMENT_AUTHOR_PLACEHOLDER_VALUES.has(text.toLowerCase())) return "";
+  return text;
+};
+
+const getFirstProjectDocumentAuthor = (...values) => {
+  for (const value of values) {
+    const normalizedValue = normalizeProjectDocumentAuthor(value);
+    if (normalizedValue) return normalizedValue;
+  }
+  return "";
+};
 
 const sanitizeProjectStartDateInput = (value = "") => {
   const text = String(value ?? "");
@@ -2249,7 +2270,7 @@ const buildProjectContext = (
     .filter(Boolean);
   const documentAuthor = getStoredProjectDocumentAuthor(targetProject);
   const author = getProjectDocumentAuthor(targetProject);
-  const writer = String(targetProject?.writer ?? author ?? "").trim();
+  const writer = getFirstProjectDocumentAuthor(targetProject?.writer, author);
   const createdBy = String(
     targetProject?.createdBy ?? targetProject?.created_by ?? "",
   ).trim();
@@ -2943,20 +2964,24 @@ function App() {
     pollingRunIdRef.current += 1;
   };
 
-  const resetGenerationState = () => {
+  const resetGenerationState = ({ restoreForm = false } = {}) => {
     clearGenerationPolling({ rejectPending: true });
     progressStepIndexRef.current = 0;
     setGenerationProgress(null);
     setGenerationJob(null);
     setIsProgressModalOpen(false);
     setProgressMinimizedState(false);
-    setIsDocumentGenerationModalOpen(false);
+    setIsDocumentGenerationModalOpen(Boolean(restoreForm));
     setIsResponding(false);
     setIsUploadingDocument(false);
     setSelectedDocumentIds([]);
     setDocumentError("");
     setDocumentStatusMessage("");
     setGenerationResetNonce((value) => value + 1);
+  };
+
+  const resetGenerationStateForUser = () => {
+    resetGenerationState({ restoreForm: true });
   };
 
   const startGenerationProgress = (requestType = "") => {
@@ -6251,6 +6276,7 @@ function App() {
         isMinimized={isProgressMinimized}
         onRestore={handleRestoreProgressModal}
         onClose={handleCloseProgressModal}
+        onReset={resetGenerationStateForUser}
         onDownload={handleDownloadGenerationJob}
       />
 
@@ -8256,6 +8282,7 @@ function GenerationProgressSurface({
   isMinimized,
   onRestore,
   onClose,
+  onReset,
   onDownload,
 }) {
   useEffect(() => {
@@ -8338,16 +8365,28 @@ function GenerationProgressSurface({
               <GenerationAgentStatusList items={agentItems} />
             </div>
 
-            {isCompleted && (
+            {(isRunning || isCompleted) && (
               <footer className="generation-progress-modal__actions">
-                <button
-                  className="message-upload-button generation-progress-modal__download"
-                  type="button"
-                  onClick={onDownload}
-                >
-                  <Download size={16} aria-hidden="true" />
-                  다운로드
-                </button>
+                {isRunning && (
+                  <button
+                    className="message-upload-button secondary generation-progress-modal__reset"
+                    type="button"
+                    onClick={onReset}
+                  >
+                    <RotateCcw size={16} aria-hidden="true" />
+                    초기화
+                  </button>
+                )}
+                {isCompleted && (
+                  <button
+                    className="message-upload-button generation-progress-modal__download"
+                    type="button"
+                    onClick={onDownload}
+                  >
+                    <Download size={16} aria-hidden="true" />
+                    다운로드
+                  </button>
+                )}
               </footer>
             )}
           </section>
