@@ -10,7 +10,37 @@ const getResponseActionId = (response) =>
   response?.result?.job_id ??
   response?.pending_action?.action_id ??
   response?.pending_action?.payload?.action_id ??
+  response?.pending_action?.result_json?.action_id ??
+  response?.pending_action?.result_json?.result?.action_id ??
+  response?.pending_action?.result_json?.result?.job_id ??
   "";
+
+export const sanitizeActionStatusResponse = (response = {}) => {
+  if (!response || typeof response !== "object") return response;
+  if (!Object.prototype.hasOwnProperty.call(response, "result_json")) {
+    return response;
+  }
+
+  return {
+    ...response,
+    result_json: {},
+  };
+};
+
+export const sanitizeCompletedActionStatusResponse = (response = {}) => {
+  if (!response || typeof response !== "object") return response;
+
+  return {
+    ...response,
+    result_json: {},
+    pending_action: response.pending_action
+      ? {
+          ...response.pending_action,
+          result_json: {},
+        }
+      : response.pending_action,
+  };
+};
 
 export const createAssistantMessageFromResponse = (response) => ({
   id: response.message_id ?? createChatId("assistant"),
@@ -42,7 +72,6 @@ export const createAssistantMessageFromResponse = (response) => ({
       : Array.isArray(response.result?.download_files)
         ? response.result.download_files
         : [],
-    rawResponse: response,
   },
 });
 
