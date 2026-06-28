@@ -24,8 +24,23 @@ const DOCUMENT_AUTHOR_PLACEHOLDER_VALUES = new Set([
   "local_dev_user",
   "local-dev-user",
 ]);
+const MAX_STORED_MESSAGE_CONTENT_LENGTH = 6000;
+const MAX_STORED_METADATA_STRING_LENGTH = 8000;
+const MAX_STORED_CONVERSATIONS_PER_PROJECT = 20;
+const MAX_STORED_MESSAGES_PER_CONVERSATION = 80;
+const AGGRESSIVE_STORED_CONVERSATIONS_PER_PROJECT = 5;
+const AGGRESSIVE_STORED_MESSAGES_PER_CONVERSATION = 30;
+const MAX_STORED_ACTIONS = 8;
+const MAX_STORED_DOCUMENTS = 20;
+const MAX_STORED_OPTIONAL_DOCUMENTS = 40;
+const MAX_STORED_OPTIONAL_DOCUMENT_IDS = 40;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const truncateText = (value, maxLength = MAX_STORED_MESSAGE_CONTENT_LENGTH) => {
+  const text = String(value ?? "");
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+};
 
 const normalizeDocumentAuthor = (value) => {
   const text = String(value ?? "").trim();
@@ -60,14 +75,52 @@ const readJsonMap = (key) => {
 
 const writeJsonMap = (key, value) => {
   const storage = getStorage();
-  if (!storage) return;
-  storage.setItem(key, JSON.stringify(value));
+  if (!storage) return true;
+
+  try {
+    storage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    console.warn("[PM Agent Storage] Failed to write storage.", {
+      key,
+      error,
+    });
+    return false;
+  }
+};
+
+const isQuotaExceededError = (error) =>
+  error?.name === "QuotaExceededError" ||
+  error?.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+  error?.code === 22 ||
+  error?.code === 1014;
+
+const tryWriteJsonMap = (key, value) => {
+  const storage = getStorage();
+  if (!storage) return true;
+
+  try {
+    storage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (isQuotaExceededError(error)) {
+      console.warn(
+        "[PM Agent Storage] Storage quota exceeded. Pruning stored conversations.",
+        error,
+      );
+      return false;
+    }
+
+    console.warn("[PM Agent Storage] Failed to write storage.", {
+      key,
+      error,
+    });
+    return false;
+  }
 };
 
 const readStoredProjectConversations = () =>
   readJsonMap(PROJECT_CONVERSATIONS_KEY);
-const writeStoredProjectConversations = (conversationsByProject) =>
-  writeJsonMap(PROJECT_CONVERSATIONS_KEY, conversationsByProject);
 
 const readActiveConversationIds = () => readJsonMap(ACTIVE_CONVERSATIONS_KEY);
 const writeActiveConversationIds = (activeConversationIds) =>
@@ -120,6 +173,150 @@ const normalizeMessage = (message, index = 0) => ({
   metadata: message.metadata ?? {},
 });
 
+const toStoredDocumentSummary = (document = {}) => ({
+  documentId:
+    document.documentId ?? document.document_id ?? document.id ?? "",
+  documentType: document.documentType ?? document.document_type ?? "",
+  fileName:
+    document.fileName ?? document.file_name ?? document.name ?? "",
+  title:
+    document.title ??
+    document.fileName ??
+    document.file_name ??
+    document.name ??
+    "",
+});
+
+const toStoredActionSummary = (action = {}) => {
+  const payload = action.payload ?? {};
+  const payloadSummary =
+    action.payload && typeof action.payload === "object"
+      ? {
+          actionId: payload.actionId ?? payload.action_id ?? "",
+          requestType: payload.requestType ?? payload.request_type ?? "",
+          documentType: payload.documentType ?? payload.document_type ?? "",
+        }
+      : undefined;
+
+  return {
+    id: action.id ?? action.actionId ?? "",
+    label: action.label ?? action.title ?? "",
+    action: action.action ?? action.type ?? action.actionType ?? "",
+    actionType:
+      action.actionType ?? action.action_type ?? action.type ?? "",
+    ...(payloadSummary ? { payload: payloadSummary } : {}),
+  };
+};
+
+const sanitizeMessageMetadataForStorage = (metadata = {}) => {
+  if (!metadata || typeof metadata !== "object") return {};
+
+  const storedMetadata = {};
+  const copyKeys = [
+    "conversationId",
+    "state",
+    "type",
+    "title",
+    "actionId",
+    "status",
+    "requestType",
+    "documentType",
+    "targetDocumentType",
+  ];
+
+  for (const key of copyKeys) {
+    if (metadata[key] !== undefined && metadata[key] !== null) {
+      storedMetadata[key] = metadata[key];
+    }
+  }
+
+  if (Array.isArray(metadata.suggestedActions)) {
+    storedMetadata.suggestedActions = metadata.suggestedActions
+      .slice(0, MAX_STORED_ACTIONS)
+      .map(toStoredActionSummary);
+  }
+
+  if (Array.isArray(metadata.commandActions)) {
+    storedMetadata.commandActions = metadata.commandActions
+      .slice(0, MAX_STORED_ACTIONS)
+      .map(toStoredActionSummary);
+  }
+
+  if (metadata.documentChoiceRequest) {
+    const request = metadata.documentChoiceRequest;
+    storedMetadata.documentChoiceRequest = {
+      originalMessage: truncateText(request.originalMessage ?? "", 1000),
+      requestType:
+        request.requestType ?? request.documentConfig?.requestType ?? "",
+      documentConfig: request.documentConfig
+        ? {
+            requestType: request.documentConfig.requestType ?? "",
+            targetLabel: request.documentConfig.targetLabel ?? "",
+            defaultOutputFormat:
+              request.documentConfig.defaultOutputFormat ?? "",
+          }
+        : undefined,
+      documents: Array.isArray(request.documents)
+        ? request.documents
+            .slice(0, MAX_STORED_DOCUMENTS)
+            .map(toStoredDocumentSummary)
+        : [],
+      optionalDocuments: Array.isArray(request.optionalDocuments)
+        ? request.optionalDocuments
+            .slice(0, MAX_STORED_OPTIONAL_DOCUMENTS)
+            .map(toStoredDocumentSummary)
+        : [],
+      defaultDocumentId: request.defaultDocumentId ?? "",
+      defaultOptionalDocumentIds: Array.isArray(
+        request.defaultOptionalDocumentIds,
+      )
+        ? request.defaultOptionalDocumentIds.slice(
+            0,
+            MAX_STORED_OPTIONAL_DOCUMENT_IDS,
+          )
+        : [],
+      outputFormat: request.outputFormat ?? "",
+    };
+  }
+
+  if (metadata.result && typeof metadata.result === "object") {
+    storedMetadata.result = {
+      type: metadata.result.type ?? "",
+      query:
+        metadata.result.query !== undefined
+          ? truncateText(metadata.result.query, 1000)
+          : undefined,
+      count: Array.isArray(metadata.result.items)
+        ? metadata.result.items.length
+        : metadata.result.count,
+    };
+  }
+
+  try {
+    if (JSON.stringify(storedMetadata).length > MAX_STORED_METADATA_STRING_LENGTH) {
+      return {
+        conversationId: storedMetadata.conversationId,
+        state: storedMetadata.state,
+        type: storedMetadata.type,
+        truncated: true,
+      };
+    }
+  } catch {
+    return {};
+  }
+
+  return storedMetadata;
+};
+
+const sanitizeMessageForStorage = (message, index = 0) => {
+  const normalizedMessage = normalizeMessage(message, index);
+  return {
+    ...normalizedMessage,
+    content: truncateText(normalizedMessage.content),
+    metadata: sanitizeMessageMetadataForStorage(normalizedMessage.metadata),
+  };
+};
+
 const createTitleFromMessage = (content) => {
   const normalizedContent = content.replace(/\s+/g, " ").trim();
   if (!normalizedContent) return createInitialConversationTitle();
@@ -169,6 +366,78 @@ const sortConversations = (conversations = []) =>
   [...conversations].sort((first, second) =>
     second.updatedAt.localeCompare(first.updatedAt),
   );
+
+const pruneConversationsForStorage = (
+  conversations = [],
+  {
+    maxConversations = MAX_STORED_CONVERSATIONS_PER_PROJECT,
+    maxMessages = MAX_STORED_MESSAGES_PER_CONVERSATION,
+  } = {},
+) =>
+  sortConversations(conversations)
+    .slice(0, maxConversations)
+    .map((conversation, conversationIndex) => {
+      const messages = Array.isArray(conversation.messages)
+        ? conversation.messages.slice(-maxMessages)
+        : [];
+
+      return {
+        ...conversation,
+        messages: messages.map((message, messageIndex) =>
+          sanitizeMessageForStorage(
+            message,
+            conversationIndex * maxMessages + messageIndex,
+          ),
+        ),
+      };
+    });
+
+const pruneAllConversationsForStorage = (conversationsByProject = {}) =>
+  Object.fromEntries(
+    Object.entries(conversationsByProject).map(
+      ([projectId, conversations]) => [
+        projectId,
+        pruneConversationsForStorage(conversations),
+      ],
+    ),
+  );
+
+const pruneAllConversationsAggressively = (conversationsByProject = {}) =>
+  Object.fromEntries(
+    Object.entries(conversationsByProject).map(
+      ([projectId, conversations]) => [
+        projectId,
+        pruneConversationsForStorage(conversations, {
+          maxConversations: AGGRESSIVE_STORED_CONVERSATIONS_PER_PROJECT,
+          maxMessages: AGGRESSIVE_STORED_MESSAGES_PER_CONVERSATION,
+        }),
+      ],
+    ),
+  );
+
+const safeWriteStoredProjectConversations = (conversationsByProject) => {
+  const compacted = pruneAllConversationsForStorage(conversationsByProject);
+  if (tryWriteJsonMap(PROJECT_CONVERSATIONS_KEY, compacted)) {
+    return true;
+  }
+
+  const aggressivelyCompacted =
+    pruneAllConversationsAggressively(conversationsByProject);
+  if (tryWriteJsonMap(PROJECT_CONVERSATIONS_KEY, aggressivelyCompacted)) {
+    return true;
+  }
+
+  try {
+    getStorage()?.removeItem(PROJECT_CONVERSATIONS_KEY);
+  } catch {
+    // Ignore storage cleanup failures; app flow must continue.
+  }
+
+  console.warn(
+    "[PM Agent Storage] Skipped conversation persistence because storage quota is full.",
+  );
+  return false;
+};
 
 const normalizeProject = (project, source = "db") => {
   const projectId = getProjectIdFromResponse(project);
@@ -223,8 +492,8 @@ const persistProject = (project) => {
   const normalizedProject = normalizeProject(project, "db");
   const conversationsByProject = readStoredProjectConversations();
   conversationsByProject[normalizedProject.projectId] =
-    normalizedProject.conversations;
-  writeStoredProjectConversations(conversationsByProject);
+    pruneConversationsForStorage(normalizedProject.conversations);
+  safeWriteStoredProjectConversations(conversationsByProject);
   return clone(normalizedProject);
 };
 

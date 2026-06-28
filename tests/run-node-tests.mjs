@@ -24,6 +24,7 @@ import {
   saveCommandUsage,
 } from "../src/services/commandRecommendationService.js";
 import {
+  addMessagesToConversation,
   createProject,
   getProjectById,
 } from "../src/services/projectService.js";
@@ -257,6 +258,158 @@ test("project explicit document author is preserved", async () => {
   assert.equal(project.author, "홍길동");
   assert.equal(project.documentAuthor, "홍길동");
   assert.equal(project.document_author, "홍길동");
+});
+
+test("conversation persistence stores compact metadata only", async () => {
+  const storage = installBrowserStubs();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name) =>
+        String(name).toLowerCase() === "content-type"
+          ? "application/json"
+          : "",
+    },
+    json: async () => ({
+      project_id: "PRJ-STORAGE",
+      project_name: "Storage project",
+      conversations: [
+        {
+          conversationId: "conv-1",
+          title: "Storage",
+          messages: [],
+        },
+      ],
+    }),
+    text: async () => "",
+  });
+
+  await addMessagesToConversation("PRJ-STORAGE", "conv-1", [
+    {
+      id: "assistant-1",
+      role: "assistant",
+      content: "x".repeat(7000),
+      metadata: {
+        conversationId: "conv-1",
+        state: "COMPLETED",
+        result: {
+          type: "schedule_query",
+          query: "이번 주 일정",
+          items: Array.from({ length: 120 }, (_, index) => ({
+            title: `할일 ${index}`,
+            evidence: "큰 원문".repeat(200),
+          })),
+        },
+        documentChoiceRequest: {
+          originalMessage: "요구사항명세서 생성",
+          requestType: "REQUIREMENT_SPEC",
+          documents: [
+            {
+              documentId: "DOC-1",
+              documentType: "CONSTRUCTION_REQUIREMENT_DEFINITION",
+              fileName: "definition.pdf",
+              rawText: "원문".repeat(1000),
+            },
+          ],
+          optionalDocuments: [
+            {
+              documentId: "DOC-2",
+              documentType: "MEETING_NOTES",
+              fileName: "meeting.docx",
+              chunks: Array.from({ length: 50 }, (_, index) => index),
+            },
+          ],
+        },
+        rawResponse: { huge: "raw".repeat(5000) },
+        retrievedChunks: Array.from({ length: 50 }, (_, index) => ({
+          index,
+          text: "chunk".repeat(1000),
+        })),
+      },
+    },
+  ]);
+
+  const stored = JSON.parse(
+    storage.get("pm-agent.v2.projectConversations") || "{}",
+  );
+  const storedMessage = stored["PRJ-STORAGE"][0].messages[0];
+
+  assert.equal(storedMessage.content.length, 6003);
+  assert.equal(storedMessage.metadata.result.count, 120);
+  assert.equal(storedMessage.metadata.result.items, undefined);
+  assert.equal(storedMessage.metadata.rawResponse, undefined);
+  assert.equal(storedMessage.metadata.retrievedChunks, undefined);
+  assert.deepEqual(storedMessage.metadata.documentChoiceRequest.documents, [
+    {
+      documentId: "DOC-1",
+      documentType: "CONSTRUCTION_REQUIREMENT_DEFINITION",
+      fileName: "definition.pdf",
+      title: "definition.pdf",
+    },
+  ]);
+  assert.equal(
+    storedMessage.metadata.documentChoiceRequest.optionalDocuments[0].chunks,
+    undefined,
+  );
+});
+
+test("conversation persistence does not throw when storage quota is exceeded", async () => {
+  installBrowserStubs();
+  const storage = new Map();
+  globalThis.window.localStorage = {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => {
+      if (key === "pm-agent.v2.projectConversations") {
+        const error = new Error("quota exceeded");
+        error.name = "QuotaExceededError";
+        error.code = 22;
+        throw error;
+      }
+      storage.set(key, String(value));
+    },
+    removeItem: (key) => storage.delete(key),
+    clear: () => storage.clear(),
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name) =>
+        String(name).toLowerCase() === "content-type"
+          ? "application/json"
+          : "",
+    },
+    json: async () => ({
+      project_id: "PRJ-QUOTA",
+      project_name: "Quota project",
+      conversations: [
+        {
+          conversationId: "conv-1",
+          title: "Quota",
+          messages: [],
+        },
+      ],
+    }),
+    text: async () => "",
+  });
+
+  const result = await addMessagesToConversation("PRJ-QUOTA", "conv-1", [
+    {
+      id: "assistant-1",
+      role: "assistant",
+      content: "문서 생성이 시작되었습니다.",
+      metadata: {
+        result: {
+          items: Array.from({ length: 500 }, (_, index) => ({ index })),
+        },
+      },
+    },
+  ]);
+
+  assert.equal(result.project.projectId, "PRJ-QUOTA");
+  assert.equal(result.messages.length, 1);
+  assert.equal(storage.has("pm-agent.v2.projectConversations"), false);
 });
 
 test("parseResponseBody returns JSON bodies", async () => {
