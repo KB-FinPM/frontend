@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowUp,
   Bot,
@@ -158,7 +165,9 @@ const TODO_STATUS_FILTERS = Object.freeze([
   { value: "IN_PROGRESS", label: "진행중" },
   { value: "DONE", label: "완료" },
 ]);
-const TODO_STATUS_OPTIONS = TODO_STATUS_FILTERS.filter((option) => option.value);
+const TODO_STATUS_OPTIONS = TODO_STATUS_FILTERS.filter(
+  (option) => option.value,
+);
 const TODO_SOURCE_FILTERS = Object.freeze([
   { value: "", label: "전체" },
   { value: "WBS", label: "WBS" },
@@ -572,7 +581,8 @@ const ARTIFACT_TYPE_LABELS = Object.freeze({
 });
 
 const getDocumentDisplayLabel = (documentType) =>
-  DOCUMENT_TYPE_LABELS[documentType] || DOCUMENT_TYPE_LABELS[DOCUMENT_TYPES.UNKNOWN];
+  DOCUMENT_TYPE_LABELS[documentType] ||
+  DOCUMENT_TYPE_LABELS[DOCUMENT_TYPES.UNKNOWN];
 
 const getArtifactDisplayLabel = (artifactType) =>
   ARTIFACT_TYPE_LABELS[artifactType] || "기타";
@@ -583,14 +593,16 @@ const ARTIFACT_SOURCE_DOCUMENT_TYPES = Object.freeze({
   WBS: DOCUMENT_TYPES.WBS,
 });
 
-const getRelation = (requestType) => GENERATION_DOCUMENT_RELATIONS[requestType] ?? null;
+const getRelation = (requestType) =>
+  GENERATION_DOCUMENT_RELATIONS[requestType] ?? null;
 
 const getOutputFormats = (relation) =>
   Array.isArray(relation?.outputFormats) && relation.outputFormats.length
     ? relation.outputFormats
     : [{ value: "xlsx", label: OUTPUT_FORMAT_LABELS.xlsx }];
 
-const getDefaultOutputFormat = (relation) => getOutputFormats(relation)[0]?.value || "xlsx";
+const getDefaultOutputFormat = (relation) =>
+  getOutputFormats(relation)[0]?.value || "xlsx";
 
 const MEETING_TODO_DOCUMENT_CONFIG = Object.freeze({
   requestType: DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION,
@@ -665,9 +677,8 @@ const getGenerationAssistantMessage = ({
   }
 
   return [
-    `${relation?.targetLabel || "산출물"}는 ${
-      relation?.primarySource?.label || "기준 문서"
-    }를 기준으로 생성합니다.`,
+    `${relation?.targetLabel || "산출물"}는 ${relation?.primarySource?.label ||
+      "기준 문서"}를 기준으로 생성합니다.`,
     "기준 문서와 파일 형식을 확인한 뒤 생성해 주세요.",
   ].join("\n");
 };
@@ -680,7 +691,8 @@ const getDocumentContextAssistantMessage = ({
 }) => {
   if (requestType === DOCUMENT_CONTEXT_REQUEST_TYPES.MEETING_TODO_EXTRACTION) {
     return hasPrimaryDocument
-      ? documentConfig.existingMessage || MEETING_TODO_DOCUMENT_CONFIG.existingMessage
+      ? documentConfig.existingMessage ||
+          MEETING_TODO_DOCUMENT_CONFIG.existingMessage
       : documentConfig.message || MEETING_TODO_DOCUMENT_CONFIG.message;
   }
 
@@ -754,8 +766,7 @@ const MIME_FILE_TYPE_LABELS = Object.freeze({
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     "DOCX",
   "application/vnd.ms-excel": "XLS",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-    "XLSX",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
   "application/vnd.ms-powerpoint": "PPT",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation":
     "PPTX",
@@ -832,10 +843,7 @@ const normalizeUploadedFile = (file) => {
     file.id ??
     "";
   const resolvedFileType =
-    file.file_type ??
-    file.fileType ??
-    file.content_type ??
-    file.contentType;
+    file.file_type ?? file.fileType ?? file.content_type ?? file.contentType;
   const fileType = formatFileType(fileName, resolvedFileType);
 
   return {
@@ -893,9 +901,12 @@ const normalizeGeneratedFile = (file) => {
     "생성 파일";
   const artifactType = file.artifact_type ?? file.artifactType ?? "";
   const artifactLabel =
-    file.display_label ?? file.displayLabel ?? getArtifactDisplayLabel(artifactType);
+    file.display_label ??
+    file.displayLabel ??
+    getArtifactDisplayLabel(artifactType);
   return {
-    fileId: file.artifact_id ?? file.artifactId ?? file.file_id ?? file.id ?? "",
+    fileId:
+      file.artifact_id ?? file.artifactId ?? file.file_id ?? file.id ?? "",
     fileName,
     fileType: formatFileType(
       fileName,
@@ -974,7 +985,10 @@ const sortDocumentsByLatest = (documents = []) =>
   [...documents].sort((left, right) => {
     const timeDiff = getCandidateTimestamp(right) - getCandidateTimestamp(left);
     if (timeDiff) return timeDiff;
-    return String(left.fileName || "").localeCompare(String(right.fileName || ""), "ko");
+    return String(left.fileName || "").localeCompare(
+      String(right.fileName || ""),
+      "ko",
+    );
   });
 
 const normalizeGeneratedSourceDocument = (file) => {
@@ -984,7 +998,10 @@ const normalizeGeneratedSourceDocument = (file) => {
     file.documentType ??
     ARTIFACT_SOURCE_DOCUMENT_TYPES[normalizedFile.artifactType] ??
     DOCUMENT_TYPES.UNKNOWN;
-  if (!normalizedFile.generatedDocumentId || documentType === DOCUMENT_TYPES.UNKNOWN) {
+  if (
+    !normalizedFile.generatedDocumentId ||
+    documentType === DOCUMENT_TYPES.UNKNOWN
+  ) {
     return null;
   }
 
@@ -1081,9 +1098,13 @@ const buildDocumentHubNodes = ({ fileBuckets, documents }) => {
     const requiredNodeIds = node.requiredNodeIds ?? [];
     const missingRequiredNodes = requiredNodeIds
       .map((nodeId) => DOCUMENT_HUB_NODE_BY_ID[nodeId])
-      .filter((requiredNode) => requiredNode && !nodeReadiness[requiredNode.id]);
+      .filter(
+        (requiredNode) => requiredNode && !nodeReadiness[requiredNode.id],
+      );
     const hasRequiredDocuments = missingRequiredNodes.length === 0;
-    const isGeneratable = Boolean(node.requestType && !isReady && hasRequiredDocuments);
+    const isGeneratable = Boolean(
+      node.requestType && !isReady && hasRequiredDocuments,
+    );
     let statusLabel = "대기중";
     let statusTone = "waiting";
     let actionLabel = "";
@@ -1212,7 +1233,9 @@ const buildIsoDate = (year, month, day) => {
 const normalizeTodoDueDate = (value, { defaultToday = false } = {}) => {
   const text = String(value ?? "").trim();
   if (!text) return defaultToday ? getTodayIsoDate() : "";
-  if (["NONE", "NULL", "TBD", "N/A", "NA", "미정"].includes(text.toUpperCase())) {
+  if (
+    ["NONE", "NULL", "TBD", "N/A", "NA", "미정"].includes(text.toUpperCase())
+  ) {
     return defaultToday ? getTodayIsoDate() : "";
   }
 
@@ -1322,7 +1345,9 @@ const getTodoSourceLabel = (todo = {}) => {
 const getTodoDeadlineDiffDays = (todo = {}) => {
   const deadline = getTodoDeadlineDate(todo);
   if (!deadline) return null;
-  return Math.round((parseIsoDate(deadline) - parseIsoDate(getTodayIsoDate())) / 86400000);
+  return Math.round(
+    (parseIsoDate(deadline) - parseIsoDate(getTodayIsoDate())) / 86400000,
+  );
 };
 
 const getTodoDeadlineSortGroup = (todo = {}) => {
@@ -1390,7 +1415,10 @@ const compareTodosForSchedule = (left = {}, right = {}) => {
     return leftDeadline.localeCompare(rightDeadline);
   }
 
-  return String(left.title || "").localeCompare(String(right.title || ""), "ko");
+  return String(left.title || "").localeCompare(
+    String(right.title || ""),
+    "ko",
+  );
 };
 
 const getMonthKeyFromDate = (dateValue = new Date()) =>
@@ -1425,7 +1453,9 @@ const formatWeekLabel = (dateText = getTodayIsoDate()) => {
 
 const formatWeekdayHeader = (dateText = getTodayIsoDate()) => {
   const dateValue = parseIsoDate(dateText);
-  const weekday = ["일", "월", "화", "수", "목", "금", "토"][dateValue.getDay()];
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][
+    dateValue.getDay()
+  ];
   return `${dateValue.getMonth() + 1}/${dateValue.getDate()}(${weekday})`;
 };
 
@@ -1437,7 +1467,9 @@ const formatDateLabel = (dateText = "") => {
 };
 
 const getCalendarWeeks = (monthKey = getMonthKeyFromDate()) => {
-  const [year, month] = String(monthKey).split("-").map(Number);
+  const [year, month] = String(monthKey)
+    .split("-")
+    .map(Number);
   const firstDate = new Date(year, (month || 1) - 1, 1);
   const cells = [];
   const leadingDays = firstDate.getDay();
@@ -1516,7 +1548,9 @@ const getTodoScheduleRange = (todo = {}) => {
 
 const isDateInTodoScheduleRange = (todo, dateText) => {
   const range = getTodoScheduleRange(todo);
-  return Boolean(range && range.startDate <= dateText && dateText <= range.endDate);
+  return Boolean(
+    range && range.startDate <= dateText && dateText <= range.endDate,
+  );
 };
 
 const formatScheduleRangeLabel = (todo = {}) => {
@@ -1537,9 +1571,12 @@ const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
       if (!range || range.endDate < weekStart || range.startDate > weekEnd) {
         return null;
       }
-      const segmentStart = range.startDate < weekStart ? weekStart : range.startDate;
+      const segmentStart =
+        range.startDate < weekStart ? weekStart : range.startDate;
       const segmentEnd = range.endDate > weekEnd ? weekEnd : range.endDate;
-      const startIndex = week.findIndex((cell) => cell.dateText === segmentStart);
+      const startIndex = week.findIndex(
+        (cell) => cell.dateText === segmentStart,
+      );
       const endIndex = week.findIndex((cell) => cell.dateText === segmentEnd);
       if (startIndex < 0 || endIndex < 0) return null;
       return {
@@ -1558,7 +1595,9 @@ const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
         left.startCol - right.startCol ||
         compareTodosForSchedule(left.todo, right.todo) ||
         right.duration - left.duration ||
-        String(left.todo.title || "").localeCompare(String(right.todo.title || "")),
+        String(left.todo.title || "").localeCompare(
+          String(right.todo.title || ""),
+        ),
     );
 
   const laneEndColumns = [];
@@ -1615,7 +1654,9 @@ const normalizeTodo = (item = {}) => {
   return {
     todoId,
     clientImportId:
-      item.client_import_id ?? item.clientImportId ?? (todoId ? `IMPORT-${todoId}` : ""),
+      item.client_import_id ??
+      item.clientImportId ??
+      (todoId ? `IMPORT-${todoId}` : ""),
     title: item.title ?? "",
     assignee: item.assignee ?? "",
     startDate: normalizedRange?.startDate || "",
@@ -1626,7 +1667,10 @@ const normalizeTodo = (item = {}) => {
     sourceType,
     sourceDocumentId: item.source_document_id ?? item.sourceDocumentId ?? "",
     sourceDocumentName:
-      item.source_document_name ?? item.sourceDocumentName ?? item.related_document ?? "",
+      item.source_document_name ??
+      item.sourceDocumentName ??
+      item.related_document ??
+      "",
     description: item.description ?? "",
     sourceSentence: item.source_sentence ?? item.sourceSentence ?? "",
     createdAt: item.created_at ?? item.createdAt ?? "",
@@ -1717,7 +1761,10 @@ const isScheduleTodoReadOnlyQuery = (value = "") => {
   );
 };
 
-const getWeekRangeFromIsoDate = (dateText = getTodayIsoDate(), weekOffset = 0) => {
+const getWeekRangeFromIsoDate = (
+  dateText = getTodayIsoDate(),
+  weekOffset = 0,
+) => {
   const dateValue = parseIsoDate(dateText);
   const mondayOffset = (dateValue.getDay() + 6) % 7;
   dateValue.setDate(dateValue.getDate() - mondayOffset + weekOffset * 7);
@@ -1738,23 +1785,31 @@ const getTodoQueryRange = (todo = {}) => {
 };
 
 const isTodoInDateRange = (todo = {}, startDate = "", endDate = "") => {
+  let filterStart = normalizeTodoDueDate(startDate);
+  let filterEnd = normalizeTodoDueDate(endDate);
+  if (!filterStart && !filterEnd) return true;
+  if (filterStart && filterEnd && filterEnd < filterStart) {
+    [filterStart, filterEnd] = [filterEnd, filterStart];
+  }
   const todoRange = getTodoQueryRange(todo);
   if (!todoRange) return false;
-  return todoRange.startDate <= endDate && todoRange.endDate >= startDate;
+  const rangeStart = filterStart || "0000-01-01";
+  const rangeEnd = filterEnd || "9999-12-31";
+  return todoRange.startDate <= rangeEnd && todoRange.endDate >= rangeStart;
 };
 
 const getScheduleChatAssignee = (messageText = "", todos = []) => {
   const normalized = normalizeCommandText(messageText);
   const assignees = Array.from(
     new Set(
-      todos
-        .map((todo) => sanitizeTodoText(todo.assignee))
-        .filter(Boolean),
+      todos.map((todo) => sanitizeTodoText(todo.assignee)).filter(Boolean),
     ),
   ).sort((left, right) => right.length - left.length);
-  return assignees.find((assignee) =>
-    normalized.includes(normalizeCommandText(assignee)),
-  ) || "";
+  return (
+    assignees.find((assignee) =>
+      normalized.includes(normalizeCommandText(assignee)),
+    ) || ""
+  );
 };
 
 const getScheduleChatQuery = (messageText = "", todos = []) => {
@@ -1790,7 +1845,11 @@ const getScheduleChatQuery = (messageText = "", todos = []) => {
     query.deadlineSoon = true;
     query.label = "마감 임박 할일";
   }
-  if (normalized.includes("기한지난") || normalized.includes("지난할일") || normalized.includes("overdue")) {
+  if (
+    normalized.includes("기한지난") ||
+    normalized.includes("지난할일") ||
+    normalized.includes("overdue")
+  ) {
     query.overdueOnly = true;
     query.label = "기한 지난 할일";
   }
@@ -1828,7 +1887,14 @@ const getScheduleChatQuery = (messageText = "", todos = []) => {
 const filterScheduleChatTodos = (todos = [], query = {}) =>
   todos
     .filter((todo) => {
-      if (query.dateRange && !isTodoInDateRange(todo, query.dateRange.startDate, query.dateRange.endDate)) {
+      if (
+        query.dateRange &&
+        !isTodoInDateRange(
+          todo,
+          query.dateRange.startDate,
+          query.dateRange.endDate,
+        )
+      ) {
         return false;
       }
       if (query.deadlineSoon && !isTodoDeadlineSoon(todo)) return false;
@@ -1840,7 +1906,8 @@ const filterScheduleChatTodos = (todos = [], query = {}) =>
       }
       if (
         query.assignee &&
-        normalizeCommandText(todo.assignee) !== normalizeCommandText(query.assignee)
+        normalizeCommandText(todo.assignee) !==
+          normalizeCommandText(query.assignee)
       ) {
         return false;
       }
@@ -1850,9 +1917,12 @@ const filterScheduleChatTodos = (todos = [], query = {}) =>
 
 const buildScheduleChatResponseContent = (query = {}, todos = []) => {
   if (!todos.length) {
-    return `${query.label || "일정/할일"}이 없습니다. 등록이나 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
+    return `${query.label ||
+      "일정/할일"}이 없습니다. 등록이나 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
   }
-  return `${query.label || "일정/할일"}은 ${todos.length}건입니다. 아래 목록에서 마감일, D-Day, 출처를 확인해 주세요. 상세 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
+  return `${query.label || "일정/할일"}은 ${
+    todos.length
+  }건입니다. 아래 목록에서 마감일, D-Day, 출처를 확인해 주세요. 상세 수정은 왼쪽 [프로젝트 일정] 또는 [할일 관리]에서 진행해 주세요.`;
 };
 
 const TODO_MUTATION_BLOCK_MESSAGE =
@@ -1885,7 +1955,8 @@ const toTodoImportPayload = (item) => {
   const range = getTodoScheduleRange(item);
   return {
     todo_id: item.todoId || item.clientImportId || raw.todo_id || "",
-    client_import_id: item.clientImportId || raw.client_import_id || item.todoId,
+    client_import_id:
+      item.clientImportId || raw.client_import_id || item.todoId,
     title: item.title,
     assignee: item.assignee || null,
     start_date: range?.startDate || null,
@@ -1907,13 +1978,15 @@ const getTodoImportDocuments = (fileBuckets = {}) => {
     documentType: file.documentType,
     createdAt: file.uploadedAt,
     updatedAt: file.raw?.updated_at ?? file.raw?.updatedAt ?? "",
-    displayLabel: file.documentLabel || getDocumentDisplayLabel(file.documentType),
+    displayLabel:
+      file.documentLabel || getDocumentDisplayLabel(file.documentType),
   }));
   const generatedDocuments = (fileBuckets.generated ?? [])
     .map((file) => {
       if (!file.generatedDocumentId) return null;
       const documentType =
-        ARTIFACT_SOURCE_DOCUMENT_TYPES[file.artifactType] ?? DOCUMENT_TYPES.UNKNOWN;
+        ARTIFACT_SOURCE_DOCUMENT_TYPES[file.artifactType] ??
+        DOCUMENT_TYPES.UNKNOWN;
       return {
         documentId: file.generatedDocumentId,
         fileName: file.fileName,
@@ -1951,15 +2024,17 @@ const getDocumentSearchText = (document) =>
   );
 
 const getMatchingDocuments = (documents, config) =>
-  sortDocumentsByLatest(documents.filter((document) => {
-    const documentType = document.documentType ?? "";
-    if (config.documentTypes?.includes(documentType)) return true;
+  sortDocumentsByLatest(
+    documents.filter((document) => {
+      const documentType = document.documentType ?? "";
+      if (config.documentTypes?.includes(documentType)) return true;
 
-    const searchText = getDocumentSearchText(document);
-    return (config.keywords ?? []).some((keyword) =>
-      searchText.includes(compactText(keyword)),
-    );
-  }));
+      const searchText = getDocumentSearchText(document);
+      return (config.keywords ?? []).some((keyword) =>
+        searchText.includes(compactText(keyword)),
+      );
+    }),
+  );
 
 const uniqueDocumentsById = (documents = []) => {
   const seen = new Set();
@@ -2059,7 +2134,11 @@ const normalizeDownloadFile = (file = {}) => ({
   artifact_id:
     file.artifact_id ?? file.artifactId ?? file.file_id ?? file.fileId ?? "",
   file_name:
-    file.file_name ?? file.fileName ?? file.name ?? file.original_file_name ?? "",
+    file.file_name ??
+    file.fileName ??
+    file.name ??
+    file.original_file_name ??
+    "",
 });
 
 const getGenerationDownloadFiles = (statusResponse = {}) => {
@@ -2078,7 +2157,10 @@ const getProjectStartDate = (project) =>
 
 const getStoredProjectDocumentAuthor = (project) =>
   String(
-    project?.documentAuthor ?? project?.document_author ?? project?.author ?? "",
+    project?.documentAuthor ??
+      project?.document_author ??
+      project?.author ??
+      "",
   ).trim();
 
 const getProjectDocumentAuthor = (project) =>
@@ -2175,17 +2257,15 @@ const buildProjectContext = (
     const technicalNegotiationMinutesDocuments = selectedDocuments.filter(
       (document) => document.documentType === DOCUMENT_TYPES.MEETING_NOTES,
     );
-    const technicalNegotiationMinutesDocumentIds =
-      technicalNegotiationMinutesDocuments
-        .map((document) => document.documentId)
-        .filter(Boolean);
+    const technicalNegotiationMinutesDocumentIds = technicalNegotiationMinutesDocuments
+      .map((document) => document.documentId)
+      .filter(Boolean);
 
     context.source_document_ids = selectedDocumentIds;
     context.document_ids = selectedDocumentIds;
     context.requirement_definition_document_id =
       requirementDefinitionDocument?.documentId ?? null;
-    context.technical_negotiation_minutes_document_ids =
-      technicalNegotiationMinutesDocumentIds;
+    context.technical_negotiation_minutes_document_ids = technicalNegotiationMinutesDocumentIds;
     context.technical_negotiation_minutes_document_id =
       technicalNegotiationMinutesDocumentIds[0] ?? null;
   }
@@ -2209,7 +2289,9 @@ const sanitizeTodoText = (value = "") =>
 
 const truncateTodoText = (value = "", maxLength = 90) => {
   const text = sanitizeTodoText(value);
-  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+  return text.length > maxLength
+    ? `${text.slice(0, maxLength).trim()}...`
+    : text;
 };
 
 const buildGenerationProgress = (progress, status = "RUNNING") => {
@@ -2286,9 +2368,7 @@ const hasPercentNumberText = (value = "") =>
   /\d+(?:\.\d+)?\s*%/.test(String(value));
 
 const getGenerationProgressDisplayText = (generationProgress) => {
-  const progressText = String(
-    generationProgress?.progress_text ?? "",
-  ).trim();
+  const progressText = String(generationProgress?.progress_text ?? "").trim();
   if (progressText && !hasPercentNumberText(progressText)) {
     return progressText;
   }
@@ -2474,7 +2554,9 @@ function App() {
   const [entryError, setEntryError] = useState("");
   const [pendingNewProjectId, setPendingNewProjectId] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectStartDate, setNewProjectStartDate] = useState(getTodayIsoDate());
+  const [newProjectStartDate, setNewProjectStartDate] = useState(
+    getTodayIsoDate(),
+  );
   const [newProjectDescription, setNewProjectDescription] = useState("");
   const [newProjectDocumentAuthor, setNewProjectDocumentAuthor] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
@@ -2488,8 +2570,10 @@ function App() {
   const [selectedDocumentHubNodeId, setSelectedDocumentHubNodeId] = useState(
     DOCUMENT_HUB_DEFAULT_NODE_ID,
   );
-  const [isDocumentGenerationModalOpen, setIsDocumentGenerationModalOpen] =
-    useState(false);
+  const [
+    isDocumentGenerationModalOpen,
+    setIsDocumentGenerationModalOpen,
+  ] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsStartDate, setSettingsStartDate] = useState("");
@@ -2519,7 +2603,10 @@ function App() {
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
-  const [fileBuckets, setFileBuckets] = useState({ uploaded: [], generated: [] });
+  const [fileBuckets, setFileBuckets] = useState({
+    uploaded: [],
+    generated: [],
+  });
   const [activeFileManagerTab, setActiveFileManagerTab] = useState(
     FILE_MANAGER_TABS.UPLOADED,
   );
@@ -2538,13 +2625,16 @@ function App() {
   const [scheduleMonth, setScheduleMonth] = useState(() =>
     getMonthKeyFromIsoDate(getTodayIsoDate()),
   );
-  const [selectedScheduleDate, setSelectedScheduleDate] = useState(getTodayIsoDate());
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState(
+    getTodayIsoDate(),
+  );
   const [calendarViewMode, setCalendarViewMode] = useState(
     CALENDAR_VIEW_MODES.MONTH,
   );
   const [isScheduleDayModalOpen, setIsScheduleDayModalOpen] = useState(false);
-  const [isScheduleRegistrationOpen, setIsScheduleRegistrationOpen] =
-    useState(false);
+  const [isScheduleRegistrationOpen, setIsScheduleRegistrationOpen] = useState(
+    false,
+  );
   const [scheduleRegistrationMode, setScheduleRegistrationMode] = useState(
     SCHEDULE_REGISTRATION_MODES.MANUAL,
   );
@@ -2562,7 +2652,8 @@ function App() {
   const [todoSourceFilter, setTodoSourceFilter] = useState("");
   const [todoTitleFilter, setTodoTitleFilter] = useState("");
   const [todoAssigneeFilter, setTodoAssigneeFilter] = useState("");
-  const [todoDateFilter, setTodoDateFilter] = useState("");
+  const [todoStartDateFilter, setTodoStartDateFilter] = useState("");
+  const [todoEndDateFilter, setTodoEndDateFilter] = useState("");
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
   const [todoError, setTodoError] = useState("");
   const [todoActionError, setTodoActionError] = useState("");
@@ -2589,8 +2680,10 @@ function App() {
   const [todoImportDocumentId, setTodoImportDocumentId] = useState("");
   const [todoImportFile, setTodoImportFile] = useState(null);
   const [todoImportStatusMessage, setTodoImportStatusMessage] = useState("");
-  const [isUploadingTodoImportDocument, setIsUploadingTodoImportDocument] =
-    useState(false);
+  const [
+    isUploadingTodoImportDocument,
+    setIsUploadingTodoImportDocument,
+  ] = useState(false);
   const [isPreviewingTodoImport, setIsPreviewingTodoImport] = useState(false);
   const [isCommittingTodoImport, setIsCommittingTodoImport] = useState(false);
   const [todoImportPreview, setTodoImportPreview] = useState(null);
@@ -2649,9 +2742,9 @@ function App() {
   );
   const selectedScheduleTodos = useMemo(
     () =>
-      todoItems.filter((todo) =>
-        isDateInTodoScheduleRange(todo, selectedScheduleDate),
-      ).sort(compareTodosForSchedule),
+      todoItems
+        .filter((todo) => isDateInTodoScheduleRange(todo, selectedScheduleDate))
+        .sort(compareTodosForSchedule),
     [selectedScheduleDate, todoItems],
   );
 
@@ -2770,7 +2863,10 @@ function App() {
     setProgressMinimizedState(false);
   };
 
-  const completeGenerationProgress = (statusResponse = null, requestType = "") => {
+  const completeGenerationProgress = (
+    statusResponse = null,
+    requestType = "",
+  ) => {
     clearGenerationPolling();
     const sourceProgress = statusResponse
       ? buildGenerationProgressFromStatus(statusResponse, "COMPLETED", 100)
@@ -2819,7 +2915,9 @@ function App() {
         sourceProgress?.progress ?? GENERATION_PROGRESS_INITIAL_VALUE,
       );
     } else if (sourceProgress) {
-      progressStepIndexRef.current = getGenerationStepIndex(sourceProgress.progress);
+      progressStepIndexRef.current = getGenerationStepIndex(
+        sourceProgress.progress,
+      );
     }
     const failedProgress = buildGenerationFailureProgress(
       progressStepIndexRef.current,
@@ -2953,10 +3051,13 @@ function App() {
 
     const pollingActionId = getAssistantActionId(assistantMessage);
     if (!pollingActionId) {
-      const failedProgress = failGenerationProgress({
-        status: GENERATION_ACTION_STATUS.FAILED,
-        message: "문서 생성 진행 상태를 확인할 작업 ID가 없습니다.",
-      }, requestType);
+      const failedProgress = failGenerationProgress(
+        {
+          status: GENERATION_ACTION_STATUS.FAILED,
+          message: "문서 생성 진행 상태를 확인할 작업 ID가 없습니다.",
+        },
+        requestType,
+      );
       return {
         ...assistantMessage,
         content:
@@ -2996,7 +3097,10 @@ function App() {
       statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
       statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
     ) {
-      const failedProgress = failGenerationProgress(statusResponse, requestType);
+      const failedProgress = failGenerationProgress(
+        statusResponse,
+        requestType,
+      );
       return {
         ...assistantMessage,
         content:
@@ -3016,7 +3120,10 @@ function App() {
       };
     }
 
-    const completedProgress = completeGenerationProgress(statusResponse, requestType);
+    const completedProgress = completeGenerationProgress(
+      statusResponse,
+      requestType,
+    );
     return {
       ...assistantMessage,
       content: statusResponse.message || assistantMessage.content,
@@ -3239,9 +3346,7 @@ function App() {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const submittedProjectName = String(formData.get("projectName") ?? "");
-    const submittedProjectStartDate = String(
-      formData.get("start_date") ?? "",
-    );
+    const submittedProjectStartDate = String(formData.get("start_date") ?? "");
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
     );
@@ -3644,7 +3749,8 @@ function App() {
     setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
-    setTodoDateFilter("");
+    setTodoStartDateFilter("");
+    setTodoEndDateFilter("");
     if (!project?.projectId) {
       setTodoItems([]);
       setTodoError("프로젝트를 먼저 선택해 주세요.");
@@ -3667,7 +3773,8 @@ function App() {
     setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
-    setTodoDateFilter("");
+    setTodoStartDateFilter("");
+    setTodoEndDateFilter("");
     setIsTodoImportOpen(false);
     setTodoImportPreview(null);
     setSelectedTodoImportIds([]);
@@ -3688,7 +3795,8 @@ function App() {
     setTodoSourceFilter("");
     setTodoTitleFilter("");
     setTodoAssigneeFilter("");
-    setTodoDateFilter("");
+    setTodoStartDateFilter("");
+    setTodoEndDateFilter("");
     setSelectedTodoIds([]);
   };
 
@@ -3796,9 +3904,7 @@ function App() {
     setTodoEditDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
-      ...(field === "dueDate"
-        ? { startDate: value, endDate: value }
-        : {}),
+      ...(field === "dueDate" ? { startDate: value, endDate: value } : {}),
     }));
   };
 
@@ -3817,7 +3923,7 @@ function App() {
       todoEditDraft.endDate || todoEditDraft.dueDate || todoEditDraft.startDate,
       { defaultToday: false },
     );
-    if ((nextStartDate && nextEndDate && nextEndDate < nextStartDate)) {
+    if (nextStartDate && nextEndDate && nextEndDate < nextStartDate) {
       setTodoActionError("종료일은 시작일보다 빠를 수 없습니다.");
       return;
     }
@@ -3895,7 +4001,9 @@ function App() {
 
     const targetTodoIds = getSelectedVisibleTodoIds();
     if (!targetTodoIds.length) return;
-    if (!window.confirm(`선택한 ${targetTodoIds.length}개의 할일을 삭제할까요?`)) {
+    if (
+      !window.confirm(`선택한 ${targetTodoIds.length}개의 할일을 삭제할까요?`)
+    ) {
       return;
     }
 
@@ -3991,15 +4099,18 @@ function App() {
   };
 
   const handleTodoImportDocumentTypeChange = (value) => {
-    const nextType =
-      TODO_IMPORT_DOCUMENT_TYPES.some((option) => option.value === value)
-        ? value
-        : DOCUMENT_TYPES.MEETING_NOTES;
+    const nextType = TODO_IMPORT_DOCUMENT_TYPES.some(
+      (option) => option.value === value,
+    )
+      ? value
+      : DOCUMENT_TYPES.MEETING_NOTES;
     const nextDocument = getTodoImportDocuments(fileBuckets).find(
       (document) => document.documentType === nextType,
     );
     setTodoImportDocumentType(nextType);
-    setTodoImportDocumentId(todoImportUseExisting ? nextDocument?.documentId || "" : "");
+    setTodoImportDocumentId(
+      todoImportUseExisting ? nextDocument?.documentId || "" : "",
+    );
     setTodoImportFile(null);
     setTodoImportStatusMessage("");
     setTodoImportPreview(null);
@@ -4101,7 +4212,9 @@ function App() {
       await loadUploadedFiles(project);
       setTodoImportDocumentId(uploadedDocumentId);
       setTodoImportFile(null);
-      setTodoImportStatusMessage("업로드한 문서에서 할일 후보를 불러오는 중입니다.");
+      setTodoImportStatusMessage(
+        "업로드한 문서에서 할일 후보를 불러오는 중입니다.",
+      );
       await previewTodoImport({
         documentId: uploadedDocumentId,
         documentType: todoImportDocumentType,
@@ -4111,7 +4224,9 @@ function App() {
       setSelectedTodoImportIds([]);
       setTodoImportStatusMessage("");
       setTodoActionError(
-        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
+        error instanceof Error
+          ? error.message
+          : "문서를 업로드하지 못했습니다.",
       );
     } finally {
       setIsUploadingTodoImportDocument(false);
@@ -4132,7 +4247,8 @@ function App() {
     const selectedDocument = todoImportDocuments.find(
       (document) => document.documentId === todoImportDocumentId,
     );
-    const documentType = selectedDocument?.documentType || todoImportDocumentType;
+    const documentType =
+      selectedDocument?.documentType || todoImportDocumentType;
 
     await previewTodoImport({
       documentId: todoImportDocumentId,
@@ -4221,7 +4337,9 @@ function App() {
   };
 
   const handleScheduleDateSelect = (dateText) => {
-    const normalizedDate = normalizeTodoDueDate(dateText, { defaultToday: true });
+    const normalizedDate = normalizeTodoDueDate(dateText, {
+      defaultToday: true,
+    });
     setSelectedScheduleDate(normalizedDate);
     setScheduleMonth(getMonthKeyFromIsoDate(normalizedDate));
     setEditingTodoId("");
@@ -4230,7 +4348,9 @@ function App() {
   };
 
   const handleScheduleMonthChange = (offset) => {
-    setScheduleMonth((currentMonth) => addMonthsToMonthKey(currentMonth, offset));
+    setScheduleMonth((currentMonth) =>
+      addMonthsToMonthKey(currentMonth, offset),
+    );
   };
 
   const handleSchedulePeriodChange = (offset) => {
@@ -4278,10 +4398,7 @@ function App() {
     setScheduleRegistrationMode(SCHEDULE_REGISTRATION_MODES.MANUAL);
     setTodoImportUseExisting(true);
     resetScheduleRegistrationImportState();
-    if (
-      !todoImportDocumentId &&
-      filteredTodoImportDocuments[0]?.documentId
-    ) {
+    if (!todoImportDocumentId && filteredTodoImportDocuments[0]?.documentId) {
       setTodoImportDocumentId(filteredTodoImportDocuments[0].documentId);
     }
     if (project?.projectId) {
@@ -4322,7 +4439,9 @@ function App() {
 
     const title = scheduleDraft.title.trim();
     const startDate = normalizeTodoDueDate(scheduleDraft.startDate);
-    const endDate = normalizeTodoDueDate(scheduleDraft.endDate || scheduleDraft.startDate);
+    const endDate = normalizeTodoDueDate(
+      scheduleDraft.endDate || scheduleDraft.startDate,
+    );
     if (!title) {
       setTodoActionError("할일명을 입력해 주세요.");
       return;
@@ -4407,7 +4526,10 @@ function App() {
       : uploadFiles.slice(0, 1);
     const uploadLabel =
       filesToUpload.length > 1
-        ? `${uploadRequest.displayLabel || getDocumentDisplayLabel(requestedDocumentType)} ${filesToUpload.length}개`
+        ? `${uploadRequest.displayLabel ||
+            getDocumentDisplayLabel(requestedDocumentType)} ${
+            filesToUpload.length
+          }개`
         : filesToUpload[0].name;
     setIsUploadingDocument(true);
     setDocumentError("");
@@ -4434,7 +4556,9 @@ function App() {
         const uploadedDocumentId =
           document.document_id ?? document.documentId ?? "";
         if (!uploadedDocumentId) {
-          throw new Error(`${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`);
+          throw new Error(
+            `${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`,
+          );
         }
         uploadedDocuments.push({
           ...toAttachmentDocument(document),
@@ -4456,7 +4580,9 @@ function App() {
       return uploadedDocuments;
     } catch (error) {
       setDocumentError(
-        error instanceof Error ? error.message : "문서를 업로드하지 못했습니다.",
+        error instanceof Error
+          ? error.message
+          : "문서를 업로드하지 못했습니다.",
       );
       setDocumentStatusMessage("");
       return [];
@@ -4482,13 +4608,15 @@ function App() {
     const request = selectedDocumentHubRequest;
     const requestType = request.documentConfig?.requestType || "";
     const selectedDocument =
-      request.documents.find((document) => document.documentId === documentId) ??
+      request.documents.find(
+        (document) => document.documentId === documentId,
+      ) ??
       request.documents.find(
         (document) => document.documentId === request.defaultDocumentId,
       ) ??
       request.documents[0];
-    const selectedOptionalDocuments = request.optionalDocuments.filter((document) =>
-      optionalDocumentIds.includes(document.documentId),
+    const selectedOptionalDocuments = request.optionalDocuments.filter(
+      (document) => optionalDocumentIds.includes(document.documentId),
     );
     const selectedDocuments = uniqueDocumentsById([
       selectedDocument,
@@ -4503,7 +4631,8 @@ function App() {
 
     if (!selectedDocument?.documentId) {
       setDocumentError(
-        `${request.documentConfig?.primarySource?.label || "기준 문서"}를 선택하거나 업로드해 주세요.`,
+        `${request.documentConfig?.primarySource?.label ||
+          "기준 문서"}를 선택하거나 업로드해 주세요.`,
       );
       return;
     }
@@ -4684,7 +4813,9 @@ function App() {
   }) => {
     const includeDocumentIdAliases =
       requestType === GENERATION_REQUEST_TYPES.REQUIREMENT_SPEC;
-    const shouldTrackGeneration = Boolean(getRequiredDocumentConfig(requestType));
+    const shouldTrackGeneration = Boolean(
+      getRequiredDocumentConfig(requestType),
+    );
     if (shouldTrackGeneration) {
       startGenerationProgress(requestType);
     }
@@ -5065,7 +5196,10 @@ function App() {
         : uploadFiles.slice(0, 1);
       const uploadLabel =
         filesToUpload.length > 1
-          ? `${uploadRequest.displayLabel || getDocumentDisplayLabel(requestedDocumentType)} ${filesToUpload.length}개`
+          ? `${uploadRequest.displayLabel ||
+              getDocumentDisplayLabel(requestedDocumentType)} ${
+              filesToUpload.length
+            }개`
           : filesToUpload[0].name;
       const uploadedDocuments = [];
       setDocumentStatusMessage(`${uploadLabel} 업로드 중입니다.`);
@@ -5088,7 +5222,9 @@ function App() {
         const document = response?.document;
 
         if (!document?.document_id) {
-          throw new Error(`${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`);
+          throw new Error(
+            `${file.name}: 업로드된 문서 정보를 확인하지 못했습니다.`,
+          );
         }
 
         uploadedDocuments.push({
@@ -5114,7 +5250,9 @@ function App() {
         const targetConversationId =
           message.metadata?.conversationId || activeConversationId;
         if (!targetConversationId) {
-          throw new Error("업로드한 문서를 반영할 대화 정보를 확인하지 못했습니다.");
+          throw new Error(
+            "업로드한 문서를 반영할 대화 정보를 확인하지 못했습니다.",
+          );
         }
         const result = await updateConversationMessage(
           project.projectId,
@@ -5123,7 +5261,9 @@ function App() {
           (currentMessage) => {
             const currentMetadata = currentMessage.metadata ?? {};
             const currentChoiceRequest =
-              currentMetadata.documentChoiceRequest ?? documentChoiceRequest ?? {};
+              currentMetadata.documentChoiceRequest ??
+              documentChoiceRequest ??
+              {};
             const nextChoiceRequest = {
               ...currentChoiceRequest,
               outputFormat:
@@ -5139,18 +5279,17 @@ function App() {
               )
                 ? uploadRequest.selectedOptionalDocumentIds
                 : currentDefaultOptionalIds;
-              const currentSelectedOptionalDocuments =
-                currentOptionalDocuments.filter((item) =>
+              const currentSelectedOptionalDocuments = currentOptionalDocuments.filter(
+                (item) =>
                   selectedOptionalIdsFromRequest.includes(item.documentId),
-                );
+              );
               nextChoiceRequest.optionalDocuments = uniqueDocumentsById([
                 ...uploadedDocuments,
                 ...currentOptionalDocuments,
               ]);
-              nextChoiceRequest.defaultOptionalDocumentIds = uniqueDocumentsById([
-                ...uploadedDocuments,
-                ...currentSelectedOptionalDocuments,
-              ])
+              nextChoiceRequest.defaultOptionalDocumentIds = uniqueDocumentsById(
+                [...uploadedDocuments, ...currentSelectedOptionalDocuments],
+              )
                 .map((item) => item.documentId)
                 .filter(Boolean);
             } else {
@@ -5232,7 +5371,9 @@ function App() {
             : {
                 output_format:
                   uploadRequest.outputFormat ||
-                  getDefaultOutputFormat(getRelation(uploadRequest.requestType)),
+                  getDefaultOutputFormat(
+                    getRelation(uploadRequest.requestType),
+                  ),
                 document_generation_mode: "upload",
               },
         });
@@ -5288,7 +5429,9 @@ function App() {
         getDefaultOutputFormat(getRelation(requestType));
 
     if (!targetConversationId) {
-      setConversationActionError("문서를 선택할 대화 정보를 확인하지 못했습니다.");
+      setConversationActionError(
+        "문서를 선택할 대화 정보를 확인하지 못했습니다.",
+      );
       return;
     }
 
@@ -5318,7 +5461,8 @@ function App() {
     setConversationActionError("");
     setDocumentError("");
     setDocumentStatusMessage(
-      choiceRequest.documentConfig?.startMessage || DOCUMENT_GENERATION_COPY.start,
+      choiceRequest.documentConfig?.startMessage ||
+        DOCUMENT_GENERATION_COPY.start,
     );
 
     try {
@@ -5427,9 +5571,12 @@ function App() {
       const backendConversationId =
         assistantMessage.metadata?.conversationId ?? targetConversationId;
       if (isConfirmGenerationAction) {
-        const pollingActionId = getAssistantActionId(assistantMessage) || actionId;
+        const pollingActionId =
+          getAssistantActionId(assistantMessage) || actionId;
         setGenerationJob((currentJob) =>
-          currentJob ? { ...currentJob, actionId: pollingActionId } : currentJob,
+          currentJob
+            ? { ...currentJob, actionId: pollingActionId }
+            : currentJob,
         );
         if (assistantMessage.metadata?.state === CHAT_STATES.FAILED) {
           const failedProgress = failGenerationProgress();
@@ -5473,7 +5620,9 @@ function App() {
               },
             };
           } else {
-            const completedProgress = completeGenerationProgress(statusResponse);
+            const completedProgress = completeGenerationProgress(
+              statusResponse,
+            );
             assistantMessage = {
               ...assistantMessage,
               content: statusResponse.message || assistantMessage.content,
@@ -5508,7 +5657,10 @@ function App() {
         await loadUploadedFiles(project);
       }
     } catch (error) {
-      if (isConfirmGenerationAction && isGenerationPollingCancelledError(error)) {
+      if (
+        isConfirmGenerationAction &&
+        isGenerationPollingCancelledError(error)
+      ) {
         return;
       }
       reportUiError("handleSuggestedActionClick", error, {
@@ -5616,7 +5768,10 @@ function App() {
     }
 
     const latestArtifact = generationJob?.targetArtifactType
-      ? getLatestGeneratedArtifact(fileBuckets, generationJob.targetArtifactType)
+      ? getLatestGeneratedArtifact(
+          fileBuckets,
+          generationJob.targetArtifactType,
+        )
       : null;
     if (latestArtifact?.fileId) {
       await handleDownloadDocumentNodeArtifact({ latestArtifact });
@@ -5759,9 +5914,7 @@ function App() {
     if (!project) return;
     const formData = new FormData(event.currentTarget);
     const submittedProjectName = String(formData.get("projectName") ?? "");
-    const submittedProjectStartDate = String(
-      formData.get("start_date") ?? "",
-    );
+    const submittedProjectStartDate = String(formData.get("start_date") ?? "");
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
     );
@@ -6064,7 +6217,8 @@ function App() {
           sourceFilter={todoSourceFilter}
           titleFilter={todoTitleFilter}
           assigneeFilter={todoAssigneeFilter}
-          dateFilter={todoDateFilter}
+          startDateFilter={todoStartDateFilter}
+          endDateFilter={todoEndDateFilter}
           isLoading={isLoadingTodos}
           error={todoError}
           actionError={todoActionError}
@@ -6092,7 +6246,8 @@ function App() {
           onSourceFilterChange={handleTodoSourceFilterChange}
           onTitleFilterChange={setTodoTitleFilter}
           onAssigneeFilterChange={setTodoAssigneeFilter}
-          onDateFilterChange={setTodoDateFilter}
+          onStartDateFilterChange={setTodoStartDateFilter}
+          onEndDateFilterChange={setTodoEndDateFilter}
           onFilterReset={handleTodoFilterReset}
           onStatusChange={handleTodoStatusChange}
           onToggleTodoSelection={handleToggleTodoSelection}
@@ -6223,7 +6378,9 @@ function WorkspaceTabs({ activeTab, onTabChange }) {
       <button
         className={activeTab === WORKSPACE_TABS.DOCUMENTS ? "is-active" : ""}
         type="button"
-        aria-current={activeTab === WORKSPACE_TABS.DOCUMENTS ? "page" : undefined}
+        aria-current={
+          activeTab === WORKSPACE_TABS.DOCUMENTS ? "page" : undefined
+        }
         onClick={() => onTabChange(WORKSPACE_TABS.DOCUMENTS)}
       >
         <FileText size={16} aria-hidden="true" />
@@ -6232,7 +6389,9 @@ function WorkspaceTabs({ activeTab, onTabChange }) {
       <button
         className={activeTab === WORKSPACE_TABS.SCHEDULE ? "is-active" : ""}
         type="button"
-        aria-current={activeTab === WORKSPACE_TABS.SCHEDULE ? "page" : undefined}
+        aria-current={
+          activeTab === WORKSPACE_TABS.SCHEDULE ? "page" : undefined
+        }
         onClick={() => onTabChange(WORKSPACE_TABS.SCHEDULE)}
       >
         <CalendarDays size={16} aria-hidden="true" />
@@ -6259,7 +6418,8 @@ const getTodoStatusTone = (status = "") => {
 };
 
 const getTodoStatusLabel = (status = "") =>
-  TODO_STATUS_OPTIONS.find((option) => option.value === status)?.label || "진행전";
+  TODO_STATUS_OPTIONS.find((option) => option.value === status)?.label ||
+  "진행전";
 
 function TodoSourceBadge({ todo }) {
   return (
@@ -6335,7 +6495,11 @@ function ScheduleStatusPicker({
         <span aria-hidden="true">▾</span>
       </button>
       {isOpen && (
-        <div className="schedule-status-menu" role="listbox" aria-label={ariaLabel}>
+        <div
+          className="schedule-status-menu"
+          role="listbox"
+          aria-label={ariaLabel}
+        >
           {TODO_STATUS_OPTIONS.map((option) => (
             <button
               className={option.value === currentStatus ? "is-selected" : ""}
@@ -6391,7 +6555,11 @@ function ProjectScheduleCalendar({
   const navigationLabelPrefix = isWeekView ? "주" : "달";
 
   return (
-    <div className="document-hub-panel schedule-panel" role="main" aria-label="프로젝트 일정">
+    <div
+      className="document-hub-panel schedule-panel"
+      role="main"
+      aria-label="프로젝트 일정"
+    >
       <header className="document-hub-header">
         <button
           className="sidebar-menu-button"
@@ -6407,17 +6575,30 @@ function ProjectScheduleCalendar({
         </div>
         <div className="document-hub-title">
           <strong>프로젝트 일정</strong>
-          <span>{project.projectName}의 할일과 주요 일정을 월간 캘린더로 확인하세요.</span>
+          <span>
+            {project.projectName}의 할일과 주요 일정을 월간 캘린더로 확인하세요.
+          </span>
         </div>
       </header>
       <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
 
       <div className="schedule-scroll">
-        <section className="schedule-month-header" aria-label="캘린더 일정 도구">
+        <section
+          className="schedule-month-header"
+          aria-label="캘린더 일정 도구"
+        >
           <div className="schedule-month-header__left">
-            <div className="schedule-view-toggle" role="group" aria-label="캘린더 보기 방식">
+            <div
+              className="schedule-view-toggle"
+              role="group"
+              aria-label="캘린더 보기 방식"
+            >
               <button
-                className={calendarViewMode === CALENDAR_VIEW_MODES.MONTH ? "is-active" : ""}
+                className={
+                  calendarViewMode === CALENDAR_VIEW_MODES.MONTH
+                    ? "is-active"
+                    : ""
+                }
                 type="button"
                 aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.MONTH}
                 onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.MONTH)}
@@ -6425,7 +6606,11 @@ function ProjectScheduleCalendar({
                 월간
               </button>
               <button
-                className={calendarViewMode === CALENDAR_VIEW_MODES.WEEK ? "is-active" : ""}
+                className={
+                  calendarViewMode === CALENDAR_VIEW_MODES.WEEK
+                    ? "is-active"
+                    : ""
+                }
                 type="button"
                 aria-pressed={calendarViewMode === CALENDAR_VIEW_MODES.WEEK}
                 onClick={() => onViewModeChange(CALENDAR_VIEW_MODES.WEEK)}
@@ -6448,7 +6633,9 @@ function ProjectScheduleCalendar({
         </section>
 
         {error && <p className="form-error">{error}</p>}
-        {isLoading && <p className="schedule-loading">일정을 불러오는 중입니다.</p>}
+        {isLoading && (
+          <p className="schedule-loading">일정을 불러오는 중입니다.</p>
+        )}
 
         <div className="schedule-calendar-shell">
           <button
@@ -6460,7 +6647,9 @@ function ProjectScheduleCalendar({
             <ChevronLeft size={30} aria-hidden="true" />
           </button>
           <section
-            className={`schedule-calendar ${isWeekView ? "is-week-view" : "is-month-view"}`}
+            className={`schedule-calendar ${
+              isWeekView ? "is-week-view" : "is-month-view"
+            }`}
             aria-label={`${calendarTitle} 캘린더`}
           >
             <div className="schedule-calendar__weekdays">
@@ -6531,7 +6720,11 @@ function TodayTasksView({
   const activeCount = todayTasks.length - doneCount;
 
   return (
-    <div className="document-hub-panel today-tasks-panel" role="main" aria-label="오늘의 할일">
+    <div
+      className="document-hub-panel today-tasks-panel"
+      role="main"
+      aria-label="오늘의 할일"
+    >
       <header className="document-hub-header">
         <button
           className="sidebar-menu-button"
@@ -6547,7 +6740,9 @@ function TodayTasksView({
         </div>
         <div className="document-hub-title">
           <strong>오늘의 할일</strong>
-          <span>{project.projectName}의 오늘 진행할 할일을 카드로 확인하세요.</span>
+          <span>
+            {project.projectName}의 오늘 진행할 할일을 카드로 확인하세요.
+          </span>
         </div>
       </header>
       <WorkspaceTabs activeTab={activeTab} onTabChange={onTabChange} />
@@ -6562,7 +6757,10 @@ function TodayTasksView({
               {doneCount ? ` · 완료 ${doneCount}건` : ""}
             </p>
           </div>
-          <div className="today-tasks-counter" aria-label={`진행 대상 ${activeCount}건`}>
+          <div
+            className="today-tasks-counter"
+            aria-label={`진행 대상 ${activeCount}건`}
+          >
             <strong>{activeCount}</strong>
             <span>진행 대상</span>
           </div>
@@ -6571,7 +6769,9 @@ function TodayTasksView({
         {(error || actionError) && (
           <p className="form-error">{actionError || error}</p>
         )}
-        {isLoading && <p className="schedule-loading">오늘의 할일을 불러오는 중입니다.</p>}
+        {isLoading && (
+          <p className="schedule-loading">오늘의 할일을 불러오는 중입니다.</p>
+        )}
 
         {todayTasks.length ? (
           <ul className="today-task-list" aria-label="오늘의 할일 목록">
@@ -6610,7 +6810,9 @@ function TodayTasksView({
                           <input
                             type="text"
                             value={editDraft.title}
-                            onChange={(event) => onEditDraftChange("title", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange("title", event.target.value)
+                            }
                           />
                         </label>
                         <label>
@@ -6629,7 +6831,10 @@ function TodayTasksView({
                             type="date"
                             value={editDraft.startDate}
                             onInput={(event) =>
-                              onEditDraftChange("startDate", event.currentTarget.value)
+                              onEditDraftChange(
+                                "startDate",
+                                event.currentTarget.value,
+                              )
                             }
                             onChange={(event) =>
                               onEditDraftChange("startDate", event.target.value)
@@ -6642,7 +6847,10 @@ function TodayTasksView({
                             type="date"
                             value={editDraft.endDate}
                             onInput={(event) =>
-                              onEditDraftChange("endDate", event.currentTarget.value)
+                              onEditDraftChange(
+                                "endDate",
+                                event.currentTarget.value,
+                              )
                             }
                             onChange={(event) =>
                               onEditDraftChange("endDate", event.target.value)
@@ -6653,7 +6861,9 @@ function TodayTasksView({
                           진행상태
                           <select
                             value={editDraft.status}
-                            onChange={(event) => onEditDraftChange("status", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange("status", event.target.value)
+                            }
                           >
                             {TODO_STATUS_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -6668,12 +6878,19 @@ function TodayTasksView({
                             rows={3}
                             value={editDraft.description}
                             onChange={(event) =>
-                              onEditDraftChange("description", event.target.value)
+                              onEditDraftChange(
+                                "description",
+                                event.target.value,
+                              )
                             }
                           />
                         </label>
                         <div className="schedule-row-actions">
-                          <button className="secondary-button" type="button" onClick={onCancelEdit}>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={onCancelEdit}
+                          >
                             취소
                           </button>
                           <button
@@ -6700,7 +6917,9 @@ function TodayTasksView({
                           </div>
                           <div>
                             <dt>출처</dt>
-                            <dd><TodoSourceBadge todo={todo} /></dd>
+                            <dd>
+                              <TodoSourceBadge todo={todo} />
+                            </dd>
                           </div>
                         </dl>
                         <p>{todo.description || "상세내용이 없습니다."}</p>
@@ -6736,10 +6955,16 @@ function TodayTasksView({
           </ul>
         ) : (
           !isLoading && (
-            <section className="today-tasks-empty" aria-label="오늘의 할일 없음">
+            <section
+              className="today-tasks-empty"
+              aria-label="오늘의 할일 없음"
+            >
               <Check size={22} aria-hidden="true" />
               <strong>오늘 진행할 할일이 없습니다.</strong>
-              <p>프로젝트 일정에서 일정을 등록하거나 문서에서 할일을 불러올 수 있습니다.</p>
+              <p>
+                프로젝트 일정에서 일정을 등록하거나 문서에서 할일을 불러올 수
+                있습니다.
+              </p>
             </section>
           )
         )}
@@ -6797,14 +7022,15 @@ function ScheduleWeekRow({
             ]
               .filter(Boolean)
               .join(" ")}
-            key={`${segment.todo.todoId || segment.todo.title}-${segment.segmentStart}`}
+            key={`${segment.todo.todoId || segment.todo.title}-${
+              segment.segmentStart
+            }`}
             style={{
               gridColumn: `${segment.startCol} / ${segment.endCol + 1}`,
               gridRow: segment.lane + 1,
             }}
-            title={`${formatTodoDeadlineWithDday(segment.todo)} · ${
-              segment.todo.title || "제목 없음"
-            }`}
+            title={`${formatTodoDeadlineWithDday(segment.todo)} · ${segment.todo
+              .title || "제목 없음"}`}
             type="button"
             onClick={() => onDateSelect(segment.segmentStart)}
           >
@@ -6863,7 +7089,12 @@ function ScheduleDayModal({
             <span>프로젝트 일정</span>
             <h2 id="schedule-day-title">{formatDateLabel(dateText)} 일정</h2>
           </div>
-          <button className="icon-button" type="button" aria-label="일정 팝업 닫기" onClick={onClose}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="일정 팝업 닫기"
+            onClick={onClose}
+          >
             <X size={18} aria-hidden="true" />
           </button>
         </header>
@@ -6876,7 +7107,9 @@ function ScheduleDayModal({
                 const isSaving = savingTodoId === todo.todoId;
                 return (
                   <li
-                    className={`schedule-day-item ${getTodoScheduleClassNames(todo)}`}
+                    className={`schedule-day-item ${getTodoScheduleClassNames(
+                      todo,
+                    )}`}
                     key={todo.todoId || todo.title}
                   >
                     <div className="schedule-day-item__main">
@@ -6905,7 +7138,9 @@ function ScheduleDayModal({
                             </div>
                             <div>
                               <dt>출처</dt>
-                              <dd><TodoSourceBadge todo={todo} /></dd>
+                              <dd>
+                                <TodoSourceBadge todo={todo} />
+                              </dd>
                             </div>
                           </dl>
                           {todo.description && <p>{todo.description}</p>}
@@ -6919,7 +7154,9 @@ function ScheduleDayModal({
                           <input
                             type="text"
                             value={editDraft.title}
-                            onChange={(event) => onEditDraftChange("title", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange("title", event.target.value)
+                            }
                           />
                         </label>
                         <label>
@@ -6927,7 +7164,9 @@ function ScheduleDayModal({
                           <input
                             type="text"
                             value={editDraft.assignee}
-                            onChange={(event) => onEditDraftChange("assignee", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange("assignee", event.target.value)
+                            }
                           />
                         </label>
                         <label>
@@ -6935,8 +7174,15 @@ function ScheduleDayModal({
                           <input
                             type="date"
                             value={editDraft.startDate}
-                            onInput={(event) => onEditDraftChange("startDate", event.currentTarget.value)}
-                            onChange={(event) => onEditDraftChange("startDate", event.target.value)}
+                            onInput={(event) =>
+                              onEditDraftChange(
+                                "startDate",
+                                event.currentTarget.value,
+                              )
+                            }
+                            onChange={(event) =>
+                              onEditDraftChange("startDate", event.target.value)
+                            }
                           />
                         </label>
                         <label>
@@ -6944,15 +7190,24 @@ function ScheduleDayModal({
                           <input
                             type="date"
                             value={editDraft.endDate}
-                            onInput={(event) => onEditDraftChange("endDate", event.currentTarget.value)}
-                            onChange={(event) => onEditDraftChange("endDate", event.target.value)}
+                            onInput={(event) =>
+                              onEditDraftChange(
+                                "endDate",
+                                event.currentTarget.value,
+                              )
+                            }
+                            onChange={(event) =>
+                              onEditDraftChange("endDate", event.target.value)
+                            }
                           />
                         </label>
                         <label>
                           진행상태
                           <select
                             value={editDraft.status}
-                            onChange={(event) => onEditDraftChange("status", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange("status", event.target.value)
+                            }
                           >
                             {TODO_STATUS_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -6966,11 +7221,20 @@ function ScheduleDayModal({
                           <textarea
                             rows={3}
                             value={editDraft.description}
-                            onChange={(event) => onEditDraftChange("description", event.target.value)}
+                            onChange={(event) =>
+                              onEditDraftChange(
+                                "description",
+                                event.target.value,
+                              )
+                            }
                           />
                         </label>
                         <div className="schedule-row-actions">
-                          <button className="secondary-button" type="button" onClick={onCancelEdit}>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={onCancelEdit}
+                          >
                             취소
                           </button>
                           <button
@@ -7083,7 +7347,12 @@ function ScheduleRegistrationModal({
             <h2 id="schedule-registration-title">일정 등록</h2>
             <p>직접 입력하거나 문서에서 할일을 불러와 등록합니다.</p>
           </div>
-          <button className="icon-button" type="button" aria-label="일정 등록 닫기" onClick={onClose}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="일정 등록 닫기"
+            onClick={onClose}
+          >
             <X size={18} aria-hidden="true" />
           </button>
         </header>
@@ -7123,7 +7392,9 @@ function ScheduleRegistrationModal({
                 <input
                   type="text"
                   value={draft.title}
-                  onChange={(event) => onDraftChange("title", event.target.value)}
+                  onChange={(event) =>
+                    onDraftChange("title", event.target.value)
+                  }
                   placeholder="예: 요구사항 누락 항목 검토"
                 />
               </label>
@@ -7132,7 +7403,9 @@ function ScheduleRegistrationModal({
                 <input
                   type="text"
                   value={draft.assignee}
-                  onChange={(event) => onDraftChange("assignee", event.target.value)}
+                  onChange={(event) =>
+                    onDraftChange("assignee", event.target.value)
+                  }
                   placeholder="담당자"
                 />
               </label>
@@ -7141,8 +7414,12 @@ function ScheduleRegistrationModal({
                 <input
                   type="date"
                   value={draft.startDate}
-                  onInput={(event) => onDraftChange("startDate", event.currentTarget.value)}
-                  onChange={(event) => onDraftChange("startDate", event.target.value)}
+                  onInput={(event) =>
+                    onDraftChange("startDate", event.currentTarget.value)
+                  }
+                  onChange={(event) =>
+                    onDraftChange("startDate", event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -7150,15 +7427,21 @@ function ScheduleRegistrationModal({
                 <input
                   type="date"
                   value={draft.endDate}
-                  onInput={(event) => onDraftChange("endDate", event.currentTarget.value)}
-                  onChange={(event) => onDraftChange("endDate", event.target.value)}
+                  onInput={(event) =>
+                    onDraftChange("endDate", event.currentTarget.value)
+                  }
+                  onChange={(event) =>
+                    onDraftChange("endDate", event.target.value)
+                  }
                 />
               </label>
               <label>
                 진행상태
                 <select
                   value={draft.status}
-                  onChange={(event) => onDraftChange("status", event.target.value)}
+                  onChange={(event) =>
+                    onDraftChange("status", event.target.value)
+                  }
                 >
                   {TODO_STATUS_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -7172,11 +7455,17 @@ function ScheduleRegistrationModal({
                 <textarea
                   rows={4}
                   value={draft.description}
-                  onChange={(event) => onDraftChange("description", event.target.value)}
+                  onChange={(event) =>
+                    onDraftChange("description", event.target.value)
+                  }
                   placeholder="상세 내용을 입력하세요."
                 />
               </label>
-              <button className="primary-button" type="submit" disabled={isCommittingImport}>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isCommittingImport}
+              >
                 {isCommittingImport ? "등록 중" : "등록"}
               </button>
             </form>
@@ -7187,7 +7476,9 @@ function ScheduleRegistrationModal({
                   문서 유형
                   <select
                     value={importDocumentType}
-                    onChange={(event) => onImportDocumentTypeChange(event.target.value)}
+                    onChange={(event) =>
+                      onImportDocumentTypeChange(event.target.value)
+                    }
                   >
                     {TODO_IMPORT_DOCUMENT_TYPES.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -7202,11 +7493,16 @@ function ScheduleRegistrationModal({
                     <select
                       value={importDocumentId}
                       disabled={isLoadingDocuments || !importDocuments.length}
-                      onChange={(event) => onImportDocumentChange(event.target.value)}
+                      onChange={(event) =>
+                        onImportDocumentChange(event.target.value)
+                      }
                     >
                       {importDocuments.length ? (
                         importDocuments.map((document) => (
-                          <option key={document.documentId} value={document.documentId}>
+                          <option
+                            key={document.documentId}
+                            value={document.documentId}
+                          >
                             {document.fileName}
                           </option>
                         ))
@@ -7232,7 +7528,9 @@ function ScheduleRegistrationModal({
                         onImportFileChange(event.target.files?.[0] || null)
                       }
                     />
-                    <span>{importFile?.name || "파일 선택 또는 드래그 앤 드롭"}</span>
+                    <span>
+                      {importFile?.name || "파일 선택 또는 드래그 앤 드롭"}
+                    </span>
                   </label>
                 )}
               </div>
@@ -7242,7 +7540,8 @@ function ScheduleRegistrationModal({
                 disabled={
                   isPreviewingImport ||
                   isUploadingImportDocument ||
-                  (mode === SCHEDULE_REGISTRATION_MODES.EXISTING && !importDocumentId) ||
+                  (mode === SCHEDULE_REGISTRATION_MODES.EXISTING &&
+                    !importDocumentId) ||
                   (mode === SCHEDULE_REGISTRATION_MODES.UPLOAD && !importFile)
                 }
                 onClick={onPreviewImport}
@@ -7266,10 +7565,18 @@ function ScheduleRegistrationModal({
                       </span>
                     </div>
                     <div>
-                      <button className="mini-action-button" type="button" onClick={() => onSelectImportMode("new")}>
+                      <button
+                        className="mini-action-button"
+                        type="button"
+                        onClick={() => onSelectImportMode("new")}
+                      >
                         중복 제외
                       </button>
-                      <button className="mini-action-button" type="button" onClick={() => onSelectImportMode("all")}>
+                      <button
+                        className="mini-action-button"
+                        type="button"
+                        onClick={() => onSelectImportMode("all")}
+                      >
                         모두 선택
                       </button>
                     </div>
@@ -7586,9 +7893,13 @@ function DocumentGenerationModal({
 
         <div className="document-generation-modal__body">
           <div className="document-generation-modal__status">
-            {(documentError || documentStatusMessage || isUploadingDocument) && (
+            {(documentError ||
+              documentStatusMessage ||
+              isUploadingDocument) && (
               <div
-                className={`attachment-status ${documentError ? "is-error" : ""}`}
+                className={`attachment-status ${
+                  documentError ? "is-error" : ""
+                }`}
                 role="status"
               >
                 {isUploadingDocument
@@ -7602,7 +7913,10 @@ function DocumentGenerationModal({
           </div>
 
           {DOCUMENT_HUB_SOURCE_NODE_IDS.includes(selectedNode?.id) ? (
-            <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
+            <SourceDocumentPanel
+              node={selectedNode}
+              onSelectNode={onSelectNode}
+            />
           ) : shouldShowPrerequisiteGuide ? (
             <BlockedDocumentPanel
               node={selectedNode}
@@ -7626,7 +7940,10 @@ function DocumentGenerationModal({
               />
             </div>
           ) : (
-            <SourceDocumentPanel node={selectedNode} onSelectNode={onSelectNode} />
+            <SourceDocumentPanel
+              node={selectedNode}
+              onSelectNode={onSelectNode}
+            />
           )}
         </div>
       </section>
@@ -7697,10 +8014,16 @@ function GenerationAgentStatusList({ items }) {
             className={`generation-agent-status__item is-${item.status}`}
             key={`${item.label}-${item.status}`}
           >
-            <span className="generation-agent-status__indicator" aria-hidden="true">
+            <span
+              className="generation-agent-status__indicator"
+              aria-hidden="true"
+            >
               {item.status === "completed" && <Check size={13} />}
               {item.status === "running" && (
-                <LoaderCircle className="generation-progress-spinner" size={13} />
+                <LoaderCircle
+                  className="generation-progress-spinner"
+                  size={13}
+                />
               )}
               {item.status === "failed" && <X size={13} />}
             </span>
@@ -7715,8 +8038,8 @@ function GenerationAgentStatusList({ items }) {
                     {item.status === "failed"
                       ? "실패 위치"
                       : item.status === "completed"
-                        ? "처리 완료"
-                        : "상세 처리단위"}
+                      ? "처리 완료"
+                      : "상세 처리단위"}
                   </span>
                   <div>
                     {item.unitItems.map((unitItem) => (
@@ -7898,8 +8221,8 @@ function BlockedDocumentPanel({ node, prerequisiteNode, onSelectNode }) {
         <span>기준 문서 필요</span>
         <h2>{node.label} 생성</h2>
         <p>
-          {node.label}를 생성하려면 {prerequisiteNode?.label || node.basisLabel}가
-          필요합니다. 먼저 선행 문서를 준비해 주세요.
+          {node.label}를 생성하려면 {prerequisiteNode?.label || node.basisLabel}
+          가 필요합니다. 먼저 선행 문서를 준비해 주세요.
         </p>
       </div>
       {prerequisiteNode && (
@@ -8012,7 +8335,9 @@ function ChatPopup({
                 <ConversationListItem
                   key={conversation.conversationId}
                   conversation={conversation}
-                  isActive={conversation.conversationId === activeConversationId}
+                  isActive={
+                    conversation.conversationId === activeConversationId
+                  }
                   isEditing={
                     conversation.conversationId === editingConversationId
                   }
@@ -8031,7 +8356,9 @@ function ChatPopup({
                     onRequestDeleteConversation(conversation.conversationId)
                   }
                   onCancelDelete={onCancelDeleteConversation}
-                  onDelete={() => onDeleteConversation(conversation.conversationId)}
+                  onDelete={() =>
+                    onDeleteConversation(conversation.conversationId)
+                  }
                 />
               ))}
             </ul>
@@ -8047,113 +8374,117 @@ function ChatPopup({
         aria-modal="false"
         aria-label="PM Agent 채팅"
       >
-      <header className="chat-popup__header">
-        <div>
-          <span>Chat</span>
-          <strong>{activeConversation?.title ?? "새 채팅"}</strong>
-          <small>
-            {project.projectName} · {project.projectId}
-          </small>
-        </div>
-        <div className="chat-popup__header-actions">
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onToggleMaximized}
-            aria-label={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
-            title={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
-          >
-            {isMaximized ? (
-              <Minimize2 size={17} aria-hidden="true" />
-            ) : (
-              <Maximize2 size={17} aria-hidden="true" />
-            )}
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onClose}
-            aria-label="채팅 팝업 닫기"
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+        <header className="chat-popup__header">
+          <div>
+            <span>Chat</span>
+            <strong>{activeConversation?.title ?? "새 채팅"}</strong>
+            <small>
+              {project.projectName} · {project.projectId}
+            </small>
+          </div>
+          <div className="chat-popup__header-actions">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onToggleMaximized}
+              aria-label={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
+              title={isMaximized ? "채팅 작게 보기" : "채팅 크게 보기"}
+            >
+              {isMaximized ? (
+                <Minimize2 size={17} aria-hidden="true" />
+              ) : (
+                <Maximize2 size={17} aria-hidden="true" />
+              )}
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onClose}
+              aria-label="채팅 팝업 닫기"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+        </header>
 
-      <div className="chat-popup__thread">
-        {activeConversation ? (
-          activeMessages.length ? (
-            activeMessages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                isResponding={isResponding}
-                isUploadingDocument={isUploadingDocument}
-                onAgentUploadFiles={onAgentUploadFiles}
-                onDownloadFile={onDownloadFile}
-                onDocumentChoice={onDocumentChoice}
-                onSuggestedActionClick={onSuggestedActionClick}
-                onCommandActionClick={onCommandActionClick}
+        <div className="chat-popup__thread">
+          {activeConversation ? (
+            activeMessages.length ? (
+              activeMessages.map((message) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isResponding={isResponding}
+                  isUploadingDocument={isUploadingDocument}
+                  onAgentUploadFiles={onAgentUploadFiles}
+                  onDownloadFile={onDownloadFile}
+                  onDocumentChoice={onDocumentChoice}
+                  onSuggestedActionClick={onSuggestedActionClick}
+                  onCommandActionClick={onCommandActionClick}
+                />
+              ))
+            ) : (
+              <EmptyChatState
+                title="새 채팅을 시작해보세요."
+                description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
               />
-            ))
+            )
           ) : (
             <EmptyChatState
               title="새 채팅을 시작해보세요."
               description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
             />
-          )
-        ) : (
-          <EmptyChatState
-            title="새 채팅을 시작해보세요."
-            description="요구사항 정의서 생성, WBS 일정 확인, 주간보고서 작성 등을 요청할 수 있습니다."
-          />
-        )}
-        {isResponding && <TypingMessage />}
-        <div ref={scrollRef} />
-      </div>
+          )}
+          {isResponding && <TypingMessage />}
+          <div ref={scrollRef} />
+        </div>
 
-      <footer className="chat-popup__footer">
-        {(documentError || documentStatusMessage || isUploadingDocument) && (
-          <div
-            className={`attachment-status ${documentError ? "is-error" : ""}`}
-            role="status"
-          >
-            {isUploadingDocument
-              ? "파일을 업로드하는 중입니다."
-              : documentError || documentStatusMessage}
-          </div>
-        )}
-        <CommandRecommendationBar
-          recommendations={commandRecommendations}
-          isDisabled={isResponding}
-          onSelect={onCommandRecommendationClick}
-        />
-        <form className="chat-composer" onSubmit={onMessageSubmit}>
-          <textarea
-            value={composerValue}
-            placeholder="PM 산출물, 요구사항, 일정 관련 메시지를 입력하세요."
-            rows={1}
-            disabled={isResponding}
-            onChange={(event) => onComposerChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            aria-label="메시지 입력"
+        <footer className="chat-popup__footer">
+          {(documentError || documentStatusMessage || isUploadingDocument) && (
+            <div
+              className={`attachment-status ${documentError ? "is-error" : ""}`}
+              role="status"
+            >
+              {isUploadingDocument
+                ? "파일을 업로드하는 중입니다."
+                : documentError || documentStatusMessage}
+            </div>
+          )}
+          <CommandRecommendationBar
+            recommendations={commandRecommendations}
+            isDisabled={isResponding}
+            onSelect={onCommandRecommendationClick}
           />
-          <button
-            className={`send-button ${composerValue.trim() ? "" : "is-empty"}`}
-            type="submit"
-            disabled={!composerValue.trim() || isResponding || isUploadingDocument}
-            aria-label="메시지 보내기"
-          >
-            <ArrowUp size={18} aria-hidden="true" />
-          </button>
-        </form>
-      </footer>
-    </aside>
+          <form className="chat-composer" onSubmit={onMessageSubmit}>
+            <textarea
+              value={composerValue}
+              placeholder="PM 산출물, 요구사항, 일정 관련 메시지를 입력하세요."
+              rows={1}
+              disabled={isResponding}
+              onChange={(event) => onComposerChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              aria-label="메시지 입력"
+            />
+            <button
+              className={`send-button ${
+                composerValue.trim() ? "" : "is-empty"
+              }`}
+              type="submit"
+              disabled={
+                !composerValue.trim() || isResponding || isUploadingDocument
+              }
+              aria-label="메시지 보내기"
+            >
+              <ArrowUp size={18} aria-hidden="true" />
+            </button>
+          </form>
+        </footer>
+      </aside>
     </div>
   );
 }
@@ -8301,8 +8632,8 @@ function ProjectEntry({
               }
             />
             <p className="field-helper">
-              생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명,
-              담당자명 또는 부서명을 입력합니다.
+              생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명, 담당자명
+              또는 부서명을 입력합니다.
             </p>
 
             {newProjectError && <p className="form-error">{newProjectError}</p>}
@@ -8644,8 +8975,8 @@ function ProjectSettingsModal({
             onChange={(event) => onDocumentAuthorChange(event.target.value)}
           />
           <p className="field-helper">
-            생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명,
-            담당자명 또는 부서명을 입력합니다.
+            생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명, 담당자명 또는
+            부서명을 입력합니다.
           </p>
 
           {error && <p className="form-error">{error}</p>}
@@ -8690,7 +9021,8 @@ function TodoManagerModal({
   sourceFilter,
   titleFilter,
   assigneeFilter,
-  dateFilter,
+  startDateFilter,
+  endDateFilter,
   isLoading,
   error,
   actionError,
@@ -8718,7 +9050,8 @@ function TodoManagerModal({
   onSourceFilterChange,
   onTitleFilterChange,
   onAssigneeFilterChange,
-  onDateFilterChange,
+  onStartDateFilterChange,
+  onEndDateFilterChange,
   onFilterReset,
   onStatusChange,
   onToggleTodoSelection,
@@ -8750,42 +9083,57 @@ function TodoManagerModal({
   const previewDuplicateItems = importPreview?.duplicateItems ?? [];
   const previewCount = previewNewItems.length + previewDuplicateItems.length;
   const selectedCount = selectedImportIds.length;
-  const selectedTodoIdSet = useMemo(
-    () => new Set(selectedTodoIds),
-    [selectedTodoIds],
-  );
+  const selectedTodoIdSet = useMemo(() => new Set(selectedTodoIds), [
+    selectedTodoIds,
+  ]);
   const filteredTodoItems = useMemo(() => {
     const normalizeSearchText = (value = "") =>
-      String(value ?? "").replace(/\s+/g, "").toLowerCase();
+      String(value ?? "")
+        .replace(/\s+/g, "")
+        .toLowerCase();
     const normalizedTitle = normalizeSearchText(titleFilter);
     const normalizedAssignee = normalizeSearchText(assigneeFilter);
-    const normalizedDate = normalizeTodoDueDate(dateFilter);
+    const normalizedStartDate = normalizeTodoDueDate(startDateFilter);
+    const normalizedEndDate = normalizeTodoDueDate(endDateFilter);
 
-    return todoItems.filter((todo) => {
-      if (
-        normalizedTitle &&
-        !normalizeSearchText(todo.title).includes(normalizedTitle)
-      ) {
-        return false;
-      }
-      if (
-        normalizedAssignee &&
-        !normalizeSearchText(todo.assignee).includes(normalizedAssignee)
-      ) {
-        return false;
-      }
-      if (statusFilter && (todo.status || "NOT_STARTED") !== statusFilter) {
-        return false;
-      }
-      if (sourceFilter && getTodoSourceFilterValue(todo) !== sourceFilter) {
-        return false;
-      }
-      if (normalizedDate && !isDateInTodoScheduleRange(todo, normalizedDate)) {
-        return false;
-      }
-      return true;
-    }).sort(compareTodosForSchedule);
-  }, [assigneeFilter, dateFilter, sourceFilter, statusFilter, titleFilter, todoItems]);
+    return todoItems
+      .filter((todo) => {
+        if (
+          normalizedTitle &&
+          !normalizeSearchText(todo.title).includes(normalizedTitle)
+        ) {
+          return false;
+        }
+        if (
+          normalizedAssignee &&
+          !normalizeSearchText(todo.assignee).includes(normalizedAssignee)
+        ) {
+          return false;
+        }
+        if (statusFilter && (todo.status || "NOT_STARTED") !== statusFilter) {
+          return false;
+        }
+        if (sourceFilter && getTodoSourceFilterValue(todo) !== sourceFilter) {
+          return false;
+        }
+        if (
+          (normalizedStartDate || normalizedEndDate) &&
+          !isTodoInDateRange(todo, normalizedStartDate, normalizedEndDate)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort(compareTodosForSchedule);
+  }, [
+    assigneeFilter,
+    endDateFilter,
+    sourceFilter,
+    startDateFilter,
+    statusFilter,
+    titleFilter,
+    todoItems,
+  ]);
   const visibleTodoIds = useMemo(
     () => filteredTodoItems.map((todo) => todo.todoId).filter(Boolean),
     [filteredTodoItems],
@@ -8795,6 +9143,9 @@ function TodoManagerModal({
     [selectedTodoIdSet, visibleTodoIds],
   );
   const selectedVisibleCount = selectedVisibleTodoIds.length;
+  const hasSelectedVisibleTodos = selectedVisibleCount > 0;
+  const isSelectionBarDisabled =
+    !hasSelectedVisibleTodos || isBulkActionRunning;
   const isAllVisibleSelected =
     visibleTodoIds.length > 0 && selectedVisibleCount === visibleTodoIds.length;
   const isPartiallySelected =
@@ -8969,7 +9320,9 @@ function TodoManagerModal({
               </div>
               <div>
                 <dt>출처</dt>
-                <dd><TodoSourceBadge todo={todo} /></dd>
+                <dd>
+                  <TodoSourceBadge todo={todo} />
+                </dd>
               </div>
             </dl>
             {todo.description && (
@@ -9102,7 +9455,9 @@ function TodoManagerModal({
                       type="search"
                       value={titleFilter}
                       placeholder="할일명 검색"
-                      onChange={(event) => onTitleFilterChange(event.target.value)}
+                      onChange={(event) =>
+                        onTitleFilterChange(event.target.value)
+                      }
                     />
                   </label>
                   <label>
@@ -9111,17 +9466,38 @@ function TodoManagerModal({
                       type="search"
                       value={assigneeFilter}
                       placeholder="담당자 검색"
-                      onChange={(event) => onAssigneeFilterChange(event.target.value)}
+                      onChange={(event) =>
+                        onAssigneeFilterChange(event.target.value)
+                      }
                     />
                   </label>
-                  <label>
-                    기한
-                    <input
-                      type="date"
-                      value={dateFilter}
-                      onInput={(event) => onDateFilterChange(event.currentTarget.value)}
-                      onChange={(event) => onDateFilterChange(event.target.value)}
-                    />
+                  <label className="todo-date-range-filter">
+                    조회 기간
+                    <div className="todo-date-range-inputs">
+                      <input
+                        type="date"
+                        value={startDateFilter}
+                        aria-label="조회 시작일"
+                        onInput={(event) =>
+                          onStartDateFilterChange(event.currentTarget.value)
+                        }
+                        onChange={(event) =>
+                          onStartDateFilterChange(event.target.value)
+                        }
+                      />
+                      <span aria-hidden="true">~</span>
+                      <input
+                        type="date"
+                        value={endDateFilter}
+                        aria-label="조회 종료일"
+                        onInput={(event) =>
+                          onEndDateFilterChange(event.currentTarget.value)
+                        }
+                        onChange={(event) =>
+                          onEndDateFilterChange(event.target.value)
+                        }
+                      />
+                    </div>
                   </label>
                   <label>
                     진행여부
@@ -9132,7 +9508,10 @@ function TodoManagerModal({
                       }
                     >
                       {TODO_STATUS_FILTERS.map((option) => (
-                        <option key={option.value || "ALL"} value={option.value}>
+                        <option
+                          key={option.value || "ALL"}
+                          value={option.value}
+                        >
                           {option.label}
                         </option>
                       ))}
@@ -9147,7 +9526,10 @@ function TodoManagerModal({
                       }
                     >
                       {TODO_SOURCE_FILTERS.map((option) => (
-                        <option key={option.value || "ALL"} value={option.value}>
+                        <option
+                          key={option.value || "ALL"}
+                          value={option.value}
+                        >
                           {option.label}
                         </option>
                       ))}
@@ -9176,7 +9558,9 @@ function TodoManagerModal({
                   <div className="todo-list-heading">
                     <h3>할일 목록</h3>
                     <span>
-                      전체 {todoItems.length}개 · 표시 {filteredTodoItems.length}개 · 선택 {selectedVisibleCount}개
+                      전체 {todoItems.length}개 · 표시{" "}
+                      {filteredTodoItems.length}개 · 선택 {selectedVisibleCount}
+                      개
                     </span>
                   </div>
                   <label className="todo-select-all">
@@ -9195,69 +9579,74 @@ function TodoManagerModal({
                     전체선택
                   </label>
                 </div>
-                {selectedVisibleCount > 0 && (
-                  <div
-                    className="todo-bulk-actions"
-                    role="region"
-                    aria-label="선택한 할일 일괄 작업"
+                <div className="todo-list-body">
+                  {isLoading ? (
+                    <div className="file-manager-loading" role="status">
+                      <LoaderCircle size={18} aria-hidden="true" />
+                      할일 목록을 불러오는 중입니다.
+                    </div>
+                  ) : error ? (
+                    <p className="form-error">{error}</p>
+                  ) : filteredTodoItems.length ? (
+                    <ul className="todo-list">
+                      {filteredTodoItems.map(renderTodoItem)}
+                    </ul>
+                  ) : (
+                    <p className="file-manager-section-empty">
+                      조건에 맞는 할일이 없습니다.
+                    </p>
+                  )}
+                </div>
+                <div
+                  className={`todo-selection-bar ${
+                    hasSelectedVisibleTodos ? "is-visible" : ""
+                  }`}
+                  role="region"
+                  aria-label="선택한 할일 일괄 작업"
+                  aria-hidden={!hasSelectedVisibleTodos}
+                >
+                  <strong>선택 {selectedVisibleCount}개</strong>
+                  <label className="todo-bulk-status">
+                    진행상태
+                    <select
+                      value={bulkStatus}
+                      disabled={isSelectionBarDisabled}
+                      onChange={(event) =>
+                        onBulkStatusChange(event.target.value)
+                      }
+                    >
+                      {TODO_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="mini-action-button primary"
+                    type="button"
+                    disabled={isSelectionBarDisabled}
+                    onClick={onApplyBulkStatus}
                   >
-                    <strong>선택 {selectedVisibleCount}개</strong>
-                    <label className="todo-bulk-status">
-                      진행상태
-                      <select
-                        value={bulkStatus}
-                        disabled={isBulkActionRunning}
-                        onChange={(event) =>
-                          onBulkStatusChange(event.target.value)
-                        }
-                      >
-                        {TODO_STATUS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      className="mini-action-button primary"
-                      type="button"
-                      disabled={isBulkActionRunning}
-                      onClick={onApplyBulkStatus}
-                    >
-                      {isBulkActionRunning ? "변경 중" : "상태 변경"}
-                    </button>
-                    <button
-                      className="mini-action-button danger"
-                      type="button"
-                      disabled={isBulkActionRunning}
-                      onClick={onBulkDelete}
-                    >
-                      삭제
-                    </button>
-                    <button
-                      className="mini-action-button"
-                      type="button"
-                      disabled={isBulkActionRunning}
-                      onClick={onClearTodoSelection}
-                    >
-                      선택 해제
-                    </button>
-                  </div>
-                )}
-                {isLoading ? (
-                  <div className="file-manager-loading" role="status">
-                    <LoaderCircle size={18} aria-hidden="true" />
-                    할일 목록을 불러오는 중입니다.
-                  </div>
-                ) : error ? (
-                  <p className="form-error">{error}</p>
-                ) : filteredTodoItems.length ? (
-                  <ul className="todo-list">{filteredTodoItems.map(renderTodoItem)}</ul>
-                ) : (
-                  <p className="file-manager-section-empty">
-                    조건에 맞는 할일이 없습니다.
-                  </p>
-                )}
+                    {isBulkActionRunning ? "변경 중" : "상태 변경"}
+                  </button>
+                  <button
+                    className="mini-action-button danger"
+                    type="button"
+                    disabled={isSelectionBarDisabled}
+                    onClick={onBulkDelete}
+                  >
+                    삭제
+                  </button>
+                  <button
+                    className="mini-action-button"
+                    type="button"
+                    disabled={isSelectionBarDisabled}
+                    onClick={onClearTodoSelection}
+                  >
+                    선택 해제
+                  </button>
+                </div>
               </section>
             </>
           )}
@@ -9337,9 +9726,13 @@ function FileManagerModal({
                   editingFileTarget?.fileId === file.fileId;
                 const isRenaming = renamingFileKey === fileKey;
                 const documentLabel = isGenerated
-                  ? file.documentLabel || getArtifactDisplayLabel(file.artifactType)
-                  : file.documentLabel || getDocumentDisplayLabel(file.documentType);
-                const timeValue = isGenerated ? file.createdAt : file.uploadedAt;
+                  ? file.documentLabel ||
+                    getArtifactDisplayLabel(file.artifactType)
+                  : file.documentLabel ||
+                    getDocumentDisplayLabel(file.documentType);
+                const timeValue = isGenerated
+                  ? file.createdAt
+                  : file.uploadedAt;
                 const handleDownload = isGenerated
                   ? onDownloadGenerated
                   : onDownloadUploaded;
@@ -9348,7 +9741,10 @@ function FileManagerModal({
                   : onRequestDelete;
 
                 return (
-                  <li className="uploaded-file-item" key={`${fileKind}-${file.fileId}`}>
+                  <li
+                    className="uploaded-file-item"
+                    key={`${fileKind}-${file.fileId}`}
+                  >
                     <div className="uploaded-file-main">
                       <FileText size={18} aria-hidden="true" />
                       <div>
@@ -9413,8 +9809,12 @@ function FileManagerModal({
                       </div>
                     </div>
                     <div className="uploaded-file-cell">
-                      <span className="uploaded-file-cell-label">{timeHeader}</span>
-                      <strong>{formatFileUploadedAt(timeValue, timeHeader)}</strong>
+                      <span className="uploaded-file-cell-label">
+                        {timeHeader}
+                      </span>
+                      <strong>
+                        {formatFileUploadedAt(timeValue, timeHeader)}
+                      </strong>
                     </div>
                     <div className="uploaded-file-cell">
                       <span className="uploaded-file-cell-label">파일크기</span>
@@ -9521,7 +9921,11 @@ function FileManagerModal({
             <p className="form-error">{error}</p>
           ) : (
             <div className="file-manager-sections">
-              <div className="file-manager-tabs" role="tablist" aria-label="파일 유형">
+              <div
+                className="file-manager-tabs"
+                role="tablist"
+                aria-label="파일 유형"
+              >
                 <button
                   id="uploaded-files-tab"
                   className={`file-manager-tab ${
@@ -9538,7 +9942,9 @@ function FileManagerModal({
                 <button
                   id="generated-files-tab"
                   className={`file-manager-tab ${
-                    currentTab === FILE_MANAGER_TABS.GENERATED ? "is-active" : ""
+                    currentTab === FILE_MANAGER_TABS.GENERATED
+                      ? "is-active"
+                      : ""
                   }`}
                   type="button"
                   role="tab"
@@ -9665,12 +10071,9 @@ function ChatMessage({
     [];
   const shouldUseUploadOutputFormat =
     uploadOutputFormats.length > 0 || Boolean(uploadRequest?.outputFormat);
-  const shouldShowUploadOutputFormat =
-    false;
+  const shouldShowUploadOutputFormat = false;
   const uploadDefaultOutputFormat =
-    uploadRequest?.outputFormat ||
-    uploadOutputFormats[0]?.value ||
-    "xlsx";
+    uploadRequest?.outputFormat || uploadOutputFormats[0]?.value || "xlsx";
   const [selectedUploadOutputFormat, setSelectedUploadOutputFormat] = useState(
     uploadDefaultOutputFormat,
   );
@@ -9764,9 +10167,7 @@ function ChatMessage({
             }
           />
         )}
-        <ScheduleTodoResult
-          items={scheduleTodoItems}
-        />
+        <ScheduleTodoResult items={scheduleTodoItems} />
         <MessageResult
           downloadFiles={downloadFiles}
           onDownloadFile={onDownloadFile}
@@ -9778,7 +10179,9 @@ function ChatMessage({
               className="suggested-action-button primary"
               type="button"
               disabled={isResponding || isUploadingDocument}
-              onClick={() => onCommandActionClick(message, descriptionCtaAction)}
+              onClick={() =>
+                onCommandActionClick(message, descriptionCtaAction)
+              }
             >
               {descriptionCtaAction.label}
             </button>
@@ -9788,7 +10191,9 @@ function ChatMessage({
           <div className="suggested-action-list">
             {commandActions.map((action, index) => (
               <button
-                key={`${action.message ?? action.command ?? action.label}-${index}`}
+                key={`${action.message ??
+                  action.command ??
+                  action.label}-${index}`}
                 className="suggested-action-button secondary"
                 type="button"
                 disabled={isResponding || isUploadingDocument}
@@ -9874,7 +10279,8 @@ function GenerationOutputFormatField({
       >
         {availableFormats.map((format) => (
           <option key={format.value} value={format.value}>
-            {format.label || getOutputFormatLabel(availableFormats, format.value)}
+            {format.label ||
+              getOutputFormatLabel(availableFormats, format.value)}
           </option>
         ))}
       </select>
@@ -9897,18 +10303,20 @@ function DefaultDocumentChoicePanel({
     ? request.optionalDocuments
     : [];
   const documentConfig = request?.documentConfig ?? {};
-  const relation = documentConfig.relation ?? getRelation(documentConfig.requestType);
+  const relation =
+    documentConfig.relation ?? getRelation(documentConfig.requestType);
   const primarySource = relation?.primarySource ?? documentConfig.primarySource;
   const optionalSource =
-    relation?.optionalSources?.[0] ?? documentConfig.optionalSources?.[0] ?? null;
+    relation?.optionalSources?.[0] ??
+    documentConfig.optionalSources?.[0] ??
+    null;
   const outputFormats =
     request?.outputFormats ??
     documentConfig.outputFormats ??
     (relation ? getOutputFormats(relation) : []);
   const shouldUseOutputFormat =
     outputFormats.length > 0 || Boolean(request?.outputFormat);
-  const shouldShowOutputFormat =
-    false;
+  const shouldShowOutputFormat = false;
   const [localPrimaryDocuments, setLocalPrimaryDocuments] = useState([]);
   const [localOptionalDocuments, setLocalOptionalDocuments] = useState([]);
   const documents = uniqueDocumentsById([
@@ -9921,19 +10329,25 @@ function DefaultDocumentChoicePanel({
   ]);
   const defaultDocumentId =
     request?.defaultDocumentId || documents[0]?.documentId || "";
-  const [selectedDocumentId, setSelectedDocumentId] =
-    useState(defaultDocumentId);
-  const defaultOptionalDocumentIds = Array.isArray(request?.defaultOptionalDocumentIds)
+  const [selectedDocumentId, setSelectedDocumentId] = useState(
+    defaultDocumentId,
+  );
+  const defaultOptionalDocumentIds = Array.isArray(
+    request?.defaultOptionalDocumentIds,
+  )
     ? request.defaultOptionalDocumentIds
     : optionalDocuments
         .slice(0, 1)
         .map((document) => document.documentId)
         .filter(Boolean);
-  const [selectedOptionalDocumentIds, setSelectedOptionalDocumentIds] = useState(
-    defaultOptionalDocumentIds,
-  );
-  const [hasTouchedOptionalSelection, setHasTouchedOptionalSelection] =
-    useState(false);
+  const [
+    selectedOptionalDocumentIds,
+    setSelectedOptionalDocumentIds,
+  ] = useState(defaultOptionalDocumentIds);
+  const [
+    hasTouchedOptionalSelection,
+    setHasTouchedOptionalSelection,
+  ] = useState(false);
   const [selectedOutputFormat, setSelectedOutputFormat] = useState(
     request?.outputFormat ||
       documentConfig.defaultOutputFormat ||
@@ -9955,7 +10369,8 @@ function DefaultDocumentChoicePanel({
   const optionalListId = `${panelId}-optional-source-documents`;
   const primaryInputName = `${panelId}-primary-source-document`;
   const optionalInputName = `${panelId}-optional-source-document`;
-  const targetLabel = relation?.targetLabel || documentConfig.targetLabel || "산출물";
+  const targetLabel =
+    relation?.targetLabel || documentConfig.targetLabel || "산출물";
   const actionLabel =
     documentConfig.actionLabel || DOCUMENT_GENERATION_COPY.generate;
   const primaryLabel = primarySource?.label || "기준 문서";
@@ -9967,10 +10382,10 @@ function DefaultDocumentChoicePanel({
   const materialSummary = !hasSelectedPrimaryDocument
     ? `${primaryLabel}를 선택하거나 업로드하면 ${targetLabel}를 생성할 수 있습니다.`
     : optionalSource
-      ? optionalSelectionCount > 0
-        ? `${primaryLabel} 1개, ${optionalLabel} ${optionalSelectionCount}개를 반영해 ${targetLabel}를 생성합니다.`
-        : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다. ${optionalLabel}은 반영하지 않습니다.`
-      : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다.`;
+    ? optionalSelectionCount > 0
+      ? `${primaryLabel} 1개, ${optionalLabel} ${optionalSelectionCount}개를 반영해 ${targetLabel}를 생성합니다.`
+      : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다. ${optionalLabel}은 반영하지 않습니다.`
+    : `${primaryLabel} 1개를 기준으로 ${targetLabel}를 생성합니다.`;
   const canGenerate =
     hasSelectedPrimaryDocument &&
     (!shouldUseOutputFormat || Boolean(selectedOutputFormat));
@@ -10046,7 +10461,8 @@ function DefaultDocumentChoicePanel({
     documentChoiceSlot: slot,
     displayLabel: `업로드한 ${source?.label || "문서"}`,
     allowMultiple:
-      slot === "optional" && source?.documentType === DOCUMENT_TYPES.MEETING_NOTES,
+      slot === "optional" &&
+      source?.documentType === DOCUMENT_TYPES.MEETING_NOTES,
     selectedOptionalDocumentIds:
       slot === "optional" ? selectedOptionalDocumentIdsForChoice : [],
   });
@@ -10085,7 +10501,10 @@ function DefaultDocumentChoicePanel({
   };
 
   const handleSlotUpload = async (files, source, slot) => {
-    const result = await onUploadFiles?.(files, buildUploadRequest(source, slot));
+    const result = await onUploadFiles?.(
+      files,
+      buildUploadRequest(source, slot),
+    );
     applyUploadedDocuments(slot, normalizeUploadedDocuments(result));
   };
 
@@ -10131,10 +10550,15 @@ function DefaultDocumentChoicePanel({
       <section className="document-choice-section document-choice-slot">
         <div className="document-choice-slot-header">
           <div>
-            <label className="document-choice-file-label" htmlFor={primaryListId}>
+            <label
+              className="document-choice-file-label"
+              htmlFor={primaryListId}
+            >
               {primaryLabel}
             </label>
-            <p className="document-choice-helper">필수 문서입니다. 1개를 선택해 주세요.</p>
+            <p className="document-choice-helper">
+              필수 문서입니다. 1개를 선택해 주세요.
+            </p>
           </div>
           <button
             className={`document-source-control document-upload-control ${
@@ -10143,11 +10567,15 @@ function DefaultDocumentChoicePanel({
             type="button"
             disabled={isDisabled || isUploading}
             onClick={(event) =>
-              handlePanelAction(event, () => primaryFileInputRef.current?.click())
+              handlePanelAction(event, () =>
+                primaryFileInputRef.current?.click(),
+              )
             }
             onDragOver={(event) => handleUploadDragOver(event, "primary")}
             onDragLeave={(event) => handleUploadDragLeave(event, "primary")}
-            onDrop={(event) => handleUploadDrop(event, primarySource, "primary")}
+            onDrop={(event) =>
+              handleUploadDrop(event, primarySource, "primary")
+            }
           >
             {isUploading ? (
               <>
@@ -10167,7 +10595,8 @@ function DefaultDocumentChoicePanel({
             aria-label={`${primaryLabel} 선택`}
           >
             {documents.map((document) => {
-              const isSelected = selectedDocument?.documentId === document.documentId;
+              const isSelected =
+                selectedDocument?.documentId === document.documentId;
               return (
                 <label
                   className={`document-choice-list-item ${
@@ -10200,7 +10629,9 @@ function DefaultDocumentChoicePanel({
           type="file"
           accept={DOCUMENT_UPLOAD_ACCEPTED_TYPES.join(",")}
           disabled={isDisabled || isUploading}
-          onChange={(event) => handleUploadChange(event, primarySource, "primary")}
+          onChange={(event) =>
+            handleUploadChange(event, primarySource, "primary")
+          }
           aria-label={`${primaryLabel} 업로드`}
         />
       </section>
@@ -10208,7 +10639,10 @@ function DefaultDocumentChoicePanel({
         <section className="document-choice-section document-choice-slot">
           <div className="document-choice-slot-header">
             <div>
-              <label className="document-choice-file-label" htmlFor={optionalListId}>
+              <label
+                className="document-choice-file-label"
+                htmlFor={optionalListId}
+              >
                 {optionalLabel}
               </label>
               <p className="document-choice-helper">
@@ -10231,7 +10665,9 @@ function DefaultDocumentChoicePanel({
               }
               onDragOver={(event) => handleUploadDragOver(event, "optional")}
               onDragLeave={(event) => handleUploadDragLeave(event, "optional")}
-              onDrop={(event) => handleUploadDrop(event, optionalSource, "optional")}
+              onDrop={(event) =>
+                handleUploadDrop(event, optionalSource, "optional")
+              }
             >
               {isUploading ? (
                 <>
@@ -10266,7 +10702,9 @@ function DefaultDocumentChoicePanel({
                       name={optionalInputName}
                       checked={isSelected}
                       disabled={isDisabled}
-                      onChange={() => selectOptionalDocumentId(document.documentId)}
+                      onChange={() =>
+                        selectOptionalDocumentId(document.documentId)
+                      }
                     />
                     <span className="document-choice-item-text">
                       {document.fileName || document.documentId}
@@ -10274,13 +10712,11 @@ function DefaultDocumentChoicePanel({
                   </label>
                 );
               })}
-              <p className="document-choice-selected-count">
-                {optionalLabel} {optionalSelectionCount}개 선택됨
-              </p>
             </div>
           ) : (
             <p className="document-choice-empty">
-              등록된 {optionalLabel}이 없습니다. 회의록 없이도 생성할 수 있습니다.
+              등록된 {optionalLabel}이 없습니다. 회의록 없이도 생성할 수
+              있습니다.
             </p>
           )}
           <input
@@ -10376,12 +10812,19 @@ function ScheduleTodoResult({ items }) {
             return (
               <tr
                 className={getTodoScheduleClassNames(todo)}
-                key={todo.todo_id || todo.todoId || todo.id || `${todo.title}-${index}`}
+                key={
+                  todo.todo_id ||
+                  todo.todoId ||
+                  todo.id ||
+                  `${todo.title}-${index}`
+                }
               >
                 <td title={evidence}>{truncateTodoText(title)}</td>
                 <td>{sanitizeTodoText(todo.assignee) || "담당자 미정"}</td>
                 <td>{sanitizeTodoText(formatTodoDeadlineWithDday(todo))}</td>
-                <td><TodoSourceBadge todo={todo} /></td>
+                <td>
+                  <TodoSourceBadge todo={todo} />
+                </td>
                 <td>{sanitizeTodoText(todo.status) || "확인 필요"}</td>
               </tr>
             );
@@ -10483,7 +10926,8 @@ function GenerationSubProgress({ progressState }) {
     <section className="sub-progress-panel" aria-label="세부 처리 진행률">
       {progressState?.largeDocumentHint && (
         <p className="sub-progress-hint">
-          문서가 큰 경우 시간이 걸릴 수 있습니다. 세부 처리 상태를 확인하고 있습니다.
+          문서가 큰 경우 시간이 걸릴 수 있습니다. 세부 처리 상태를 확인하고
+          있습니다.
         </p>
       )}
       {subProgressItems.map((item, index) => (

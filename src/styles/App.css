@@ -1185,8 +1185,7 @@ p {
 }
 
 .document-choice-file-label {
-  color: var(--kb-text-muted);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -1228,7 +1227,6 @@ p {
 .document-choice-list {
   display: grid;
   gap: 6px;
-  width: min(100%, 560px);
   max-height: 176px;
   overflow-y: auto;
   padding: 8px;
@@ -2479,11 +2477,22 @@ p {
 }
 
 .todo-list-section {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
   overflow: hidden;
+}
+
+.todo-list-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 76px;
+}
+
+.todo-list-body .todo-list {
+  overflow: visible;
 }
 
 .todo-item-main {
@@ -3690,7 +3699,6 @@ p {
 .document-choice-radio-label,
 .document-choice-check,
 .document-choice-file-line,
-.document-choice-file-label,
 .document-output-format,
 .progress-header,
 .step-content p,
@@ -4571,7 +4579,8 @@ textarea {
 }
 
 .todo-list-section {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  position: relative;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .todo-list-heading {
@@ -4607,18 +4616,38 @@ textarea {
   accent-color: var(--kb-yellow-positive);
 }
 
-.todo-bulk-actions {
+.todo-selection-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px;
-  border: 1px solid rgba(255, 188, 0, 0.42);
-  border-radius: var(--kb-radius-sm);
-  background: rgba(255, 188, 0, 0.08);
+  min-height: 50px;
+  padding: 10px 12px;
+  border: 1px solid rgba(96, 88, 76, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 12px 28px rgba(31, 29, 25, 0.16);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
-.todo-bulk-actions strong {
+.todo-selection-bar.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.todo-selection-bar strong {
   color: var(--kb-text);
   font-size: 13px;
   font-weight: 900;
@@ -4633,7 +4662,7 @@ textarea {
   font-weight: 900;
 }
 
-.todo-bulk-actions select,
+.todo-selection-bar select,
 .todo-row-actions select,
 .todo-filter-grid input,
 .todo-filter-grid select,
@@ -4652,7 +4681,7 @@ textarea {
   min-height: var(--todo-control-height);
 }
 
-.todo-bulk-actions .mini-action-button,
+.todo-selection-bar .mini-action-button,
 .todo-row-actions .inline-icon-button,
 .todo-edit-actions .mini-action-button,
 .todo-preview-header .mini-action-button,
@@ -4668,7 +4697,7 @@ textarea {
   min-width: var(--todo-control-height);
 }
 
-.todo-bulk-actions select {
+.todo-selection-bar select {
   width: 128px;
   min-width: 128px;
   padding: 0 10px;
@@ -4682,6 +4711,25 @@ textarea {
 
 .todo-filter-grid input {
   padding: 0 10px;
+}
+
+.todo-date-range-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.todo-date-range-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.todo-date-range-inputs span {
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .todo-upload-row input {
@@ -4703,7 +4751,9 @@ textarea {
     rgba(255, 188, 0, 0.1) 0%,
     var(--kb-surface) 72%
   );
-  box-shadow: 0 10px 22px rgba(255, 188, 0, 0.12);
+  box-shadow:
+    inset 3px 0 0 var(--kb-yellow-positive),
+    0 10px 22px rgba(255, 188, 0, 0.12);
 }
 
 .todo-item-main {
@@ -4787,9 +4837,12 @@ textarea {
     min-height: 30px;
   }
 
-  .todo-bulk-actions {
+  .todo-selection-bar {
     align-items: stretch;
     flex-direction: column;
+    left: 10px;
+    right: 10px;
+    border-radius: 16px;
   }
 
   .todo-bulk-status {
@@ -4798,8 +4851,8 @@ textarea {
     width: 100%;
   }
 
-  .todo-bulk-actions select,
-  .todo-bulk-actions .mini-action-button {
+  .todo-selection-bar select,
+  .todo-selection-bar .mini-action-button {
     width: 100%;
     min-width: 0;
   }
@@ -5396,6 +5449,13 @@ textarea {
   box-shadow: 0 0 0 2px rgba(180, 60, 40, 0.18);
 }
 
+.todo-item.is-selected.is-deadline-soon,
+.todo-item.is-selected.is-overdue {
+  box-shadow:
+    inset 3px 0 0 var(--kb-yellow-positive),
+    0 10px 22px rgba(255, 188, 0, 0.12);
+}
+
 .today-task-card__content {
   display: grid;
   gap: 10px;
@@ -5801,7 +5861,6 @@ textarea {
 
 .schedule-row-actions {
   display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -6444,7 +6503,6 @@ textarea {
 
 .document-generation-modal__body {
   display: grid;
-  gap: var(--kb-space-4);
   min-height: 0;
   overflow: auto;
   padding: var(--kb-space-5);
