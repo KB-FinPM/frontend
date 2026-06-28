@@ -34,8 +34,7 @@ import {
 import {
   addMessageToConversation,
   addMessagesToConversation,
-  clearRecentProjectId,
-  createProj  clearProjectStorage,
+  clearProjectStorage,
   clearRecentProjectId,
   createProject,
   deleteConversation,
@@ -2534,7 +2533,9 @@ const getGenerationFailureDetails = (statusResponse = null) => {
     statusResponse.result?.errors,
   ];
 
-  return [...new Set(detailSources.map(formatGenerationFailureValue).filter(Boolean))];
+  return [
+    ...new Set(detailSources.map(formatGenerationFailureValue).filter(Boolean)),
+  ];
 };
 
 const getGenerationFailureMessage = (
@@ -2547,7 +2548,9 @@ const getGenerationFailureMessage = (
     (detail) => detail !== primaryMessage,
   );
   if (!details.length) return primaryMessage;
-  return [primaryMessage, ...details.map((detail) => `상세: ${detail}`)].join("\n");
+  return [primaryMessage, ...details.map((detail) => `상세: ${detail}`)].join(
+    "\n",
+  );
 };
 
 const buildGenerationFailureProgress = (failedIndex, sourceProgress = null) => {
@@ -3098,19 +3101,26 @@ function App() {
             projectId,
             actionId,
           });
-          const sanitizedStatusResponse =
-            sanitizeActionStatusResponse(statusResponse);
+          const sanitizedStatusResponse = sanitizeActionStatusResponse(
+            statusResponse,
+          );
 
           if (pollingRunIdRef.current !== runId) return;
 
-          if (sanitizedStatusResponse?.status === GENERATION_ACTION_STATUS.EXECUTING) {
+          if (
+            sanitizedStatusResponse?.status ===
+            GENERATION_ACTION_STATUS.EXECUTING
+          ) {
             updateGenerationProgressFromStatus(sanitizedStatusResponse);
           }
 
           if (
-            sanitizedStatusResponse?.status === GENERATION_ACTION_STATUS.EXECUTED ||
-            sanitizedStatusResponse?.status === GENERATION_ACTION_STATUS.FAILED ||
-            sanitizedStatusResponse?.status === GENERATION_ACTION_STATUS.CANCELLED
+            sanitizedStatusResponse?.status ===
+              GENERATION_ACTION_STATUS.EXECUTED ||
+            sanitizedStatusResponse?.status ===
+              GENERATION_ACTION_STATUS.FAILED ||
+            sanitizedStatusResponse?.status ===
+              GENERATION_ACTION_STATUS.CANCELLED
           ) {
             resolvePolling(sanitizedStatusResponse);
             return;
@@ -3194,24 +3204,19 @@ function App() {
       statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
       statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
     ) {
-<<<<<<< HEAD
-      const failedProgress = failGenerationProgress(
+      const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
         statusResponse,
-=======
-      const sanitizedStatusResponse =
-        sanitizeCompletedActionStatusResponse(statusResponse);
+      );
       const failedProgress = failGenerationProgress(
         sanitizedStatusResponse,
->>>>>>> 4f3414554d1e7e90c027eb5304d9f6bf9993f98f
         requestType,
       );
       return {
         ...assistantMessage,
-        content:
-          getGenerationFailureMessage(
-            sanitizedStatusResponse,
-            "문서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
-          ),
+        content: getGenerationFailureMessage(
+          sanitizedStatusResponse,
+          "문서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        ),
         metadata: {
           ...assistantMessage.metadata,
           state: CHAT_STATES.FAILED,
@@ -3225,15 +3230,11 @@ function App() {
       };
     }
 
-<<<<<<< HEAD
-    const completedProgress = completeGenerationProgress(
+    const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
       statusResponse,
-=======
-    const sanitizedStatusResponse =
-      sanitizeCompletedActionStatusResponse(statusResponse);
+    );
     const completedProgress = completeGenerationProgress(
       sanitizedStatusResponse,
->>>>>>> 4f3414554d1e7e90c027eb5304d9f6bf9993f98f
       requestType,
     );
     return {
@@ -5712,18 +5713,18 @@ function App() {
             statusResponse.status === GENERATION_ACTION_STATUS.FAILED ||
             statusResponse.status === GENERATION_ACTION_STATUS.CANCELLED
           ) {
-            const sanitizedStatusResponse =
-              sanitizeCompletedActionStatusResponse(statusResponse);
+            const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
+              statusResponse,
+            );
             const failedProgress = failGenerationProgress(
               sanitizedStatusResponse,
             );
             assistantMessage = {
               ...assistantMessage,
-              content:
-                getGenerationFailureMessage(
-                  sanitizedStatusResponse,
-                  "요구사항명세서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
-                ),
+              content: getGenerationFailureMessage(
+                sanitizedStatusResponse,
+                "요구사항명세서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
+              ),
               metadata: {
                 ...assistantMessage.metadata,
                 state: CHAT_STATES.FAILED,
@@ -5736,25 +5737,44 @@ function App() {
               },
             };
           } else {
-            const sanitizedStatusResponse =
-              sanitizeCompletedActionStatusResponse(statusResponse);
+            const sanitizedStatusResponse = sanitizeCompletedActionStatusResponse(
+              statusResponse,
+            );
             const completedProgress = completeGenerationProgress(
               sanitizedStatusResponse,
             );
             assistantMessage = {
               ...assistantMessage,
-              content: sanitizedStatusResponse.message || assistantMessage.content,
+              content:
+                sanitizedStatusResponse.message || assistantMessage.content,
               metadata: {
                 ...assistantMessage.metadata,
                 state: sanitizedStatusResponse.state ?? CHAT_STATES.COMPLETED,
                 actionId: pollingActionId,
                 generationProgress: completedProgress,
                 result: sanitizedStatusResponse.result ?? {},
-                downloadFiles: Array.isArray(sanitizedStatusResponse.download_files)
+                downloadFiles: Array.isArray(
+                  sanitizedStatusResponse.download_files,
+                )
                   ? sanitizedStatusResponse.download_files
                   : [],
                 pendingAction: null,
                 suggestedActions: [],
+              },
+              error: error.message
+                ? error.message
+                : "대화 제목을 저장하지 못했습니다.",
+            };
+          }
+        }
+      }
+    } catch (error) {
+      reportUiError("handleSaveConversationTitle", error, {
+        projectId: project?.projectId,
+        conversationId,
+      });
+      setConversationActionError(
+        error instanceof Error
           ? error.message
           : "대화 제목을 저장하지 못했습니다.",
       );
@@ -7618,10 +7638,7 @@ function DocumentRelationMap({
                 orient="auto"
                 markerUnits="strokeWidth"
               >
-                <path
-                  d="M2 2L12 7L2 12Z"
-                  fill="currentColor"
-                />
+                <path d="M2 2L12 7L2 12Z" fill="currentColor" />
               </marker>
             </defs>
             <path
