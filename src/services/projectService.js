@@ -178,6 +178,8 @@ const normalizeProject = (project, source = "db") => {
     author: project.author ?? project.document_author ?? project.documentAuthor ?? "",
     documentAuthor:
       project.documentAuthor ?? project.document_author ?? project.author ?? "",
+    document_author:
+      project.document_author ?? project.documentAuthor ?? project.author ?? "",
     writer: project.writer ?? "",
     createdBy: project.createdBy ?? project.created_by ?? "",
     created_by: project.created_by ?? project.createdBy ?? "",
@@ -278,6 +280,7 @@ export const createProject = async (
   projectName,
   projectDescription = "",
   start_date = "",
+  documentAuthor = "",
 ) => {
   const normalizedProjectId = normalizeProjectId(projectId);
   const normalizedProjectName = String(projectName ?? "").trim();
@@ -302,6 +305,7 @@ export const createProject = async (
     project_name: normalizedProjectName,
     start_date: String(start_date ?? "").trim() || null,
     description: String(projectDescription ?? "").trim() || null,
+    document_author: String(documentAuthor ?? "").trim() || null,
   });
   const createdProjectId = getProjectIdFromResponse(createdProject);
   if (!createdProjectId) {
@@ -327,7 +331,7 @@ export const createProject = async (
 
 export const updateProject = async (
   projectId,
-  { projectName, projectDescription = "", start_date = "" },
+  { projectName, projectDescription = "", start_date = "", documentAuthor = "" },
 ) => {
   const normalizedProjectName = projectName.trim();
 
@@ -343,6 +347,7 @@ export const updateProject = async (
     project_name: normalizedProjectName,
     start_date: String(start_date ?? "").trim() || null,
     description: projectDescription.trim() || null,
+    document_author: String(documentAuthor ?? "").trim() || null,
   });
   const normalizedProject = normalizeProject(
     {

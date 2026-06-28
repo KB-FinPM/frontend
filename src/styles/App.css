@@ -234,7 +234,7 @@ p {
 }
 
 .new-project-panel.is-open {
-  max-height: 720px;
+  max-height: 820px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -368,6 +368,15 @@ p {
 .form-error {
   color: #b42318;
   font-size: 14px;
+}
+
+.field-helper {
+  margin-top: -4px;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .chat-app-shell {

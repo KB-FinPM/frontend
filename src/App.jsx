@@ -2075,11 +2075,16 @@ const getGenerationDownloadFiles = (statusResponse = {}) => {
 const getProjectStartDate = (project) =>
   project?.projectStartDate ?? project?.start_date ?? project?.startDate ?? "";
 
-const getProjectAuthor = (project) =>
+const getStoredProjectDocumentAuthor = (project) =>
   String(
-    project?.author ||
-      project?.documentAuthor ||
+    project?.documentAuthor ?? project?.document_author ?? project?.author ?? "",
+  ).trim();
+
+const getProjectDocumentAuthor = (project) =>
+  String(
+    project?.documentAuthor ||
       project?.document_author ||
+      project?.author ||
       project?.writer ||
       project?.createdBy ||
       project?.created_by ||
@@ -2127,7 +2132,8 @@ const buildProjectContext = (
   const selectedDocumentIds = selectedDocuments
     .map((document) => document.documentId)
     .filter(Boolean);
-  const author = getProjectAuthor(targetProject);
+  const documentAuthor = getStoredProjectDocumentAuthor(targetProject);
+  const author = getProjectDocumentAuthor(targetProject);
   const writer = String(targetProject?.writer || author || "").trim();
   const createdBy = String(
     targetProject?.createdBy ?? targetProject?.created_by ?? "",
@@ -2146,12 +2152,14 @@ const buildProjectContext = (
     author,
     writer,
     created_by: createdByValue,
+    document_author: documentAuthor,
     user_id: userIdValue,
     project: {
       project_id: targetProject.projectId,
       name: targetProject.projectName || "",
       start_date: getProjectStartDate(targetProject),
       end_date: targetProject.projectEndDate || "",
+      document_author: documentAuthor,
       author,
       writer,
       created_by: createdByValue,
@@ -2467,6 +2475,7 @@ function App() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectStartDate, setNewProjectStartDate] = useState(getTodayIsoDate());
   const [newProjectDescription, setNewProjectDescription] = useState("");
+  const [newProjectDocumentAuthor, setNewProjectDocumentAuthor] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
   const [project, setProject] = useState(null);
   const [activeConversationId, setActiveConversationIdState] = useState("");
@@ -2484,6 +2493,7 @@ function App() {
   const [settingsName, setSettingsName] = useState("");
   const [settingsStartDate, setSettingsStartDate] = useState("");
   const [settingsDescription, setSettingsDescription] = useState("");
+  const [settingsDocumentAuthor, setSettingsDocumentAuthor] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [editingConversationId, setEditingConversationId] = useState("");
@@ -3063,6 +3073,7 @@ function App() {
       setNewProjectName("");
       setNewProjectStartDate(getTodayIsoDate());
       setNewProjectDescription("");
+      setNewProjectDocumentAuthor("");
       setNewProjectError("");
       setConversationActionError("");
       setDeletingConversationId("");
@@ -3213,6 +3224,7 @@ function App() {
       setNewProjectName("");
       setNewProjectStartDate(getTodayIsoDate());
       setNewProjectDescription("");
+      setNewProjectDocumentAuthor("");
       setNewProjectError("");
     }
   };
@@ -3231,6 +3243,9 @@ function App() {
     );
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
+    );
+    const submittedDocumentAuthor = String(
+      formData.get("documentAuthor") ?? "",
     );
 
     if (!submittedProjectName.trim()) {
@@ -3251,6 +3266,7 @@ function App() {
         submittedProjectName,
         submittedProjectDescription,
         submittedProjectStartDate,
+        submittedDocumentAuthor,
       );
       if (!createdProject?.projectId) {
         throw new Error(PROJECT_CREATE_RESPONSE_ERROR_MESSAGE);
@@ -5688,6 +5704,7 @@ function App() {
     setNewProjectName("");
     setNewProjectStartDate(getTodayIsoDate());
     setNewProjectDescription("");
+    setNewProjectDocumentAuthor("");
     setNewProjectError("");
     setIsSettingsOpen(false);
     setConversationActionError("");
@@ -5708,6 +5725,7 @@ function App() {
     setSettingsName(project.projectName ?? "");
     setSettingsStartDate(getProjectStartDate(project) || getTodayIsoDate());
     setSettingsDescription(project.projectDescription ?? "");
+    setSettingsDocumentAuthor(getStoredProjectDocumentAuthor(project));
     setSettingsError("");
     setIsSettingsOpen(true);
   };
@@ -5729,6 +5747,9 @@ function App() {
     const submittedProjectDescription = String(
       formData.get("projectDescription") ?? "",
     );
+    const submittedDocumentAuthor = String(
+      formData.get("documentAuthor") ?? "",
+    );
 
     if (!submittedProjectName.trim()) {
       setSettingsError("프로젝트명을 입력해주세요.");
@@ -5747,6 +5768,7 @@ function App() {
         projectName: submittedProjectName,
         projectDescription: submittedProjectDescription,
         start_date: submittedProjectStartDate,
+        documentAuthor: submittedDocumentAuthor,
       });
       setProject(updatedProject);
       setIsSettingsOpen(false);
@@ -5773,6 +5795,7 @@ function App() {
         newProjectName={newProjectName}
         newProjectStartDate={newProjectStartDate}
         newProjectDescription={newProjectDescription}
+        newProjectDocumentAuthor={newProjectDocumentAuthor}
         newProjectError={newProjectError}
         isLoading={isLoadingProject}
         isCreating={isCreatingProject}
@@ -5780,6 +5803,7 @@ function App() {
         onNewProjectNameChange={setNewProjectName}
         onNewProjectStartDateChange={setNewProjectStartDate}
         onNewProjectDescriptionChange={setNewProjectDescription}
+        onNewProjectDocumentAuthorChange={setNewProjectDocumentAuthor}
         onSubmit={handleEntrySubmit}
         onCreateProject={handleCreateProject}
       />
@@ -5975,11 +5999,13 @@ function App() {
           projectName={settingsName}
           projectStartDate={settingsStartDate}
           projectDescription={settingsDescription}
+          documentAuthor={settingsDocumentAuthor}
           error={settingsError}
           isSaving={isSavingSettings}
           onProjectNameChange={setSettingsName}
           onProjectStartDateChange={setSettingsStartDate}
           onProjectDescriptionChange={setSettingsDescription}
+          onDocumentAuthorChange={setSettingsDocumentAuthor}
           onClose={closeSettings}
           onSubmit={handleSettingsSubmit}
         />
@@ -8121,6 +8147,7 @@ function ProjectEntry({
   newProjectName,
   newProjectStartDate,
   newProjectDescription,
+  newProjectDocumentAuthor,
   newProjectError,
   isLoading,
   isCreating,
@@ -8128,6 +8155,7 @@ function ProjectEntry({
   onNewProjectNameChange,
   onNewProjectStartDateChange,
   onNewProjectDescriptionChange,
+  onNewProjectDocumentAuthorChange,
   onSubmit,
   onCreateProject,
 }) {
@@ -8191,7 +8219,7 @@ function ProjectEntry({
               <div>
                 <strong>신규 프로젝트입니다.</strong>
                 <p>
-                  {pendingNewProjectId} 프로젝트의 이름과 설명을 입력한 후
+                  {pendingNewProjectId} 프로젝트의 이름과 기본 정보를 입력한 후
                   입장하세요.
                 </p>
               </div>
@@ -8240,6 +8268,24 @@ function ProjectEntry({
                 onNewProjectDescriptionChange(event.target.value)
               }
             />
+
+            <label htmlFor="new-project-document-author">
+              문서 작성자 <span>선택</span>
+            </label>
+            <input
+              id="new-project-document-author"
+              name="documentAuthor"
+              value={newProjectDocumentAuthor}
+              placeholder="예: 홍길동 PM"
+              disabled={!isNewProject}
+              onChange={(event) =>
+                onNewProjectDocumentAuthorChange(event.target.value)
+              }
+            />
+            <p className="field-helper">
+              생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명,
+              담당자명 또는 부서명을 입력합니다.
+            </p>
 
             {newProjectError && <p className="form-error">{newProjectError}</p>}
 
@@ -8493,11 +8539,13 @@ function ProjectSettingsModal({
   projectName,
   projectStartDate,
   projectDescription,
+  documentAuthor,
   error,
   isSaving,
   onProjectNameChange,
   onProjectStartDateChange,
   onProjectDescriptionChange,
+  onDocumentAuthorChange,
   onClose,
   onSubmit,
 }) {
@@ -8566,6 +8614,21 @@ function ProjectSettingsModal({
             rows={4}
             onChange={(event) => onProjectDescriptionChange(event.target.value)}
           />
+
+          <label htmlFor="settings-document-author">
+            문서 작성자 <span>선택</span>
+          </label>
+          <input
+            id="settings-document-author"
+            name="documentAuthor"
+            value={documentAuthor}
+            placeholder="예: 홍길동 PM"
+            onChange={(event) => onDocumentAuthorChange(event.target.value)}
+          />
+          <p className="field-helper">
+            생성 문서의 표지/작성자 항목에 표시됩니다. 보통 PM명,
+            담당자명 또는 부서명을 입력합니다.
+          </p>
 
           {error && <p className="form-error">{error}</p>}
 
