@@ -4648,8 +4648,8 @@ function App() {
   };
 
   const handleSelectDocumentHubNode = (nodeId) => {
-    if (!DOCUMENT_HUB_NODE_BY_ID[nodeId]) return;
     if (restoreGenerationProgressModal()) return;
+    if (!DOCUMENT_HUB_NODE_BY_ID[nodeId]) return;
 
     setSelectedDocumentHubNodeId(nodeId);
     setIsDocumentGenerationModalOpen(true);
@@ -4750,6 +4750,8 @@ function App() {
     optionalDocumentIds = [],
     outputFormat = "",
   }) => {
+    if (restoreGenerationProgressModal()) return;
+
     if (
       !project?.projectId ||
       isUploadingDocument ||
@@ -4781,8 +4783,6 @@ function App() {
       request.outputFormat ||
       request.documentConfig?.defaultOutputFormat ||
       getDefaultOutputFormat(relation);
-
-    if (restoreGenerationProgressModal()) return;
 
     if (!selectedDocument?.documentId) {
       setDocumentError(
@@ -4841,6 +4841,12 @@ function App() {
         requestType,
         documentId,
         optionalDocumentIds,
+        isResponding,
+        isUploadingDocument,
+        isProgressModalOpen,
+        isProgressMinimized: isProgressMinimizedRef.current,
+        generationJobStatus: generationJob?.status,
+        generationActionId: generationJob?.actionId,
       });
       setDocumentError(
         error instanceof Error
@@ -5959,13 +5965,16 @@ function App() {
     );
   };
 
-  const restoreGenerationProgressModal = () => {
-    const hasProgressSurface = Boolean(generationJob || generationProgress);
-    const shouldRestoreProgress =
-      hasProgressSurface &&
-      (isProgressMinimized || isProgressModalOpen || hasRunningGenerationJob);
+  const shouldRestoreGenerationProgress = () => {
+    if (!generationJob && !generationProgress) return false;
+    if (generationJob?.status === GENERATION_JOB_STATUS.RUNNING) return true;
+    if (isProgressMinimizedRef.current) return true;
+    if (isProgressModalOpen) return true;
+    return false;
+  };
 
-    if (!shouldRestoreProgress) return false;
+  const restoreGenerationProgressModal = () => {
+    if (!shouldRestoreGenerationProgress()) return false;
 
     setIsProgressModalOpen(true);
     setProgressMinimizedState(false);
