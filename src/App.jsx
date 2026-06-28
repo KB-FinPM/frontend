@@ -1336,6 +1336,21 @@ const getTodoSourceKind = (todo = {}) => {
   return "unknown";
 };
 
+const normalizeAssigneeForWbsImport = (assignee) => {
+  const value = String(assignee ?? "").trim();
+  return value || "미정";
+};
+
+const getTodoImportAssignee = (item = {}, sourceType = "") => {
+  const sourceTodo = sourceType
+    ? { ...item, sourceType, source_type: sourceType }
+    : item;
+  if (getTodoSourceKind(sourceTodo) === "wbs") {
+    return normalizeAssigneeForWbsImport(item.assignee);
+  }
+  return item.assignee ?? "";
+};
+
 const getTodoSourcePriority = (todo = {}) => {
   const sourceKind = getTodoSourceKind(todo);
   if (sourceKind === "wbs") return 1;
@@ -1676,7 +1691,7 @@ const normalizeTodo = (item = {}) => {
       item.clientImportId ??
       (todoId ? `IMPORT-${todoId}` : ""),
     title: item.title ?? "",
-    assignee: item.assignee ?? "",
+    assignee: getTodoImportAssignee(item, sourceType),
     startDate: normalizedRange?.startDate || "",
     endDate: normalizedRange?.endDate || "",
     dueDate: normalizedRange?.endDate || dueDate,
@@ -1971,12 +1986,16 @@ const normalizeTodoImportPreview = (response) => {
 const toTodoImportPayload = (item) => {
   const raw = item.raw ?? {};
   const range = getTodoScheduleRange(item);
+  const assignee =
+    getTodoSourceKind(item) === "wbs"
+      ? normalizeAssigneeForWbsImport(item.assignee)
+      : item.assignee;
   return {
     todo_id: item.todoId || item.clientImportId || raw.todo_id || "",
     client_import_id:
       item.clientImportId || raw.client_import_id || item.todoId,
     title: item.title,
-    assignee: item.assignee || null,
+    assignee: assignee || null,
     start_date: range?.startDate || null,
     end_date: range?.endDate || null,
     due_date: range?.endDate || null,
