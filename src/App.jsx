@@ -4649,6 +4649,8 @@ function App() {
 
   const handleSelectDocumentHubNode = (nodeId) => {
     if (!DOCUMENT_HUB_NODE_BY_ID[nodeId]) return;
+    if (restoreGenerationProgressModal()) return;
+
     setSelectedDocumentHubNodeId(nodeId);
     setIsDocumentGenerationModalOpen(true);
     setDocumentError("");
@@ -4780,16 +4782,12 @@ function App() {
       request.documentConfig?.defaultOutputFormat ||
       getDefaultOutputFormat(relation);
 
+    if (restoreGenerationProgressModal()) return;
+
     if (!selectedDocument?.documentId) {
       setDocumentError(
         `${request.documentConfig?.primarySource?.label ||
           "기준 문서"}를 선택하거나 업로드해 주세요.`,
-      );
-      return;
-    }
-    if (hasRunningGenerationJob) {
-      setDocumentError(
-        "진행 중인 문서 생성이 있습니다. 하단 진행바에서 완료 여부를 확인한 뒤 다시 생성해 주세요.",
       );
       return;
     }
@@ -5961,6 +5959,19 @@ function App() {
     );
   };
 
+  const restoreGenerationProgressModal = () => {
+    const hasProgressSurface = Boolean(generationJob || generationProgress);
+    const shouldRestoreProgress =
+      hasProgressSurface &&
+      (isProgressMinimized || isProgressModalOpen || hasRunningGenerationJob);
+
+    if (!shouldRestoreProgress) return false;
+
+    setIsProgressModalOpen(true);
+    setProgressMinimizedState(false);
+    return true;
+  };
+
   const handleMinimizeProgressModal = () => {
     if (!generationJob) return;
     setIsProgressModalOpen(false);
@@ -5968,9 +5979,7 @@ function App() {
   };
 
   const handleRestoreProgressModal = () => {
-    if (!generationJob) return;
-    setIsProgressModalOpen(true);
-    setProgressMinimizedState(false);
+    restoreGenerationProgressModal();
   };
 
   const handleCloseProgressModal = () => {
