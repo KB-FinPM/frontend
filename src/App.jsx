@@ -24,7 +24,6 @@ import {
   Minimize2,
   Pencil,
   PlusCircle,
-  RotateCcw,
   Save,
   Settings,
   Sparkles,
@@ -2726,7 +2725,6 @@ function App() {
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(null);
   const [generationJob, setGenerationJob] = useState(null);
-  const [generationResetNonce, setGenerationResetNonce] = useState(0);
   const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
   const [isProgressMinimized, setIsProgressMinimized] = useState(false);
   const isProgressMinimizedRef = useRef(false);
@@ -2734,6 +2732,10 @@ function App() {
     isProgressMinimizedRef.current = nextValue;
     setIsProgressMinimized(nextValue);
   };
+  const hasRunningGenerationJob =
+    generationJob?.status === GENERATION_JOB_STATUS.RUNNING;
+  const isDocumentGenerationPanelBusy =
+    isResponding && !hasRunningGenerationJob;
   const [isSidebarDrawerOpen, setIsSidebarDrawerOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
@@ -2964,24 +2966,16 @@ function App() {
     pollingRunIdRef.current += 1;
   };
 
-  const resetGenerationState = ({ restoreForm = false } = {}) => {
+  const resetGenerationState = () => {
     clearGenerationPolling({ rejectPending: true });
     progressStepIndexRef.current = 0;
     setGenerationProgress(null);
     setGenerationJob(null);
     setIsProgressModalOpen(false);
     setProgressMinimizedState(false);
-    setIsDocumentGenerationModalOpen(Boolean(restoreForm));
-    setIsResponding(false);
-    setIsUploadingDocument(false);
     setSelectedDocumentIds([]);
     setDocumentError("");
     setDocumentStatusMessage("");
-    setGenerationResetNonce((value) => value + 1);
-  };
-
-  const resetGenerationStateForUser = () => {
-    resetGenerationState({ restoreForm: true });
   };
 
   const startGenerationProgress = (requestType = "") => {
@@ -4662,7 +4656,7 @@ function App() {
   };
 
   const handleCloseDocumentGenerationModal = () => {
-    if (isResponding || isUploadingDocument) return;
+    if (isUploadingDocument) return;
     setIsDocumentGenerationModalOpen(false);
     setDocumentError("");
     setDocumentStatusMessage("");
@@ -4756,7 +4750,6 @@ function App() {
   }) => {
     if (
       !project?.projectId ||
-      isResponding ||
       isUploadingDocument ||
       !selectedDocumentHubRequest
     ) {
@@ -4791,6 +4784,18 @@ function App() {
       setDocumentError(
         `${request.documentConfig?.primarySource?.label ||
           "기준 문서"}를 선택하거나 업로드해 주세요.`,
+      );
+      return;
+    }
+    if (hasRunningGenerationJob) {
+      setDocumentError(
+        "진행 중인 문서 생성이 있습니다. 하단 진행바에서 완료 여부를 확인한 뒤 다시 생성해 주세요.",
+      );
+      return;
+    }
+    if (isResponding) {
+      setDocumentError(
+        "처리 중인 요청이 있습니다. 현재 요청이 끝난 뒤 다시 생성해 주세요.",
       );
       return;
     }
@@ -6254,10 +6259,9 @@ function App() {
 
       {isDocumentGenerationModalOpen && (
         <DocumentGenerationModal
-          key={`${selectedDocumentHubNode?.id || "none"}-${generationResetNonce}`}
           selectedNode={selectedDocumentHubNode}
           selectedRequest={selectedDocumentHubRequest}
-          isResponding={isResponding}
+          isPanelBusy={isDocumentGenerationPanelBusy}
           isUploadingDocument={isUploadingDocument}
           generationProgress={generationProgress}
           isLoadingDocuments={isLoadingUploadedFiles}
@@ -6276,7 +6280,6 @@ function App() {
         isMinimized={isProgressMinimized}
         onRestore={handleRestoreProgressModal}
         onClose={handleCloseProgressModal}
-        onReset={resetGenerationStateForUser}
         onDownload={handleDownloadGenerationJob}
       />
 
@@ -8060,7 +8063,7 @@ function DocumentStatusChip({ label, tone }) {
 function DocumentGenerationModal({
   selectedNode,
   selectedRequest,
-  isResponding,
+  isPanelBusy,
   isUploadingDocument,
   generationProgress,
   isLoadingDocuments,
@@ -8082,7 +8085,7 @@ function DocumentGenerationModal({
   const modalTitle = selectedNode?.requestType
     ? `${selectedNode.label} 생성`
     : selectedNode?.label || "문서 생성";
-  const isCloseDisabled = isResponding || isUploadingDocument;
+  const isCloseDisabled = isUploadingDocument;
 
   return (
     <div className="modal-backdrop document-generation-modal-backdrop">
@@ -8124,7 +8127,7 @@ function DocumentGenerationModal({
                   : documentError || documentStatusMessage}
               </div>
             )}
-            {isResponding && generationProgress && (
+            {isPanelBusy && generationProgress && (
               <GenerationSubProgress progressState={generationProgress} />
             )}
           </div>
@@ -8150,7 +8153,7 @@ function DocumentGenerationModal({
               )}
               <DefaultDocumentChoicePanel
                 request={selectedRequest}
-                isDisabled={isResponding}
+                isDisabled={isPanelBusy}
                 isUploading={isUploadingDocument}
                 onChoice={onGenerate}
                 onUploadFiles={onUploadFiles}
@@ -8282,7 +8285,6 @@ function GenerationProgressSurface({
   isMinimized,
   onRestore,
   onClose,
-  onReset,
   onDownload,
 }) {
   useEffect(() => {
@@ -8365,28 +8367,16 @@ function GenerationProgressSurface({
               <GenerationAgentStatusList items={agentItems} />
             </div>
 
-            {(isRunning || isCompleted) && (
+            {isCompleted && (
               <footer className="generation-progress-modal__actions">
-                {isRunning && (
-                  <button
-                    className="message-upload-button secondary generation-progress-modal__reset"
-                    type="button"
-                    onClick={onReset}
-                  >
-                    <RotateCcw size={16} aria-hidden="true" />
-                    초기화
-                  </button>
-                )}
-                {isCompleted && (
-                  <button
-                    className="message-upload-button generation-progress-modal__download"
-                    type="button"
-                    onClick={onDownload}
-                  >
-                    <Download size={16} aria-hidden="true" />
-                    다운로드
-                  </button>
-                )}
+                <button
+                  className="message-upload-button generation-progress-modal__download"
+                  type="button"
+                  onClick={onDownload}
+                >
+                  <Download size={16} aria-hidden="true" />
+                  다운로드
+                </button>
               </footer>
             )}
           </section>

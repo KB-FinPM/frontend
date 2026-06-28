@@ -17,8 +17,30 @@ const UNTITLED_CONVERSATION_TITLES = new Set([
   "제목 없음",
   "기존 대화",
 ]);
+const DOCUMENT_AUTHOR_PLACEHOLDER_VALUES = new Set([
+  "작성자",
+  "author",
+  "unknown",
+  "local_dev_user",
+  "local-dev-user",
+]);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const normalizeDocumentAuthor = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (DOCUMENT_AUTHOR_PLACEHOLDER_VALUES.has(text.toLowerCase())) return "";
+  return text;
+};
+
+const firstDocumentAuthor = (...values) => {
+  for (const value of values) {
+    const normalizedValue = normalizeDocumentAuthor(value);
+    if (normalizedValue) return normalizedValue;
+  }
+  return "";
+};
 
 const getStorage = () => {
   if (typeof window === "undefined") return null;
@@ -163,6 +185,13 @@ const normalizeProject = (project, source = "db") => {
     : legacyMessages.length
       ? [createLegacyConversation(projectId, legacyMessages)]
       : [];
+  const writer = firstDocumentAuthor(project.writer);
+  const documentAuthor = firstDocumentAuthor(
+    project.documentAuthor,
+    project.document_author,
+    project.author,
+    writer,
+  );
 
   return {
     projectId,
@@ -175,12 +204,10 @@ const normalizeProject = (project, source = "db") => {
     projectDescription:
       project.projectDescription ?? project.description ?? project.summary ?? "",
     conversations: sortConversations(normalizedConversations),
-    author: project.author ?? project.document_author ?? project.documentAuthor ?? "",
-    documentAuthor:
-      project.documentAuthor ?? project.document_author ?? project.author ?? "",
-    document_author:
-      project.document_author ?? project.documentAuthor ?? project.author ?? "",
-    writer: project.writer ?? "",
+    author: documentAuthor,
+    documentAuthor,
+    document_author: documentAuthor,
+    writer,
     createdBy: project.createdBy ?? project.created_by ?? "",
     created_by: project.created_by ?? project.createdBy ?? "",
     userName: project.userName ?? project.user_name ?? "",

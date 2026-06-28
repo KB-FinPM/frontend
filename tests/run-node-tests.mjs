@@ -23,7 +23,10 @@ import {
   normalizeCommandText,
   saveCommandUsage,
 } from "../src/services/commandRecommendationService.js";
-import { createProject } from "../src/services/projectService.js";
+import {
+  createProject,
+  getProjectById,
+} from "../src/services/projectService.js";
 import {
   getGenerationProgressPayload,
   getGenerationStageStepIndex,
@@ -199,6 +202,61 @@ test("createProject follows the id from the create response", async () => {
   );
   assert.equal(requests[1].method, "POST");
   assert.equal(JSON.parse(requests[1].body).project_id, "draft-id");
+});
+
+test("project author placeholders normalize to blank values", async () => {
+  installBrowserStubs();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name) =>
+        String(name).toLowerCase() === "content-type"
+          ? "application/json"
+          : "",
+    },
+    json: async () => ({
+      project_id: "PRJ-AUTH",
+      project_name: "Author placeholder",
+      document_author: "작성자",
+      author: "local-dev-user",
+      writer: "Unknown",
+    }),
+    text: async () => "",
+  });
+
+  const project = await getProjectById("PRJ-AUTH");
+
+  assert.equal(project.author, "");
+  assert.equal(project.documentAuthor, "");
+  assert.equal(project.document_author, "");
+  assert.equal(project.writer, "");
+});
+
+test("project explicit document author is preserved", async () => {
+  installBrowserStubs();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name) =>
+        String(name).toLowerCase() === "content-type"
+          ? "application/json"
+          : "",
+    },
+    json: async () => ({
+      project_id: "PRJ-AUTH",
+      project_name: "Author explicit",
+      document_author: " 홍길동 ",
+    }),
+    text: async () => "",
+  });
+
+  const project = await getProjectById("PRJ-AUTH");
+
+  assert.equal(project.author, "홍길동");
+  assert.equal(project.documentAuthor, "홍길동");
+  assert.equal(project.document_author, "홍길동");
 });
 
 test("parseResponseBody returns JSON bodies", async () => {
