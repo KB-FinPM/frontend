@@ -5220,7 +5220,7 @@ textarea {
   gap: 8px;
   height: 100%;
   min-height: 0;
-  padding: 10px;
+  padding: 4px;
   border: 0;
   border-right: 1px solid var(--kb-border);
   border-bottom: 1px solid var(--kb-border);
@@ -5251,8 +5251,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   font-size: 13px;
   font-weight: 900;
@@ -5264,14 +5264,12 @@ textarea {
 }
 
 .schedule-day__more {
-  position: absolute;
-  right: 7px;
-  bottom: 5px;
-  left: 7px;
+  position: static;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 18px;
+  margin-top: 4px;
   padding: 0 7px;
   overflow: hidden;
   border: 1px solid rgba(96, 88, 76, 0.24);
@@ -5354,15 +5352,16 @@ textarea {
 }
 
 .schedule-calendar.is-month-view .schedule-event-layer {
-  inset: 28px 0 27px;
-  grid-auto-rows: 22px;
+  inset: 26px 0 auto;
+  grid-auto-rows: 18px;
   gap: 2px 0;
-  padding: 0 3px;
+  padding: 0 4px;
 }
 
-.schedule-calendar.is-month-view .calendar-event-bar {
-  height: 22px;
-  padding: 0 7px;
+.schedule-calendar.is-month-view .calendar-event-bar,
+.schedule-calendar.is-month-view .schedule-event-more {
+  height: 18px;
+  padding: 0 6px;
   font-size: 11px;
 }
 
@@ -7349,8 +7348,10 @@ textarea {
   }
 
   .schedule-calendar.is-month-view .schedule-event-layer {
-    inset: 28px 0 27px;
-    padding: 0 3px;
+    inset: 26px 0 auto;
+    grid-auto-rows: 18px;
+    gap: 2px 0;
+    padding: 0 4px;
   }
 
   .calendar-event-bar,
@@ -7358,6 +7359,12 @@ textarea {
     height: 24px;
     padding: 0 7px;
     font-size: 11px;
+  }
+
+  .schedule-calendar.is-month-view .calendar-event-bar,
+  .schedule-calendar.is-month-view .schedule-event-more {
+    height: 18px;
+    padding: 0 6px;
   }
 
   .document-hub-overview,
