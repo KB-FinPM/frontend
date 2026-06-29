@@ -5214,6 +5214,7 @@ textarea {
 }
 
 .schedule-day {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 8px;
@@ -5260,6 +5261,37 @@ textarea {
 .schedule-day.is-today .schedule-day__number {
   color: var(--kb-dark);
   background: var(--kb-yellow-negative);
+}
+
+.schedule-day__more {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  left: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid rgba(96, 88, 76, 0.24);
+  border-radius: 999px;
+  color: var(--kb-text-muted);
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 4px 10px rgba(31, 29, 25, 0.08);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 16px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-day:hover .schedule-day__more,
+.schedule-day:focus-visible .schedule-day__more {
+  border-color: rgba(255, 188, 0, 0.5);
+  color: var(--kb-text);
+  background: #fff8df;
 }
 
 .schedule-day__items {
@@ -5322,6 +5354,19 @@ textarea {
 }
 
 .schedule-calendar.is-month-view .schedule-event-layer {
+  inset: 28px 0 27px;
+  grid-auto-rows: 22px;
+  gap: 2px 0;
+  padding: 0 3px;
+}
+
+.schedule-calendar.is-month-view .calendar-event-bar {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.schedule-calendar.is-month-view {
   padding-top: 34px;
 }
 
@@ -7304,7 +7349,8 @@ textarea {
   }
 
   .schedule-calendar.is-month-view .schedule-event-layer {
-    padding: 34px 3px 0;
+    inset: 28px 0 27px;
+    padding: 0 3px;
   }
 
   .calendar-event-bar,

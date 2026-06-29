@@ -1609,7 +1609,9 @@ const formatScheduleRangeLabel = (todo = {}) => {
 const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
   const weekStart = week[0]?.dateText;
   const weekEnd = week[6]?.dateText;
-  if (!weekStart || !weekEnd) return { visibleSegments: [], hiddenCount: 0 };
+  if (!weekStart || !weekEnd) {
+    return { visibleSegments: [], hiddenCount: 0, hiddenCountsByDate: {} };
+  }
 
   const segments = todos
     .map((todo) => {
@@ -1661,7 +1663,25 @@ const getWeekScheduleSegments = (week = [], todos = [], maxRows = 3) => {
     visibleSegments.push({ ...segment, lane });
   });
 
-  return { visibleSegments, hiddenCount };
+  const hiddenCountsByDate = week.reduce((counts, cell) => {
+    const totalCount = segments.filter(
+      (segment) =>
+        segment.segmentStart <= cell.dateText &&
+        cell.dateText <= segment.segmentEnd,
+    ).length;
+    const visibleCount = visibleSegments.filter(
+      (segment) =>
+        segment.segmentStart <= cell.dateText &&
+        cell.dateText <= segment.segmentEnd,
+    ).length;
+    const hiddenForDate = totalCount - visibleCount;
+    if (hiddenForDate > 0) {
+      counts[cell.dateText] = hiddenForDate;
+    }
+    return counts;
+  }, {});
+
+  return { visibleSegments, hiddenCount, hiddenCountsByDate };
 };
 
 const normalizeTodo = (item = {}) => {
@@ -7180,7 +7200,7 @@ function TodayTasksView({
   );
 }
 
-const SCHEDULE_MONTH_MAX_EVENT_ROWS = 3;
+const SCHEDULE_MONTH_MAX_EVENT_ROWS = 2;
 const SCHEDULE_WEEK_MIN_EVENT_ROWS = 8;
 const SCHEDULE_EVENT_ROW_HEIGHT = 27;
 const SCHEDULE_EVENT_ROW_GAP = 7;
@@ -7235,35 +7255,46 @@ function ScheduleWeekRow({
   }, [isWeekView]);
 
   const maxRows = isWeekView ? weekMaxRows : SCHEDULE_MONTH_MAX_EVENT_ROWS;
-  const { visibleSegments, hiddenCount } = getWeekScheduleSegments(
-    week,
-    todos,
-    maxRows,
-  );
+  const { visibleSegments, hiddenCount, hiddenCountsByDate } =
+    getWeekScheduleSegments(
+      week,
+      todos,
+      maxRows,
+    );
 
   return (
     <div className={`schedule-week-row ${isWeekView ? "is-week-view" : ""}`}>
       <div className="schedule-week-days">
-        {week.map((cell) => (
-          <button
-            key={cell.dateText}
-            className={[
-              "schedule-day",
-              !isWeekView && !cell.isCurrentMonth ? "is-outside-month" : "",
-              cell.dateText === today ? "is-today" : "",
-              cell.dateText === selectedDate ? "is-selected" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            type="button"
-            aria-label={`${formatDateLabel(cell.dateText)} 일정 보기`}
-            onClick={() => onDateSelect(cell.dateText)}
-          >
-            {!isWeekView && (
-              <span className="schedule-day__number">{cell.day}</span>
-            )}
-          </button>
-        ))}
+        {week.map((cell) => {
+          const hiddenCountForDate = !isWeekView
+            ? hiddenCountsByDate[cell.dateText] || 0
+            : 0;
+          return (
+            <button
+              key={cell.dateText}
+              className={[
+                "schedule-day",
+                !isWeekView && !cell.isCurrentMonth ? "is-outside-month" : "",
+                cell.dateText === today ? "is-today" : "",
+                cell.dateText === selectedDate ? "is-selected" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              type="button"
+              aria-label={`${formatDateLabel(cell.dateText)} 일정 보기`}
+              onClick={() => onDateSelect(cell.dateText)}
+            >
+              {!isWeekView && (
+                <span className="schedule-day__number">{cell.day}</span>
+              )}
+              {hiddenCountForDate > 0 && (
+                <span className="schedule-day__more">
+                  +{hiddenCountForDate}개 더
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div className="schedule-event-layer" ref={eventLayerRef}>
         {visibleSegments.map((segment) => (
@@ -7298,10 +7329,9 @@ function ScheduleWeekRow({
             </span>
           </button>
         ))}
-        {hiddenCount > 0 && (
+        {isWeekView && hiddenCount > 0 && (
           <button
             className="schedule-event-more"
-            style={{ gridColumn: "1 / -1", gridRow: maxRows + 1 }}
             type="button"
             onClick={() => onDateSelect(week[0].dateText)}
           >
